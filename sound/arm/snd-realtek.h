@@ -18,9 +18,7 @@
 // Main Control //
 //////////////////
 #define USE_ION_AUDIO_HEAP
-#define WORK_AROUND_BUG34499
 #define CAPTURE_USE_PTS_RING
-//#define USE_COPY_OPS
 
 ///////////////////
 // Debug Control //
@@ -36,12 +34,8 @@
 ///////////
 #ifdef USE_ION_AUDIO_HEAP
 #include "../../drivers/staging/android/ion/ion.h"
-#include "../../drivers/staging/android/uapi/rtk_phoenix_ion.h"
+#include "../../drivers/staging/android/uapi/ion_rtk.h"
 extern struct ion_device *rtk_phoenix_ion_device;
-#endif
-
-#ifdef AO_ON_SCPU
-#include "../../drivers/uio/uio_rtk_ao.h"
 #endif
 
 #define ALSA_CAPTURE_TODO(format, ...) printk(KERN_ALERT "[ALSA CAPTURE NOT IMPLEMENT !!]\n");
@@ -117,7 +111,11 @@ extern struct ion_device *rtk_phoenix_ion_device;
 
 #define S_OK        0x10000000
 
+#if defined(CONFIG_ARCH_RTD129x) || defined(CONFIG_ARCH_RTD119X)
 #define CONVERT_FOR_AVCPU(x)        ((unsigned int)(x) | 0xA0000000)
+#else
+#define CONVERT_FOR_AVCPU(x)        (x)
+#endif
 #define AUDIO_ION_FLAG              (ION_FLAG_NONCACHED |ION_FLAG_SCPUACC | ION_FLAG_ACPUACC)
 
 //////////////
@@ -127,9 +125,11 @@ extern struct ion_device *rtk_phoenix_ion_device;
                          SNDRV_PCM_INFO_NONINTERLEAVED | \
                          SNDRV_PCM_INFO_RESUME | \
                          SNDRV_PCM_INFO_PAUSE)
-#define RTK_DMP_PLAYBACK_FORMATS (SNDRV_PCM_FMTBIT_S8 | SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE)
-#define RTK_DMP_PLYABACK_RATES (SNDRV_PCM_RATE_8000_192000)
-#define RTK_DMP_PLAYBACK_RATE_MIN       8000
+#define RTK_DMP_PLAYBACK_FORMATS (SNDRV_PCM_FMTBIT_S8 | SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S24_3LE)
+#define RTK_DMP_PLYABACK_RATES (SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 \
+                     | SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_88200 | SNDRV_PCM_RATE_96000 \
+                     | SNDRV_PCM_RATE_176400 | SNDRV_PCM_RATE_192000)
+#define RTK_DMP_PLAYBACK_RATE_MIN       16000
 #define RTK_DMP_PLAYBACK_RATE_MAX       192000
 #define RTK_DMP_PLAYBACK_CHANNELS_MIN   1
 #define RTK_DMP_PLAYBACK_CHANNELS_MAX   8
@@ -149,24 +149,26 @@ extern struct ion_device *rtk_phoenix_ion_device;
 #define RTK_DMP_CAPTURE_RATE_MIN 44100
 #define RTK_DMP_CAPTURE_RATE_MAX 48000
 #define RTK_DMP_CAPTURE_CHANNELS_MIN 2
-#define RTK_DMP_CAPTURE_CHANNELS_MAX 8
+#define RTK_DMP_CAPTURE_CHANNELS_MAX 2
 #define RTK_DMP_CAPTURE_MAX_BUFFER_SIZE         RTK_DMP_PLAYBACK_MAX_BUFFER_SIZE
-#define RTK_DMP_CAPTURE_MIN_PERIOD_BYTE         RTK_DMP_PLAYBACK_MIN_PERIOD_SIZE
-#define RTK_DMP_CAPTURE_MAX_PERIOD_BYTE         4096
+#define RTK_DMP_CAPTURE_MIN_PERIOD_SIZE         RTK_DMP_PLAYBACK_MIN_PERIOD_SIZE
+#define RTK_DMP_CAPTURE_MAX_PERIOD_SIZE         4096
 #define RTK_DMP_CAPTURE_PERIODS_MIN             RTK_DMP_PLAYBACK_PERIODS_MIN
 #define RTK_DMP_CAPTURE_PERIODS_MAX             RTK_DMP_PLAYBACK_PERIODS_MAX
 #define RTK_DMP_CAPTURE_FIFO_SIZE               RTK_DMP_PLAYBACK_FIFO_SIZE
 
-#define RTK_DEC_AO_BUFFER_SIZE          (6*1024)//(10*1024)
+#define RTK_DEC_AO_BUFFER_SIZE          (7*1024)//(10*1024)
 #define RTK_ENC_AI_BUFFER_SIZE          (32*1024)//(64*1024)
 #define RTK_ENC_LPCM_BUFFER_SIZE        (32*1024)
 #define RTK_ENC_PTS_BUFFER_SIZE         (8*1024)
 
 enum{
 	ENUM_AIN_HDMIRX = 0,
-	ENUM_AIN_I2S,    // from ADC outside of IC
-	ENUM_AIN_ANALOG,
-	ENUM_AIN_AMIC
+	ENUM_AIN_I2S,  // from ADC outside of IC
+	ENUM_AIN_AUDIO,
+	ENUM_AIN_AUDIO_V2,
+	ENUM_AIN_AUDIO_V3,
+	ENUM_AIN_AUDIO_V4
 };
 
 ////////////////////////////////////////////
@@ -491,6 +493,23 @@ enum AUDIO_ENUM_PRIVAETINFO {
     ENUM_PRIVATEINFO_AUDIO_AI_PAD_IN = 40,
     ENUM_PRIVATEINFO_AUDIO_MS_MAJOR_DECODER_PIN = 41,
     ENUM_PRIVATEINFO_AUDIO_PROVIDE_RAWOUT_LATENCY = 42,
+    ENUM_PRIVATEINFO_AUDIO_MS_MIXER_IGNORE_PIN = 43,
+    ENUM_PRIVATEINFO_AUDIO_MS_CERTIFICATION_PLATFORM = 44,
+    ENUM_PRIVATEINFO_AUDIO_MS_MIXER_PIN_NEW_SEG = 45,
+    ENUM_PRIVATEINFO_AUDIO_MS_DEC_DROP_BY_PTS = 46,
+    ENUM_PRIVATEINFO_AUDIO_MS_DEC_INIT_PTS_OFFSET = 47,
+    ENUM_PRIVATEINFO_AUDIO_MS_PP_OUTPUT_TYPE = 48,
+    ENUM_PRIVATEINFO_AUDIO_DTS_ENCODER_CONFIG = 49,
+    ENUM_PRIVATEINFO_AUDIO_GET_FW_VERSION = 50,
+    ENUM_PRIVATEINFO_AUDIO_DTS_M8_IN_CONFIG = 51,
+    ENUM_PRIVATEINFO_AUDIO_DTS_M8_LA_NUM = 52,
+    ENUM_PRIVATEINFO_AUDIO_DTS_M8_SET_OUTPUT_FORMAT = 53,
+    ENUM_PRIVATEINFO_AUDIO_SET_DRC_CFG = 54,
+    ENUM_PRIVATEINFO_AUDIO_DTS_M8_LA_ERROR_MSG = 55,
+    ENUM_PRIVATEINFO_GET_B_VALUE = 56,
+    ENUM_PRIVATEINFO_AUDIO_ENTER_SUSPEND = 57,
+    ENUM_PRIVATEINFO_AUDIO_MPEGH_IN_CONFIG = 58,
+    ENUM_PRIVATEINFO_AUDIO_SET_LOW_WATERLEVEL = 59,
 };
 typedef enum AUDIO_ENUM_PRIVAETINFO AUDIO_ENUM_PRIVAETINFO;
 
@@ -527,9 +546,11 @@ enum AUDIO_CHANNEL_OUT_INDEX {
 typedef enum AUDIO_CHANNEL_OUT_INDEX AUDIO_CHANNEL_OUT_INDEX;
 
 enum AUDIO_FORMAT_OF_AI_SEND_TO_ALSA {
-    AUDIO_ALSA_FORMAT_32BITS_BE_PCM = 0,
-    AUDIO_ALSA_FORMAT_16BITS_LE_LPCM = 1,
-    AUDIO_ALSA_FORMAT_24BITS_LE_LPCM = 2,
+	AUDIO_ALSA_FORMAT_32BITS_BE_PCM = 0,
+	AUDIO_ALSA_FORMAT_16BITS_LE_LPCM = 1,
+	AUDIO_ALSA_FORMAT_24BITS_LE_LPCM = 2,
+	AUDIO_ALSA_FORMAT_NONE = 3,
+	AUDIO_ALSA_FORMAT_TOTAL_NUM = 3 + 1,
 };
 typedef enum AUDIO_FORMAT_OF_AI_SEND_TO_ALSA AUDIO_FORMAT_OF_AI_SEND_TO_ALSA;
 
@@ -659,8 +680,8 @@ enum ENUM_AUDIO_CHANNEL_OUT {
 typedef enum ENUM_AUDIO_CHANNEL_OUT ENUM_AUDIO_CHANNEL_OUT;
 
 enum AUDIO_ENUM_AIO_PRIVAETINFO {
-    ENUM_PRIVATEINFO_AIO_AO_INTERFACE_SWITCH_CONTROL = 0,
-    ENUM_PRIVATEINFO_AIO_AI_INTERFACE_SWITCH_CONTROL = 1,
+	ENUM_PRIVATEINFO_AIO_AO_INTERFACE_SWITCH_CONTROL = 0,
+	ENUM_PRIVATEINFO_AIO_AI_INTERFACE_SWITCH_CONTROL = 1,
 	ENUM_PRIVATEINFO_AIO_ALSA_DESTROY_AI_FLOW = 2,
 	ENUM_PRIVATEINFO_AIO_AI_NONPCM_WRITE_BACK_BS = 3,
 	ENUM_PRIVATEINFO_AIO_HDMIRX_LATENCY_MEM = 4,
@@ -673,9 +694,112 @@ enum AUDIO_ENUM_AIO_PRIVAETINFO {
 	ENUM_PRIVATEINFO_AIO_KERNEL_RPC = 9 + 2,
 	ENUM_PRIVATEINFO_AIO_SET_SE_CLK = 9 + 3,
 	ENUM_PRIVATEINFO_AIO_AI_PRIVATEINFO = 9 + 4,
+	ENUM_PRIVATEINFO_AIO_DELIVER_SCPU_FW_PID = 9 + 5,
+	ENUM_PRIVATEINFO_AIO_GET_D_VISION_CAPABILITY = 9 + 6,
+	ENUM_PRIVATEINFO_AIO_GET_AUDIO_PROCESSING_AI = 9 + 7,
+	ENUM_PRIVATEINFO_AIO_TOTAL_NUM = 9 + 8,
 };
 typedef enum AUDIO_ENUM_AIO_PRIVAETINFO AUDIO_ENUM_AIO_PRIVAETINFO;
 
+typedef enum
+{
+    ENUM_AI_PRIVATE_MUTE = 0,
+    ENUM_AI_PRIVATE_WRITE_BACK_SYSTEM,
+    ENUM_AI_PRIVATE_HDMI_RX_TO_SET_AO_FLASH,
+    ENUM_AI_PRIVATE_HDMI_RX_TO_GET_AO_FLASH,
+    ENUM_AI_PRIVATE_HDMI_RX_CONNECT_TO_BT_INFO,
+    ENUM_AI_PRIVATE_NON_PCM_IN,
+    ENUM_AI_PRIVATE_SET_PAD_SOURCE,
+    ENUM_AI_PRIVATE_NONPCM_WRITE_BACK_BS,
+    ENUM_AI_PRIVATE_LOOPBACK_AO,
+    ENUM_AI_PRIVATE_ADC_ANALOG,
+    ENUM_AI_PRIVATE_MULTIPLE_ADC,
+    ENUM_AI_PRIVATE_ADC_AMIC,     // 11
+    ENUM_AI_PRIVATE_ADC_SWAP,
+    ENUM_AI_PRIVATE_ADC_SET_VOLUME,
+	ENUM_AI_PRIVATE_AUDIO_PROCESSING,
+	ENUM_AI_PRIVATE_VOLUME_CTRL,
+	ENUM_AI_PRIVATE_WRITE_BACK_SYSTEM_EXT,
+	ENUM_AI_PRIVATE_HDMIRX_AUDIO_INFO_FRAME,
+	ENUM_AI_PRIVATE_HACK_1KHZ_WITHOUT_HW = 12 + 6,
+	ENUM_AI_PRIVATE_SPDIF_OPTICAL = 12 + 7,
+	ENUM_AI_PRIVATE_HDMI_RX = 12 + 8,
+	ENUM_AI_PRIVATE_SPDIF_COAXIAL = 12 + 9,
+	ENUM_AI_PRIVATE_SPDIF_ARC = 12 + 10,
+	ENUM_AI_PRIVATE_ADC_DMIC = 12 + 11,
+	ENUM_AI_PRIVATE_TDM = 12 + 12,
+	ENUM_AI_PRIVATE_ADC_DMIC_PACK = 12 + 13,
+	ENUM_AI_PRIVATE_SELF_FLUSH = 12 + 14,
+	ENUM_AI_PRIVATE_CONFIG_PIN_MUX = 12 + 15,
+	ENUM_AI_PRIVATE_DUMP_NONPCM = 12 + 16,
+	ENUM_AI_PRIVATE_DUAL_DMIC_AND_LOOPBACK = 12 + 17,
+	ENUM_AI_PRIVATE_DUAL_DMIC_AND_LOOPBACK_FW = 12 + 18,
+	ENUM_AI_PRIVATE_SPEECH_RECOGNITION_FROM_DMIC = 12 + 19,
+	ENUM_AI_PRIVATE_TOTAL_NUM = 12 + 20,
+}ENUM_AI_PRIVATE_TYPE;
+
+enum AUDIO_VOLUME_CTRL {
+	ENUM_AUDIO_VOLUME_CTRL_0_DB = 0,
+	ENUM_AUDIO_VOLUME_CTRL_N1_DB = 0 + 1,
+	ENUM_AUDIO_VOLUME_CTRL_N2_DB = 0 + 2,
+	ENUM_AUDIO_VOLUME_CTRL_N3_DB = 0 + 3,
+	ENUM_AUDIO_VOLUME_CTRL_N4_DB = 0 + 4,
+	ENUM_AUDIO_VOLUME_CTRL_N5_DB = 0 + 5,
+	ENUM_AUDIO_VOLUME_CTRL_N6_DB = 0 + 6,
+	ENUM_AUDIO_VOLUME_CTRL_N7_DB = 0 + 7,
+	ENUM_AUDIO_VOLUME_CTRL_N8_DB = 0 + 8,
+	ENUM_AUDIO_VOLUME_CTRL_N9_DB = 0 + 9,
+	ENUM_AUDIO_VOLUME_CTRL_N10_DB = 0 + 10,
+	ENUM_AUDIO_VOLUME_CTRL_N11_DB = 0 + 11,
+	ENUM_AUDIO_VOLUME_CTRL_N12_DB = 0 + 12,
+	ENUM_AUDIO_VOLUME_CTRL_N13_DB = 0 + 13,
+	ENUM_AUDIO_VOLUME_CTRL_N14_DB = 0 + 14,
+	ENUM_AUDIO_VOLUME_CTRL_N15_DB = 0 + 15,
+	ENUM_AUDIO_VOLUME_CTRL_N16_DB = 0 + 16,
+	ENUM_AUDIO_VOLUME_CTRL_P1_DB = 256,  //17
+	ENUM_AUDIO_VOLUME_CTRL_P2_DB = 256 + 1,
+	ENUM_AUDIO_VOLUME_CTRL_P3_DB = 256 + 2,
+	ENUM_AUDIO_VOLUME_CTRL_P4_DB = 256 + 3,
+	ENUM_AUDIO_VOLUME_CTRL_P5_DB = 256 + 4,
+	ENUM_AUDIO_VOLUME_CTRL_P6_DB = 256 + 5,
+	ENUM_AUDIO_VOLUME_CTRL_P7_DB = 256 + 6,
+	ENUM_AUDIO_VOLUME_CTRL_P8_DB = 256 + 7,
+	ENUM_AUDIO_VOLUME_CTRL_P9_DB = 256 + 8,
+	ENUM_AUDIO_VOLUME_CTRL_P10_DB = 256 + 9,
+	ENUM_AUDIO_VOLUME_CTRL_P11_DB = 256 + 10,
+	ENUM_AUDIO_VOLUME_CTRL_P12_DB = 256 + 11,
+	ENUM_AUDIO_VOLUME_CTRL_P13_DB = 256 + 12,
+	ENUM_AUDIO_VOLUME_CTRL_P14_DB = 256 + 13,
+	ENUM_AUDIO_VOLUME_CTRL_P15_DB = 256 + 14,
+	ENUM_AUDIO_VOLUME_CTRL_P16_DB = 256 + 15,  //32
+};
+typedef enum AUDIO_VOLUME_CTRL AUDIO_VOLUME_CTRL;
+
+typedef enum _audio_digital_output_mode {
+	AUDIO_DIGITAL_RAW,
+	AUDIO_DIGITAL_LPCM_DUAL_CH,
+	AUDIO_DIGITAL_LPCM_MULTI_CH,
+	AUDIO_DIGITAL_AUTO,
+	AUDIO_DIGITAL_MAX
+} ENUM_AUDIO_DIGITAL_OUTPUT_MODE;
+
+enum ENUM_GBL_VAR_EQUALIZER_ID {
+	ENUM_EQUALIZER_PP = 0,
+	ENUM_EQUALIZER_MIC = 1,
+	ENUM_EQUALIZER_AUX = 2,
+	ENUM_EQUALIZER_AO = 3,
+};
+typedef enum ENUM_GBL_VAR_EQUALIZER_ID ENUM_GBL_VAR_EQUALIZER_ID;
+
+enum AIN_AUDIO_PROCESSING {
+	ENUM_AIN_AUDIO_PROCESSING_NONE = 0,
+	ENUM_AIN_AUDIO_PROCESSING_NO_INTERNAL_RING_BUF = 0 + 1,
+	ENUM_AIN_AUDIO_PROCESSING = 0 + 2,
+	ENUM_AIN_AUDIO_PROCESSING_DMIC_AND_LOOPBACK = 0 + 3,
+	ENUM_AIN_AUDIO_PROCESSING_DMIC = 0 + 4,
+	ENUM_AIN_AUDIO_PROCESSING_I2S = 0 + 5,
+};
+typedef enum AIN_AUDIO_PROCESSING AIN_AUDIO_PROCESSING;
 
 /************************************************************************/
 /* typedef                                                                     */
@@ -720,12 +844,19 @@ typedef struct {
     int privateInfo[16];
 }AUDIO_RPC_PRIVATEINFO_RETURNVAL;
 
+typedef struct AUDIO_EQUALIZER_CONFIG {
+	int instanceID;
+	int gbl_var_eq_ID;
+	unsigned char ena;
+	struct AUDIO_RPC_EQUALIZER_MODE app_eq_config;
+}AUDIO_EQUALIZER_CONFIG;
+
 typedef struct AUDIO_RPC_INSTANCE {
     int instanceID;
     int type;
 }AUDIO_RPC_INSTANCE;
 
-typedef struct { 
+typedef struct {
     AUDIO_RPC_INSTANCE info;
     RPCRES_LONG retval;
     HRESULT ret;
@@ -1048,52 +1179,62 @@ typedef struct RTK_snd_card {
 
 // RTK PCM instance
 typedef struct snd_card_RTK_pcm {
-    /******************************************************************************************************************
-    ** CAN'T change the order of the following variables, bcz AO(on SCPU) will refer RINGBUFFER_HEADER decOutRing[8] **
-    ******************************************************************************************************************/
-    RINGBUFFER_HEADER decOutRing[8];    /* big endian, in DEC-AO path, share with DEC and AO */
-    RTK_snd_card_t *card;
-    snd_pcm_substream_t *substream;
-    RINGBUFFER_HEADER decInbandRing;    /* big endian, in DEC-AO path, inband ring of DEC */
+	/******************************************************************************************************************
+	** CAN'T change the order of the following variables, bcz AO(on SCPU) will refer RINGBUFFER_HEADER decOutRing[8] **
+	******************************************************************************************************************/
+	RINGBUFFER_HEADER decOutRing[8];    /* big endian, in DEC-AO path, share with DEC and AO */
+	RTK_snd_card_t *card;
+	snd_pcm_substream_t *substream;
+	RINGBUFFER_HEADER decInbandRing;    /* big endian, in DEC-AO path, inband ring of DEC */
 
-    RINGBUFFER_HEADER decInRing[1];     /* big endian, uncache, in DEC-AO path, inring of DEC */
-    RINGBUFFER_HEADER decInRing_LE[1];  /* little endian, uncache, duplication of nHWInring */
+	RINGBUFFER_HEADER decInRing[1];     /* big endian, uncache, in DEC-AO path, inring of DEC */
+	RINGBUFFER_HEADER decInRing_LE[1];  /* little endian, uncache, duplication of nHWInring */
 
-    snd_pcm_uframes_t nHWPtr;           /* in DEC-AO path, rp of in_ring of DEC, (0,1, ..., ,runntime->buffer_size-1) */
-    snd_pcm_uframes_t nPreHWPtr;
-    snd_pcm_uframes_t nPre_appl_ptr;
-    snd_pcm_uframes_t nHWReadSize;      /* less than runntime->period_size */
-    snd_pcm_uframes_t nTotalRead;
-    snd_pcm_uframes_t nTotalWrite;
-	
+	snd_pcm_uframes_t nHWPtr;           /* in DEC-AO path, rp of in_ring of DEC, (0,1, ..., ,runntime->buffer_size-1) */
+	snd_pcm_uframes_t nPreHWPtr;
+	snd_pcm_uframes_t nPre_appl_ptr;
+	snd_pcm_uframes_t nHWReadSize;      /* less than runntime->period_size */
+	snd_pcm_uframes_t nTotalRead;
+	snd_pcm_uframes_t nTotalWrite;
+
+#ifdef DEBUG_RECORD
+	struct file *fp;
+	loff_t pos;                         /* The param for record data send to alsa */
+	mm_segment_t fs;
+	int ai_count;
+#endif
+
 	struct ion_handle *inRingHandle;
 
-    struct timer_list nStartTimer;
-    //    struct work_struct nEOSWork;
-    spinlock_t pcm_nLock;
-    //    AUDIO_PATH_T AudioPath;
-    SND_REALTEK_EOS_STATE_T nEOSState;
-    int DECAgentID;
-    int DECpinID;
-    int AOAgentID;
-    int AOpinID;
-    int volume;
-    int bInitRing;
-    int bHWinit;
-    int bStop;
-    unsigned int decInbandData[64];     //inband ring
-    unsigned int *decOutData[8];        //decoder Output data
-    unsigned int nPeriodJiffies;
-    unsigned int nPeriodBytes;
-    unsigned int nRingSize;            // bytes
+	struct hrtimer hr_timer;           /* Hr timer for playback */
+	enum hrtimer_restart enHRTimer;    /* Hr timer state */
+	ktime_t ktime;                     /* Ktime for hr timer */
+	struct timer_list nStartTimer;
+	spinlock_t pcm_nLock;
+	//    AUDIO_PATH_T AudioPath;
+	SND_REALTEK_EOS_STATE_T nEOSState;
+	int DECAgentID;
+	int DECpinID;
+	int AOAgentID;
+	int AOpinID;
+	int volume;
+	int bInitRing;
+	int bHWinit;
+	int bStop;
+	int last_channel;
+	unsigned int decInbandData[64];     //inband ring
+	unsigned int *decOutData[8];        //decoder Output data
+	unsigned int nPeriodJiffies;
+	unsigned int nPeriodBytes;
+	unsigned int nRingSize;            // bytes
 #ifdef USE_ION_AUDIO_HEAP
-    ion_phys_addr_t phy_decOutData[8];  //physical address of Output data
-    ion_phys_addr_t phy_addr;           //physical addresss of snd_card_RTK_pcm_t;
+	ion_phys_addr_t phy_decOutData[8];  //physical address of Output data
+	ion_phys_addr_t phy_addr;           //physical addresss of snd_card_RTK_pcm_t;
 #else
-    dma_addr_t phy_decOutData[8];       //physical address of Output data
-    dma_addr_t phy_addr;                //physical addresss of snd_card_RTK_pcm_t;
+	dma_addr_t phy_decOutData[8];       //physical address of Output data
+	dma_addr_t phy_addr;                //physical addresss of snd_card_RTK_pcm_t;
 #endif
-    RINGBUFFER_HEADER decOutRing_LE[8];    /* little endian, in DEC-AO path, share with DEC and AO */
+	RINGBUFFER_HEADER decOutRing_LE[8];    /* little endian, in DEC-AO path, share with DEC and AO */
 } snd_card_RTK_pcm_t;
 
 typedef struct snd_card_RTK_capture_pcm {
@@ -1108,14 +1249,16 @@ typedef struct snd_card_RTK_capture_pcm {
     snd_pcm_uframes_t nAIRingPreWp;
     snd_pcm_uframes_t nTotalWrite;
     AUDIO_FORMAT_OF_AI_SEND_TO_ALSA nAIFormat;
+
+	struct hrtimer hr_timer;           /* Hr timer for playback */
+	enum hrtimer_restart enHRTimer;    /* Hr timer state */
+	ktime_t ktime;                     /* Ktime for hr timer */
     struct timer_list nStartTimer;
-    //    struct work_struct nEOSWork;
     spinlock_t nLock;
     //    SND_REALTEK_EOS_STATE_T nEOSState;
     int AIAgentID;
     int bInitRing;
     int bStop;
-    int devices_index; // 0 for capture, 1 for i2s, 2 for nonpcm, 3 for analog, 4 for amic
     int *pAIRingData[8];   // kernel virtual address
     unsigned int *pLPCMData;
     unsigned int nPeriodJiffies;
@@ -1145,7 +1288,7 @@ typedef struct snd_card_RTK_capture_pcm {
 /************************************************************************/
 int snd_realtek_hw_ring_write(RINGBUFFER_HEADER* ring, void *data, int len, unsigned int offset) ;
 int writeInbandCmd(snd_card_RTK_pcm_t *dpcm, void *data, int len);
-unsigned long snd_card_get_90k_pts(void);
+uint64_t snd_card_get_90k_pts(void);
 #if _DBG_CHECK_AI_HW_RING_DATA_EN
 static void snd_card_capture_lpcm_check_ringBuf(unsigned int data);
 #endif
@@ -1175,31 +1318,27 @@ int RPC_TOAGENT_PAUSE(snd_pcm_substream_t * substream);
 int RPC_TOAGENT_SET_TRUEHD_ERR_SELF_RESET(bool isON);
 int RPC_TOAGENT_SET_VOLUME(int volume);
 int RPC_TOAGENT_GET_VOLUME(snd_card_RTK_pcm_t *mars);
+int RPC_TOAGENT_SET_HDMI_OUTPUT_MODE(int mode);
+int RPC_TOAGENT_SET_SPDIF_OUTPUT_MODE(int mode);
 int RPC_TOAGENT_PUT_SHARE_MEMORY(void *p, int type);
 int RPC_TOAGENT_PUT_SHARE_MEMORY_LATENCY(void *p, void *p2, int decID, int type);
 int RPC_TOAGENT_CREATE_AI_AGENT(snd_card_RTK_capture_pcm_t *dpcm);
-int RPC_TOAGENT_AI_CONNECT_ALSA(snd_card_RTK_capture_pcm_t *dpcm);
+int RPC_TOAGENT_AI_CONNECT_ALSA(snd_pcm_runtime_t *runtime);
+int RPC_TOAGENT_AI_DISCONNECT_ALSA_AUDIO(snd_pcm_runtime_t *runtime);
 int RPC_TOAGENT_CONFIGURE_AI_HW(snd_pcm_runtime_t *runtime);
 int RPC_TOAGENT_SWITCH_FOCUS(AUDIO_RPC_FOCUS *focus);
 int RPC_TOAGENT_DAC_I2S_CONFIG(AUDIO_CONFIG_DAC_I2S *config);
 int RPC_TOAGENT_DAC_SPDIF_CONFIG(AUDIO_CONFIG_DAC_SPDIF *config);
 int RPC_TOAGENT_SETREFCLOCK(AUDIO_RPC_REFCLOCK *pClock);
-int RPC_TOAGENT_AI_CONFIG_I2S_IN(snd_pcm_runtime_t *runtime, snd_card_RTK_capture_pcm_t *dpcm);
-int RPC_TOAGENT_AI_CONFIG_I2S_krpc0_IN(snd_card_RTK_capture_pcm_t *dpcm);
-int RPC_TOAGENT_AI_CONFIG_I2S_krpc1_IN(snd_card_RTK_capture_pcm_t *dpcm);
+int RPC_TOAGENT_AI_CONFIG_HDMI_RX_IN(snd_card_RTK_capture_pcm_t *dpcm);
+int RPC_TOAGENT_AI_CONFIG_I2S_IN(snd_card_RTK_capture_pcm_t *dpcm);
+int RPC_TOAGENT_AI_CONFIG_AUDIO_IN(snd_card_RTK_capture_pcm_t *dpcm);
 int RPC_TOAGENT_DESTROY_AI_FLOW_SVC(int instance_id);
 int RPC_TOAGENT_AI_CONFIG_NONPCM_IN(snd_card_RTK_capture_pcm_t *dpcm);
-int RPC_TOAGENT_AI_CONFIG_ANALOG_IN(snd_pcm_runtime_t *runtime, snd_card_RTK_capture_pcm_t *dpcm);
-int RPC_TOAGENT_AI_CONFIG_AMIC_IN(snd_pcm_runtime_t *runtime, snd_card_RTK_capture_pcm_t *dpcm);
-
-#ifdef AO_ON_SCPU
-void rtk_ao_kernel_rpc(
-int type, 
-unsigned char *pArg, unsigned int size_pArg,
-unsigned char *pRet, unsigned int size_pRet,
-unsigned char *pFuncRet, unsigned int size_pFuncRet);
-int KRPC_TOAGENT_INITRINGBUFFER_HEADER_SVC(AUDIO_RPC_RINGBUFFER_HEADER *header, int buffer_count);
-void RPC_TOAGENT_AO_INIT_FLASH(snd_pcm_substream_t *substream);
-#endif  // #ifdef AO_ON_SCPU
+int RPC_TOAGENT_SET_AI_FLASH_VOLUME(snd_card_RTK_capture_pcm_t *dpcm, unsigned int volume);
+int RPC_TOAGENT_SET_SOFTWARE_AI_FLASH_VOLUME(snd_card_RTK_capture_pcm_t *dpcm, unsigned int volume);
+int RPC_TOAGENT_SET_LOW_WATER_LEVEL(bool isLowWater);
+int RPC_TOAGENT_GET_AI_AGENT(snd_card_RTK_capture_pcm_t *dpcm);
+int RPC_TOAGENT_SET_EQ(snd_card_RTK_pcm_t *dpcm, struct AUDIO_RPC_EQUALIZER_MODE *equalizer_mode);
 
 #endif //SND_REALTEK_H

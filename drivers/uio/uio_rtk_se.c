@@ -16,10 +16,11 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/uio_driver.h>
-#include <linux/reset.h>
+#include <linux/pm_runtime.h>
 
 #include "reg_se.h"
 #include "uio_rtk_se.h"
+#include "uio_helper.h"
 
 struct se_uio_info {
 	struct uio_info info;
@@ -27,6 +28,8 @@ struct se_uio_info {
 	void __iomem *base;
 	struct clk *clk;
 	int irq;
+	int suspend;
+	int should_resume;
 };
 
 static SEREG_INFO se_reg;
@@ -48,9 +51,8 @@ static inline void rtk_se_init_reg(struct device *dev)
 
 	for (i = 0; i < SE_NUM_ENGINES; i++) {
 		/* Stop Streaming Engine */
-		reg_info->SeCtrl[i].Value =
-			(SeGo | SeEndianSwap | SeClearWriteData);
-		reg_info->SeCtrl[i].Value = (SeEndianSwap | SeWriteData);
+		reg_info->SeCtrl[i].Value = (SeGo | SeClearWriteData);
+		reg_info->SeCtrl[i].Value = (SeWriteData);
 		reg_info->SeCmdBase[i].Value = se_hw->engine[i].CmdBase;
 		reg_info->SeCmdReadPtr[i].Value = se_hw->engine[i].CmdBase;
 		reg_info->SeCmdWritePtr[i].Value = se_hw->engine[i].CmdBase;
@@ -76,9 +78,11 @@ static inline void rtk_se_enable_icg(struct device *dev)
 	struct se_uio_info *priv = dev_get_drvdata(dev);
 	unsigned int val;
 
+#ifndef CONFIG_ARCH_RTD119X
 	val = readl(priv->base + 0x80c);
 	val &= ~0xf8000000;
 	writel(val, priv->base + 0x80c);
+#endif
 }
 
 static void rtk_se_init_drv(struct device *dev)
@@ -129,7 +133,7 @@ static irqreturn_t rtk_se_irq_handler(int irq, struct uio_info *info)
 	return IRQ_HANDLED;
 }
 
-static int rtk_se_suspend(struct device *dev)
+static int rtk_se_save_reg(struct device *dev)
 {
 	struct se_uio_info *priv = dev_get_drvdata(dev);
 	int i;
@@ -137,8 +141,6 @@ static int rtk_se_suspend(struct device *dev)
 	uint8_t *reghw = (uint8_t *)priv->base;
 
 	dev_info(dev, "[SE] Enter %s\n", __func__);
-
-	clk_prepare_enable(priv->clk);
 
 	for (i = 0; i < sizeof(SEREG_INFO); i += 4) {
 		/* skip reserved registers to avoid sb2 timeout issue */
@@ -153,17 +155,17 @@ static int rtk_se_suspend(struct device *dev)
 		if (i >= 0x504 && i < 0x510)
 			continue; /* Reserved */
 
+		dev_dbg(dev, "offset=%03x val=%08x to mem", i, *(uint32_t *)(reghw + i));
 		*(uint32_t *)(regbak + i) = *(uint32_t *)(reghw + i);
 	}
 
-	clk_disable_unprepare(priv->clk);
-
 	dev_info(dev, "[SE] Exit %s\n", __func__);
+	priv->suspend = 1;
 
 	return 0;
 }
 
-static int rtk_se_resume(struct device *dev)
+static int rtk_se_restore_reg(struct device *dev)
 {
 	struct se_uio_info *priv = dev_get_drvdata(dev);
 	uint8_t *regbak = (uint8_t *)&se_reg;
@@ -172,8 +174,6 @@ static int rtk_se_resume(struct device *dev)
 	SEREG_INFO *reg_info = (SEREG_INFO *)priv->base;
 
 	dev_info(dev, "[SE] Enter %s\n", __func__);
-
-	clk_prepare_enable(priv->clk);
 
 	for (i = 0; i < sizeof(SEREG_INFO); i += 4) {
 		/* skip restoring reserved, read-only, special registers */
@@ -204,6 +204,7 @@ static int rtk_se_resume(struct device *dev)
 		if (i >= 0x510 && i < 0x51C)
 			continue; /* INSTCNT_H */
 
+		dev_dbg(dev, "offset=%03x val=%08x to reg", i, *(uint32_t *)(regbak + i));
 		*(uint32_t *)(reghw + i) = *(uint32_t *)(regbak + i);
 	}
 
@@ -242,27 +243,78 @@ static int rtk_se_resume(struct device *dev)
 	reg_info->SeCtrl[1].Value = se_reg.SeCtrl[1].Value;
 	reg_info->SeCtrl[2].Value = se_reg.SeCtrl[2].Value;
 
-	clk_disable_unprepare(priv->clk);
-
 	dev_info(dev, "[SE] Exit %s\n", __func__);
+	priv->suspend = 0;
 
 	return 0;
 }
 
+static int rtk_se_runtime_suspend(struct device *dev)
+{
+	struct se_uio_info *priv = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "%s\n", __func__);
+	rtk_se_save_reg(dev);
+	clk_disable_unprepare(priv->clk);
+	return 0;
+}
+
+static int rtk_se_runtime_resume(struct device *dev)
+{
+	struct se_uio_info *priv = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "%s\n", __func__);
+	clk_prepare_enable(priv->clk);
+	rtk_se_restore_reg(dev);
+	return 0;
+}
+
+static int rtk_se_suspend(struct device *dev)
+{
+	struct se_uio_info *priv = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "%s\n", __func__);
+	if (priv->suspend)
+		return 0;
+
+	rtk_se_runtime_suspend(dev);
+	priv->should_resume = 1;
+
+	return 0;
+}
+
+static int rtk_se_resume(struct device *dev)
+{
+	struct se_uio_info *priv = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "%s\n", __func__);
+	if (priv->should_resume)
+		rtk_se_runtime_resume(dev);
+	priv->should_resume = 0;
+
+	return 0;
+}
+
+
 static const struct dev_pm_ops rtk_se_pm_ops = {
-	.suspend = rtk_se_suspend,
-	.resume = rtk_se_resume,
+	SET_RUNTIME_PM_OPS(rtk_se_runtime_suspend, rtk_se_runtime_resume, NULL)
+	SET_SYSTEM_SLEEP_PM_OPS(rtk_se_suspend, rtk_se_resume)
 };
 
-static inline void print_uio_mem(struct device *dev, struct uio_info *info,
-	int index)
+static int rtk_se_open(struct uio_info *info, struct inode *inode)
 {
-	struct uio_mem *umem = &info->mem[index];
+	struct se_uio_info *priv = info->priv;
 
-	dev_info(dev,
-		"mem[%d] phys:0x%pa virt:0x%p size:0x%pa type:%d name:%s\n",
-		index, &umem->addr, umem->internal_addr, &umem->size,
-		umem->memtype, umem->name);
+	pm_runtime_get_sync(priv->dev);
+	return 0;
+}
+
+static int rtk_se_release(struct uio_info *info, struct inode *inode)
+{
+	struct se_uio_info *priv = info->priv;
+
+	pm_runtime_put_sync(priv->dev);
+	return 0;
 }
 
 static int rtk_se_probe(struct platform_device *pdev)
@@ -270,80 +322,55 @@ static int rtk_se_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct se_uio_info *priv;
 	struct uio_info *info;
-
 	int ret;
-	size_t size = 0;
-	void *virt = NULL;
-	dma_addr_t phys = 0;
-	struct resource res;
-	struct reset_control *rstc;
 
-	dev_info(dev, "[SE] %s\n", __func__);
-
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	priv->clk = clk_get(dev, NULL);
+	priv->clk = devm_clk_get(dev, NULL);
 	if (IS_ERR(priv->clk)) {
-		dev_warn(dev, "failed to get clk: %ld.\n", PTR_ERR(priv->clk));
+		dev_warn(dev, "clk_get() returns %ld\n", PTR_ERR(priv->clk));
 		priv->clk = NULL;
-	}
-
-	ret = of_address_to_resource(pdev->dev.of_node, 0, &res);
-	if (ret) {
-		dev_err(dev, "failed to get resource.\n");
-		goto free_priv;
 	}
 
 	ret = platform_get_irq(pdev, 0);
 	if (ret < 0) {
-		dev_err(dev, "failed to get irq.\n");
-		goto free_priv;
+		dev_err(dev, "platform_get_irq() returns %d\n", ret);
+		return ret;
 	}
 	priv->irq = ret;
 	priv->dev = dev;
-	priv->base = ioremap(res.start, resource_size(&res));
-
-	dev_info(dev, "resouce: %pr\n", &res);
-	dev_info(dev, "irq: %d\n", priv->irq);
 
 	info = &priv->info;
-
 	info->mem[0].name = "SE reg space";
-	info->mem[0].addr = res.start;
-	info->mem[0].size = ALIGN(resource_size(&res), PAGE_SIZE);
-	info->mem[0].internal_addr = priv->base;
-	info->mem[0].memtype = UIO_MEM_PHYS;
-	print_uio_mem(dev, info, 0);
-
-	/* se driver data */
-	size = ALIGN(sizeof(struct se_hw), PAGE_SIZE);
-	virt = dma_alloc_coherent(dev, size, &phys, GFP_KERNEL);
-	if (!virt) {
-		ret = -ENOMEM;
-		goto free_base;
+	ret = uio_mem_of_iomap(dev, &info->mem[0], 0);
+	if (ret) {
+		dev_err(dev, "mem0: uio_mem_of_iomap() returns %d\n", ret);
+		goto free_uio_mem;
 	}
+	priv->base = info->mem[0].internal_addr;
+
 	info->mem[1].name = "SE driver data";
-	info->mem[1].addr = phys;
-	info->mem[1].size = size;
-	info->mem[1].internal_addr = virt;
-	info->mem[1].memtype = UIO_MEM_PHYS;
-	print_uio_mem(dev, info, 1);
-
-	/* se command queue */
-	size = ALIGN(SE_CMDBUF_SIZE * SE_NUM_ENGINES, PAGE_SIZE);
-	virt = dma_alloc_coherent(dev, size, &phys, GFP_KERNEL | GFP_DMA);
-	if (!virt) {
-		ret = -ENOMEM;
-		goto free_drv_data;
+	ret = uio_mem_dma_alloc(dev, &info->mem[1], sizeof(struct se_hw),
+		GFP_KERNEL);
+	if (ret) {
+		dev_err(dev, "mem1: uio_mem_dma_alloc() returns %d\n", ret);
+		goto free_uio_mem;
 	}
+
 	info->mem[2].name = "SE command queue";
-	info->mem[2].addr = phys;
-	info->mem[2].size = size;
-	info->mem[2].internal_addr = virt;
-	info->mem[2].memtype = UIO_MEM_PHYS;
-	print_uio_mem(dev, info, 2);
+	ret = uio_mem_dma_alloc(dev, &info->mem[2],
+		SE_CMDBUF_SIZE * SE_NUM_ENGINES, GFP_KERNEL | GFP_DMA);
+	if (ret) {
+		dev_err(dev, "mem2: uio_mem_dma_alloc() returns %d\n", ret);
+		goto free_uio_mem;
+	}
+
+	dev_info(dev, "irq=%d\n", priv->irq);
+	uio_mem_print(dev, &info->mem[0]);
+	uio_mem_print(dev, &info->mem[1]);
+	uio_mem_print(dev, &info->mem[2]);
 
 #ifdef CONFIG_UIO_ASSIGN_MINOR
 	info->minor = 251;
@@ -353,42 +380,48 @@ static int rtk_se_probe(struct platform_device *pdev)
 	info->irq = priv->irq;
 	info->irq_flags = IRQF_SHARED;
 	info->handler = rtk_se_irq_handler;
+	info->open = rtk_se_open;
+	info->release = rtk_se_release;
+	info->priv = priv;
 
 	ret = uio_register_device(dev, info);
 	if (ret) {
-		dev_err(dev, "failed to register uio device.\n");
-		goto free_cmd_queue;
+		dev_err(dev, "uio_register_device() returns %d\n", ret);
+		goto free_uio_mem;
 	}
 
-	rstc = reset_control_get(dev, NULL);
-	if (IS_ERR(rstc))
-		dev_warn(dev, "reset_control_get() returns %ld\n", PTR_ERR(rstc));
-	else {
-		reset_control_deassert(rstc);
-		reset_control_put(rstc);
-	}
-
-	clk_prepare_enable(priv->clk);
+	ret = uio_reset_control_deassert(dev, NULL);
+	if (ret)
+		dev_warn(dev, "uio_reset_control_deassert() returns %d\n", ret);
 
 	platform_set_drvdata(pdev, priv);
 
+	/* enable runtime pm */
+	pm_runtime_set_active(dev);
+	pm_runtime_enable(dev);
+
+	/* do resume */
+	clk_prepare_enable(priv->clk);
+	priv->suspend = 0;
+	pm_runtime_get_noresume(dev);
+
+	/* init se */
 	rtk_se_init_drv(dev);
 
-	clk_disable_unprepare(priv->clk);
+	if (!of_property_read_bool(dev->of_node, "realtek,device-is-exclusive")) {
+		dev_info(dev, "shared mode\n");
+		pm_runtime_forbid(dev);
+	}
 
+	pm_runtime_put_sync(dev);
+
+	dev_info(dev, "initialized\n");
 	return 0;
 
-free_cmd_queue:
-	dma_free_coherent(dev, info->mem[2].size, info->mem[2].internal_addr,
-		info->mem[2].addr);
-free_drv_data:
-	dma_free_coherent(dev, info->mem[1].size, info->mem[1].internal_addr,
-		info->mem[1].addr);
-free_base:
-	iounmap(priv->base);
-	clk_put(priv->clk);
-free_priv:
-	kfree(priv);
+free_uio_mem:
+	uio_mem_dma_free(dev, &info->mem[2]);
+	uio_mem_dma_free(dev, &info->mem[1]);
+	uio_mem_iounmap(dev, &info->mem[0]);
 
 	return ret;
 }
@@ -399,18 +432,14 @@ static int rtk_se_remove(struct platform_device *pdev)
 	struct se_uio_info *priv = platform_get_drvdata(pdev);
 	struct uio_info *info = &priv->info;
 
-	dev_info(dev, "[SE] %s\n", __func__);
-
-	uio_unregister_device(info);
+	pm_runtime_disable(dev);
+	uio_reset_control_assert(dev, NULL);
 	platform_set_drvdata(pdev, NULL);
-	dma_free_coherent(dev, info->mem[2].size, info->mem[2].internal_addr,
-		info->mem[2].addr);
-	dma_free_coherent(dev, info->mem[1].size, info->mem[1].internal_addr,
-		info->mem[1].addr);
-	iounmap(info->mem[0].internal_addr);
-	clk_put(priv->clk);
-	kfree(priv);
-
+	uio_unregister_device(info);
+	uio_mem_dma_free(dev, &info->mem[2]);
+	uio_mem_dma_free(dev, &info->mem[1]);
+	uio_mem_iounmap(dev, &info->mem[0]);
+	dev_info(dev, "removed\n");
 	return 0;
 }
 
@@ -430,4 +459,4 @@ static struct platform_driver rtk_se_driver = {
 		.pm = &rtk_se_pm_ops,
 	},
 };
-module_platform_driver_probe(rtk_se_driver, rtk_se_probe);
+module_platform_driver(rtk_se_driver);

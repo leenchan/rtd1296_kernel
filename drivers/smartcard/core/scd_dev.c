@@ -306,7 +306,7 @@ long scd_dev_ioctl(
     case SCD_GETPARAM_EX:                   
         if (copy_from_user(&param, (scd_param __user *)arg, sizeof(param)))
             return -EFAULT;                 
-        if (drv->get_param(dev, param.id, &param.val)<0)
+        if (drv->get_param(dev, param.id, (unsigned long *)&param.val)<0)
             return -EFAULT;
         return copy_to_user((scd_param __user *)arg, &param, sizeof(param));
                 
@@ -355,9 +355,11 @@ static long scd_dev_compat_ioctl(struct file* file,unsigned int cmd, unsigned lo
 {
 	 if (!file->f_op->unlocked_ioctl)
                 return -ENOTTY;
-
+#if defined(CONFIG_CPU_V7)
+	return file->f_op->unlocked_ioctl(file, cmd, arg);
+#else
 	return file->f_op->unlocked_ioctl(file, cmd,(unsigned long)compat_ptr(arg));
-
+#endif /* CONFIG_CPU_V7 */
 
 }
 

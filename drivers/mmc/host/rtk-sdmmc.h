@@ -1,8 +1,8 @@
 /*
- * Realtek SD card Header file
+ * Realtek SD/MMC/mini SD card driver
  *
  * Authors:
- * Copyright (C) 2015 Realtek Ltd.
+ * Copyright (C) 2017 Realtek Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -36,14 +36,27 @@ struct rtk_sdmmc_host {
     void __iomem *sdmmc;
     void __iomem *pll;
     void __iomem *sysbrdg;
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
+    void __iomem *isopad;
+    void __iomem *gpiodir;
+    int cd_irq;
+    int wp_irq;
+    u32 sdmmc_wp_gpio;
+    u32 sdmmc_cd_gpio;
+#else
     void __iomem *emmc;
-    void __iomem *sdio;
+#endif
 
+#ifdef CONFIG_ARCH_RTD119X
+    void __iomem *sdio;
+#endif
     spinlock_t lock;
 
     struct tasklet_struct req_end_tasklet;
     struct timer_list timer;
+#if defined(CONFIG_ARCH_RTD129x) || defined(CONFIG_ARCH_RTD119X)
     struct timer_list plug_timer;
+#endif
     struct timer_list rtk_sdmmc_stop_cmd; //CMD25_WO_STOP_COMMAND
 
     struct completion *int_waiting;

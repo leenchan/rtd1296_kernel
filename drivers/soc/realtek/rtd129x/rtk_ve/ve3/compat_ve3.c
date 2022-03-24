@@ -98,8 +98,6 @@ long compat_hantrodec_ioctl(struct file *filp, unsigned int cmd, unsigned long a
     case HANTRODEC_RESET_CLK_GATING:
     case HANTRODEC_NOTIFY_RELEASE:
     case HANTRODEC_GET_ASIC_REVISION:
-	case HANTRODEC_SET_CLK_RATE:
-	case HANTRODEC_GET_CLK_RATE:
     {
         return filp->f_op->unlocked_ioctl(filp, cmd,
                                           (unsigned long)compat_ptr(arg));

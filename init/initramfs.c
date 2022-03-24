@@ -19,6 +19,11 @@
 #include <linux/syscalls.h>
 #include <linux/utime.h>
 #include <linux/initramfs.h>
+#include <linux/file.h>
+
+#ifdef CONFIG_RTK_VMX_ULTRA_RAMFS_VENDOR
+int populate_rootfs(void);
+#endif
 
 static ssize_t __init xwrite(int fd, const char *p, size_t count)
 {
@@ -527,14 +532,14 @@ extern unsigned long __initramfs_size;
 
 static void __init free_initrd(void)
 {
-#ifdef CONFIG_KEXEC
+#ifdef CONFIG_KEXEC_CORE
 	unsigned long crashk_start = (unsigned long)__va(crashk_res.start);
 	unsigned long crashk_end   = (unsigned long)__va(crashk_res.end);
 #endif
 	if (do_retain_initrd)
 		goto skip;
 
-#ifdef CONFIG_KEXEC
+#ifdef CONFIG_KEXEC_CORE
 	/*
 	 * If the initrd region is overlapped with crashkernel reserved region,
 	 * free only memory that is not part of crashkernel region.
@@ -616,13 +621,46 @@ static int __init skip_initramfs_param(char *str)
 	return 1;
 }
 __setup("skip_initramfs", skip_initramfs_param);
+#ifdef CONFIG_RTK_VMX_ULTRA_RAMFS_VENDOR
+static int __initdata do_ramfs_vendor;
+static int __init ramfs_vendor_param(char *str)
+{
+	if (*str)
+		return 0;
 
+	do_ramfs_vendor = 1;
+	return 1;
+}
+__setup("ramfs_vendor", ramfs_vendor_param);
+
+static int __init do_default_rootfs(void)
+{
+	if (do_ramfs_vendor)
+		return default_rootfs();
+
+	return populate_rootfs();
+}
+
+int mount_ramfs_vendor(void)
+{
+	pr_err("mount_ramfs_vendor = %x \n", do_ramfs_vendor);
+	return do_ramfs_vendor;
+}
+#endif
+
+#ifdef CONFIG_RTK_VMX_ULTRA_RAMFS_VENDOR
+int populate_rootfs(void)
+#else
 static int __init populate_rootfs(void)
+#endif
 {
 	char *err;
 
-	if (do_skip_initramfs)
+	if (do_skip_initramfs) {
+		if (initrd_start)
+			free_initrd();
 		return default_rootfs();
+	}
 
 	err = unpack_to_rootfs(__initramfs_start, __initramfs_size);
 	if (err)
@@ -664,6 +702,7 @@ static int __init populate_rootfs(void)
 			printk(KERN_EMERG "Initramfs unpacking failed: %s\n", err);
 		free_initrd();
 #endif
+		flush_delayed_fput();
 		/*
 		 * Try loading default modules from initramfs.  This gives
 		 * us a chance to load before device_initcalls.
@@ -672,4 +711,8 @@ static int __init populate_rootfs(void)
 	}
 	return 0;
 }
+#ifdef CONFIG_RTK_VMX_ULTRA_RAMFS_VENDOR
+rootfs_initcall(do_default_rootfs);
+#else
 rootfs_initcall(populate_rootfs);
+#endif

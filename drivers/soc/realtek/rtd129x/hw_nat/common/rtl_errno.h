@@ -1,11 +1,11 @@
 
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2002  
-* All rights reserved.                                                    
-* 
+* Copyright c                  Realtek Semiconductor Corporation, 2002
+* All rights reserved.
+*
 * Program : The header file of all error numbers
-* Abstract :                                                           
-* Author : David Chun-Feng Liu (cfliu@realtek.com.tw)               
+* Abstract :
+* Author : David Chun-Feng Liu (cfliu@realtek.com.tw)
 * $Id: rtl_errno.h,v 1.1 2007-12-21 10:29:52 davidhsu Exp $
 * $log$
 * -------------------------------------------------------
@@ -50,7 +50,7 @@
 #define RTL_EDMZHOSTDENYFILTEREDSIP	-1105 //filtered PKT to DMZ because of the PKT's Sip in filterring range
 
 /* Error Number for ALG APIs */
-#define RTL_EINVALALGATTR			-1200 //Invalid ALG attribute. Neither Server nor Client is 
+#define RTL_EINVALALGATTR			-1200 //Invalid ALG attribute. Neither Server nor Client is
 											  //specified to an ALG entry.
 #define RTL_EINVALPORTRANGE			-1201 //Invalid port range was specified.
 #define RTL_EALGPORTRANGEOVERLAP		-1202 //ALG port range overlap
@@ -103,13 +103,13 @@
 /* Error Number for Aggregator */
 #define RTL_EINVALIDAGGREGATORID			-1900 //Invalid aggregator ID.
 #define RTL_EALREADYTRUNKING				-1901 //Aggregator already aggregates more than one port.
-#define RTL_EAGGREGATORHASNOPORT			-1902 //Not allow aggregator without port member 
+#define RTL_EAGGREGATORHASNOPORT			-1902 //Not allow aggregator without port member
 #define RTL_EAGGREGATOREXCEED			-1903 //The number of aggregator excees the system capability.
-#define RTL_EAGGREGATORIDGTPORTNO		-1904 //Aggreagator ID > Port Number. When aggregating ports, 
+#define RTL_EAGGREGATORIDGTPORTNO		-1904 //Aggreagator ID > Port Number. When aggregating ports,
 												  //any port No. > aggregator ID is disallowed.
-#define RTL_EAGGREGATORSETINDIVIDUAL		-1905 //Aggregator was set to individual, hence it can not 
+#define RTL_EAGGREGATORSETINDIVIDUAL		-1905 //Aggregator was set to individual, hence it can not
 												  //aggreate more then one port.
-#define RTL_EDIFFBROADCASTDOMAIN			-1906 //Aggregator and port are in different broadcast domain.											  
+#define RTL_EDIFFBROADCASTDOMAIN			-1906 //Aggregator and port are in different broadcast domain.
 
 /* Error Number for VLAN */
 #define RTL_EVLANALREADYEXISTS			-2000 //Vlan already exists.
@@ -277,7 +277,7 @@
 #define RTL_EIPSEC_PARAM_ERROR		-4001	//IPSec parameter error
 #define RTL_EIPSEC_SPI_EXISTED		-4002	//IPSec SPI has existed
 #define RTL_EIPSEC_SPI_NOT_FOUNT		-4003	//IPSec SPI not found
-#define RTL_EIPSEC_NO_MORE_SPI		-4004	//no more availiable IPSec SPI 
+#define RTL_EIPSEC_NO_MORE_SPI		-4004	//no more availiable IPSec SPI
 #define RTL_EIPSEC_SPIGRP_EXISTED	-4007	//IPSec SPIGRP has existed
 #define RTL_EIPSEC_SPIGRP_NOT_FOUNT	-4008	//IPSec SPIGRP not found
 #define RTL_EIPSEC_NO_MORE_SPIGRP	-4009	//no more availiable IPSec SPIGRP

@@ -20,7 +20,9 @@
 #include <linux/usb.h>
 #include <linux/usb/audio.h>
 #include <linux/usb/audio-v2.h>
+#ifdef CONFIG_RTK_PLATFORM
 #include <linux/switch.h>
+#endif /* CONFIG_RTK_PLATFORM */
 
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -38,8 +40,11 @@
 #include "clock.h"
 #include "stream.h"
 
+#ifdef CONFIG_RTK_PLATFORM
 extern struct switch_dev *usbaudiosdev;
 extern int num_playback_device;
+#endif /* CONFIG_RTK_PLATFORM */
+
 /*
  * free a substream
  */
@@ -56,13 +61,14 @@ static void free_substream(struct snd_usb_substream *subs)
 	}
 	kfree(subs->rate_list.list);
 
+#ifdef CONFIG_RTK_PLATFORM
 #if 0
-    if(subs->direction == SNDRV_PCM_STREAM_PLAYBACK && usbaudiosdev != NULL)
-    {
-        //printk("***** %s %d free playback device\n", __FUNCTION__, __LINE__);
-        //switch_set_state(usbaudiosdev, 0);
-    }
+	if(subs->direction == SNDRV_PCM_STREAM_PLAYBACK && usbaudiosdev != NULL) {
+		//pr_info("***** %s %d free playback device\n", __func__, __LINE__);
+		//switch_set_state(usbaudiosdev, 0);
+	}
 #endif
+#endif /* CONFIG_RTK_PLATFORM */
 }
 
 
@@ -103,6 +109,7 @@ static void snd_usb_init_substream(struct snd_usb_stream *as,
 	subs->direction = stream;
 	subs->dev = as->chip->dev;
 	subs->txfr_quirk = as->chip->txfr_quirk;
+	subs->tx_length_quirk = as->chip->tx_length_quirk;
 	subs->speed = snd_usb_get_speed(subs->dev);
 	subs->pkt_offset_adj = 0;
 
@@ -135,11 +142,9 @@ static int usb_chmap_ctl_info(struct snd_kcontrol *kcontrol,
 static bool have_dup_chmap(struct snd_usb_substream *subs,
 			   struct audioformat *fp)
 {
-	struct list_head *p;
+	struct audioformat *prev = fp;
 
-	for (p = fp->list.prev; p != &subs->fmt_list; p = p->prev) {
-		struct audioformat *prev;
-		prev = list_entry(p, struct audioformat, list);
+	list_for_each_entry_continue_reverse(prev, &subs->fmt_list, list) {
 		if (prev->chmap &&
 		    !memcmp(prev->chmap, fp->chmap, sizeof(*fp->chmap)))
 			return true;
@@ -361,10 +366,10 @@ int snd_usb_add_audio_stream(struct snd_usb_audio *chip,
 		if (err < 0)
 			return err;
 		snd_usb_init_substream(as, stream, fp);
-
-        if (stream == SNDRV_PCM_STREAM_PLAYBACK && usbaudiosdev != NULL)
-            num_playback_device++;
-
+#ifdef CONFIG_RTK_PLATFORM
+		if (stream == SNDRV_PCM_STREAM_PLAYBACK && usbaudiosdev != NULL)
+			num_playback_device++;
+#endif /* CONFIG_RTK_PLATFORM */
 		return add_chmap(as->pcm, stream, subs);
 	}
 
@@ -394,13 +399,23 @@ int snd_usb_add_audio_stream(struct snd_usb_audio *chip,
 
 	snd_usb_init_substream(as, stream, fp);
 
-	list_add(&as->list, &chip->pcm_list);
+	/*
+	 * Keep using head insertion for M-Audio Audiophile USB (tm) which has a
+	 * fix to swap capture stream order in conf/cards/USB-audio.conf
+	 */
+	if (chip->usb_id == USB_ID(0x0763, 0x2003))
+		list_add(&as->list, &chip->pcm_list);
+	else
+		list_add_tail(&as->list, &chip->pcm_list);
+
 	chip->pcm_devs++;
 
 	snd_usb_proc_pcm_format_add(as);
 
-    if (stream == SNDRV_PCM_STREAM_PLAYBACK && usbaudiosdev != NULL)
-        num_playback_device++;
+#ifdef CONFIG_RTK_PLATFORM
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK && usbaudiosdev != NULL)
+		num_playback_device++;
+#endif
 
 	return add_chmap(pcm, stream, &as->substream[stream]);
 }

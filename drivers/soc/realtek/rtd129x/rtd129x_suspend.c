@@ -28,28 +28,40 @@
 #include <linux/vmalloc.h>
 #include <linux/tick.h>
 #include <linux/slab.h>
+#include <linux/io.h>
 #include <linux/irqchip/arm-gic.h>
-#include <linux/pwm.h>
-#include <asm/io.h>
+#include <linux/cpumask.h>
 #include <asm/system_misc.h>
 #include <asm/cacheflush.h>
 #include <asm/suspend.h>
-
 #include <soc/realtek/memory.h>
+#include <soc/realtek/rtk_cpu.h>
+
 #include "rtd129x_suspend.h"
-#include <soc/realtek/rtd129x_cpu.h>
 
-#define SYS_GROUP1_CK_SEL    0x98000018
-#define SYS_PLL_SCPU1        0x98000104
-#define SUSPEND_VERSION_MASK(v)    ((v&0xffff) << 16)
-#define BT_WAKEUP_IGPIO(n)    (0x1 << n)//n:0 to 20
+#define DEV_NAME "RTD129x_PM"
+#define SYS_GROUP1_CK_SEL 0x98000018
+#define SYS_PLL_SCPU1 0x98000104
+#define SUSPEND_VERSION_MASK(v) ((v&0xffff) << 16)
+#define BT_WAKEUP_IGPIO(n) (0x1 << n)//n:0 to 20
 
-struct pwm_device *pwm;
-struct platform_device *pdev_locad;
+extern void rtk_cpu_power_down(int cpu);
+
 static int suspend_version = 2;
-static unsigned int suspend_context = 0;
-static enum _suspend_mode suspend_mode = SUSPEND_TO_COOLBOOT;
-typedef struct RTK119X_ipc_shm RTD1295_ipc_shm;
+static unsigned int suspend_context;
+unsigned int pm_state;
+
+/*
+wakelock count mode:
+0: original mode
+1: deep sleep mode
+*/
+unsigned int pm_wakelock_mode;
+/**
+ * some sync mechanism between kernel suspend
+ * and android wakelock control
+ */
+unsigned int pm_block_wakelock;
 
 void __iomem *RTK_CRT_BASE;
 void __iomem *RTK_AIO_BASE;
@@ -60,24 +72,24 @@ void __iomem *RTK_MISC_BASE;
 void __iomem *RTK_GIC_DIST_BASE;
 void __iomem *RTK_CPU_WRAPPER_BASE;
 
-int RTK_CHIP_VERSION = 0;
-int pwm_used = 0;
+int RTK_CHIP_VERSION;
 
-#define rtk_suspend_shm_func(_name, _offset, _def)                                  \
-void rtk_suspend_##_name##_set(unsigned int val)                                    \
-{                                                                                   \
-    RTD1295_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;                    \
-    writel(__cpu_to_be32(SUSPEND_MAGIC_MASK | _def##_MASK(val)), &(ipc->_offset));  \
-}                                                                                   \
-unsigned int rtk_suspend_##_name##_get(void)                                        \
-{                                                                                   \
-    RTD1295_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;                    \
-    unsigned int val = __be32_to_cpu(readl(&(ipc->_offset)));                       \
-    if (SUSPEND_MAGIC_GET(val) != SUSPEND_MAGIC_KEY) {                              \
-        printk(KERN_ERR "[RTD129x_PM] Error! val = 0x%08x\n", val);               \
-        return -1;                                                                  \
-    }                                                                               \
-    return _def##_GET(val);                                                         \
+#define rtk_suspend_shm_func(_name, _offset, _def) \
+void rtk_suspend_##_name##_set(unsigned int val) \
+{ \
+	struct rtk_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT; \
+	writel(__cpu_to_be32(SUSPEND_MAGIC_MASK | _def##_MASK(val)), \
+	&(ipc->_offset)); \
+} \
+unsigned int rtk_suspend_##_name##_get(void) \
+{ \
+	struct rtk_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT; \
+	unsigned int val = __be32_to_cpu(readl(&(ipc->_offset))); \
+	if (SUSPEND_MAGIC_GET(val) != SUSPEND_MAGIC_KEY) { \
+		pr_err("[%s] Error! val = 0x%08x\n", DEV_NAME, val); \
+		return -1; \
+	} \
+	return _def##_GET(val); \
 }
 
 rtk_suspend_shm_func(wakeup_flags, suspend_wakeup_flag, WAKEUP_FLAGS);
@@ -85,1369 +97,1582 @@ rtk_suspend_shm_func(resume_state, acpu_resume_state, RESUME_STATE);
 rtk_suspend_shm_func(resume_data, acpu_resume_state, RESUME_DATA);
 rtk_suspend_shm_func(gpio_wakeup_en, gpio_wakeup_enable, GPIO_WAKEUP_EN);
 rtk_suspend_shm_func(gpio_wakeup_act, gpio_wakeup_activity, GPIO_WAKEUP_ACT);
-rtk_suspend_shm_func(gpio_output_change_en, gpio_output_change_enable, GPIO_OUTPUT_CHANGE_EN);
-rtk_suspend_shm_func(gpio_output_change_act, gpio_output_change_activity, GPIO_OUTPUT_CHANGE_ACT);
+rtk_suspend_shm_func(gpio_out_en, gpio_output_change_enable,
+	GPIO_OUTPUT_CHANGE_EN);
+rtk_suspend_shm_func(gpio_out_act, gpio_output_change_activity,
+	GPIO_OUTPUT_CHANGE_ACT);
 rtk_suspend_shm_func(gpio_wakeup_en2, gpio_wakeup_enable2, GPIO_WAKEUP_EN2);
-rtk_suspend_shm_func(gpio_wakeup_act2, gpio_wakeup_activity2, GPIO_WAKEUP_ACT2);
-rtk_suspend_shm_func(gpio_output_change_en2, gpio_output_change_enable2, GPIO_OUTPUT_CHANGE_EN2);
-rtk_suspend_shm_func(gpio_output_change_act2, gpio_output_change_activity2, GPIO_OUTPUT_CHANGE_ACT2);
-rtk_suspend_shm_func(timer_sec, audio_reciprocal_timer_sec, AUDIO_RECIPROCAL_TIMER);
+rtk_suspend_shm_func(gpio_wakeup_act2, gpio_wakeup_activity2,
+	GPIO_WAKEUP_ACT2);
+rtk_suspend_shm_func(gpio_out_en2, gpio_output_change_enable2,
+	GPIO_OUTPUT_CHANGE_EN2);
+rtk_suspend_shm_func(gpio_out_act2, gpio_output_change_activity2,
+	GPIO_OUTPUT_CHANGE_ACT2);
+rtk_suspend_shm_func(timer_sec, audio_reciprocal_timer_sec,
+	AUDIO_RECIPROCAL_TIMER);
 
-static int suspend_mode_stored = 0;
-
-/* rtk_set_suspend_mode - redirect 'sys/power/state' with suspend mode
- *   This is a hack function which will hijack the input buf form sysfs
- *   '/sys/power/state'.
- *
- *   input buf     state     suepend_mode
- *   standby    => standby   wfi
- *   sleep      => mem       ram
- *   off        => mem       coolboot
- *   mem*       => mem       ram
- *
- *   NOTE: if '/sys/kernel/suspend/mode' is set before '/sys/power/state' and
- *   '/sys/power/state' is mem, then suepend_mode will be the set value.
- *   After the suspend, the set value will be clear.
- *  
- *   Return value for '/sys/power/state' store function:
- *     Returns 0 to hint the function to set the buf to 'mem'.
- *     Returns -EINVAL to hint the function to do nothing.
- *     Returns -EPERM to hint the function that there is an internal error.
- */
-int rtk_set_suspend_mode(const char *buf, int n)
-{
-    const char *p;
-    int len;
-    int ret = 0;
-
-    p = memchr(buf, '\n', n);
-    len = p ? p - buf : n;
-
-    if (strncmp(buf, "standby", len) == 0) {
-        pr_info("[RTD129x_PM] GET state = standby\n");
-        pr_info("[RTD129x_PM] SET state = standby, suepend_mode = wfi\n");
-        suspend_mode = SUSPEND_TO_WFI;
-        ret = -EINVAL;
-    } else if (strncmp(buf, "sleep", len) == 0) {
-        pr_info("[RTD129x_PM] GET state = sleep\n");
-        pr_info("[RTD129x_PM] SET state = mem, suepend_mode = ram\n");
-        suspend_mode = SUSPEND_TO_RAM;
-    } else if (strncmp(buf, "off", len) == 0) {
-         pr_info("[RTD129x_PM] GET state = off\n");
-         pr_info("[RTD129x_PM] SET state = mem, suepend_mode = coolboot\n");
-        suspend_mode = SUSPEND_TO_COOLBOOT;
-    } else if (strncmp(buf, "mem", len) == 0) {
-        if (suspend_mode_stored) {
-            pr_info("[RTD129x_PM] GET state = mem, suepend_mode = %s\n", rtk_suspend_states[suspend_mode]);
-            pr_info("[RTD129x_PM] compatible mode: suepend_mode will be reset AFTER THIS SUSPEND\n");
-            suspend_mode_stored = 0;
-            return 0;
-        }
-
-        pr_info("[RTD129x_PM] GET state = mem\n");
-        pr_info("[RTD129x_PM] SET state = mem, suepend_mode = ram\n");
-        suspend_mode = SUSPEND_TO_RAM;
-    } else 
-        return -EINVAL;
-
-    suspend_mode_stored = 0;
-    return ret;
-}
 
 static void hexdump(char *note, unsigned char *buf, unsigned int len)
 {
-    printk(KERN_CRIT "%s\n", note);
-    print_hex_dump(KERN_CONT, "", DUMP_PREFIX_OFFSET, 16, 1, buf, len, false);
+	pr_crit("%s\n", note);
+	print_hex_dump(KERN_CONT, "", DUMP_PREFIX_OFFSET, 16, 1, buf, len,
+		false);
 }
 
 void acpu_set_flag(uint32_t flag)
 {
-    RTD1295_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
+	struct rtk_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
 
-    writel(__cpu_to_be32(SUSPEND_VERSION_MASK(suspend_version)), &(ipc->suspend_mask));
-    if (suspend_version == 1)
-        writel(__cpu_to_be32(flag), &(ipc->suspend_flag));
-    else
-        writel(__cpu_to_be32(flag | AUTHOR_MASK(AUTHOR_SCPU)), &(ipc->suspend_flag));
+	writel(__cpu_to_be32(SUSPEND_VERSION_MASK(suspend_version)),
+		&(ipc->suspend_mask));
+
+	if (suspend_version == 1)
+		writel(__cpu_to_be32(flag), &(ipc->suspend_flag));
+	else
+		writel(__cpu_to_be32(flag | AUTHOR_MASK(AUTHOR_SCPU)),
+			&(ipc->suspend_flag));
 }
 
 void notify_acpu(enum _notify_flag flag)
 {
-    printk(KERN_INFO "[RTD129x_PM] Notify ACPU, flag= %d\n", flag);
+	pr_info("[%s] Notify ACPU, flag= %d\n", DEV_NAME, flag);
 
-    switch (flag) {
-        case NOTIFY_SUSPEND_TO_RAM:
-        case NOTIFY_SUSPEND_TO_COOLBOOT:
-        case NOTIFY_SUSPEND_TO_WFI:
-            if (suspend_version == 1) {
-                acpu_set_flag(0x000018ff); //suspend
-                return;
-            }
-            break;
-        case NOTIFY_RESUME_PLATFORM:
-            if (suspend_version == 1) {
-                acpu_set_flag(0x00000000);
-                return;
-            }
-            break;
-        default:
-            break;
-    }
-    if (suspend_version == 1)
-        return;
-    acpu_set_flag(NOTIFY_MASK(flag));
+	switch (flag) {
+	case NOTIFY_SUSPEND_TO_RAM:
+	case NOTIFY_SUSPEND_TO_COOLBOOT:
+	case NOTIFY_SUSPEND_TO_WFI:
+		if (suspend_version == 1) {
+			acpu_set_flag(0x000018ff);
+			return;
+		}
+		break;
+	case NOTIFY_RESUME_PLATFORM:
+		if (suspend_version == 1) {
+			acpu_set_flag(0x00000000);
+			return;
+		}
+		break;
+	default:
+		break;
+	}
+
+	if (suspend_version == 1)
+		return;
+	acpu_set_flag(NOTIFY_MASK(flag));
 }
 
 int rtk_suspend_wakeup_acpu(void)
 {
-    printk(KERN_INFO "[RTD129x_PM] Wakeup ACPU.\n");
+	pr_info("[%s] Wakeup ACPU\n", DEV_NAME);
 
-    writel(0x00000000, RTK_SB2_BASE + 0x138);
-    __delay(1000);
-    writel(0x00000008, RTK_CRT_BASE + 0x328);
-    writel(0x0000ace7, RTK_CRT_BASE + 0x320);
-    writel(0x0000000c, RTK_CRT_BASE + 0x328);
-    __delay(1000);
-    return 0;
+	writel(0x00000000, RTK_SB2_BASE + 0x138);
+	__delay(1000);
+	writel(0x00000008, RTK_CRT_BASE + 0x328);
+	writel(0x0000ace7, RTK_CRT_BASE + 0x320);
+	writel(0x0000000c, RTK_CRT_BASE + 0x328);
+	__delay(1000);
+	return 0;
 }
 
 struct _memory_verified_handle {
-    unsigned char * memAddress;
-    size_t memByte;
+	unsigned char *memAddress;
+	size_t memByte;
 };
 
-typedef struct _memory_verified_handle * memory_verified_handle_t;
+struct _memory_verified_handle phys_wb_area[] = {
+	{(unsigned char *)0x0a000000, 0x20},
+	{(unsigned char *)0x0a001000, 0x20}
+};
 
 unsigned char memory_verified_datagen(int i)
 {
-    return (unsigned char) (i & 0xff);
+	return (unsigned char) (i & 0xff);
 }
 
-struct _memory_verified_handle * memory_verified_handle_create(size_t byte)
+struct _memory_verified_handle *memory_verified_handle_create(size_t byte)
 {
-    int i = 0;
+	int i = 0;
 
-    struct _memory_verified_handle * handle =
-        (struct _memory_verified_handle *) kmalloc(sizeof(struct _memory_verified_handle), GFP_KERNEL);
+	struct _memory_verified_handle *handle =
+		(struct _memory_verified_handle *)
+		kmalloc(sizeof(struct _memory_verified_handle), GFP_KERNEL);
 
-    if (!handle)
-        return NULL;
+	if (!handle)
+		return NULL;
 
-    /*
-     * > 32KB : vmalloc
-     * < 32KB : kmalloc
-     */
-    if (byte > 0x8000)
-        handle->memAddress = (char *) vmalloc(byte);
-    else
-        handle->memAddress = (char *) kmalloc(byte, GFP_KERNEL);
+	/*
+	 * > 32KB : vmalloc
+	 * < 32KB : kmalloc
+	 */
+	if (byte > 0x8000)
+		handle->memAddress = vmalloc(byte);
+	else
+		handle->memAddress = kmalloc(byte, GFP_KERNEL);
 
-    if (!handle->memAddress) {
-        kfree(handle);
-        return NULL;
-    }
+	if (!handle->memAddress) {
+		kfree(handle);
+		return NULL;
+	}
 
-    for (i=0; i<byte; i++)
-        handle->memAddress[i] = memory_verified_datagen(i);
+	for (i = 0; i < byte ; i++)
+		handle->memAddress[i] = memory_verified_datagen(i);
 
-    handle->memByte = byte;
+	handle->memByte = byte;
 
-    return handle;
+	return handle;
 }
 
-int memory_verified_release(struct _memory_verified_handle * handle)
+int memory_verified_release(struct _memory_verified_handle *handle)
 {
-    int ret = 0, i = 0;
-    if (!handle) {
-        printk(KERN_ERR "[RTD129x_PM] handle is NULL !\n");
-        return -1;
-    }
+	int ret = 0, i = 0;
+	unsigned char data;
 
-    if (!handle->memByte) {
-        ret = -2;
-        printk(KERN_INFO "[RTD129x_PM] handle %p (memByte = %ld, memAddress = 0x%08lx)\n",
-                (void *) handle, (long int) handle->memByte, (unsigned long) handle->memAddress);
-        if (handle->memAddress)
-            goto free1;
-        else
-            goto free0;
-    }
+	if (!handle) {
+		pr_err("[%s] handle is NULL !\n", DEV_NAME);
+		return -1;
+	}
 
-    for (i=0; i < handle->memByte; i++) {
-        unsigned char data = memory_verified_datagen(i);
-        if (handle->memAddress[i] != data) {
-            printk(KERN_INFO "[RTD129x_PM] handle %p memAddress[0x%x] => 0x%x != 0x%x (%ld bytes at 0x%08lx)\n",
-                    (void *) handle, i, handle->memAddress[i], data,
-                    (long int) handle->memByte, (unsigned long) handle->memAddress);
-            ret = -4;
-        }
-    }
+	if (!handle->memByte) {
+		ret = -2;
+		pr_info("[%s] handle %p ", DEV_NAME, (void *) handle);
+		pr_info("(memByte = %ld, memAddress = 0x%08lx)\n",
+			(long int) handle->memByte,
+			(unsigned long) handle->memAddress);
 
-    if (ret == -4) {
-        printk(KERN_ERR "[RTD129x_PM] memory phyAddt 0x%08llx\n", __pa(handle->memAddress));
-        hexdump("[RTD129x_PM] memory verified error\n", handle->memAddress, handle->memByte);
-    }
+		if (handle->memAddress)
+			goto free1;
+		else
+			goto free0;
+	}
+
+	for (i = 0 ; i < handle->memByte ; i++) {
+		data = memory_verified_datagen(i);
+
+		if (handle->memAddress[i] != data) {
+			pr_info("[%s] handle %p memAddress[0x%x]",
+				DEV_NAME, (void *) handle, i);
+			pr_info("=> 0x%x != 0x%x (%ld bytes at 0x%08lx)\n",
+				handle->memAddress[i], data,
+				(long int) handle->memByte,
+				(unsigned long) handle->memAddress);
+			ret = -4;
+		}
+	}
+
+	if (ret == -4) {
+		pr_err("[%s] memory phyAddt 0x%08llx\n",
+			DEV_NAME, __pa(handle->memAddress));
+		hexdump("[%s] memory verified error\n",
+			handle->memAddress, handle->memByte);
+	}
 
 free1:
-    kfree(handle->memAddress);
+	kfree(handle->memAddress);
 free0:
-    kfree(handle);
+	kfree(handle);
 
-    return ret;
+	return ret;
+}
+
+struct _memory_verified_handle *memory_writeback_handle_create(
+	struct _memory_verified_handle *phys_area)
+{
+	void *tmp_addr;
+
+	struct _memory_verified_handle *handle =
+		(struct _memory_verified_handle *)
+		kmalloc(sizeof(struct _memory_verified_handle), GFP_KERNEL);
+
+	if (!handle)
+		goto out;
+
+	handle->memAddress = kmalloc(phys_area->memByte, GFP_KERNEL);
+
+	if (!handle->memAddress) {
+		kfree(handle);
+		handle = NULL;
+		goto out;
+	}
+
+	handle->memByte = phys_area->memByte;
+	tmp_addr = phys_to_virt((phys_addr_t) phys_area->memAddress);
+	hexdump("[RTD129x_PM] Before write back dump:",
+		(unsigned char *) tmp_addr, phys_area->memByte);
+	memcpy(handle->memAddress, tmp_addr, phys_area->memByte);
+	__flush_dcache_area(handle->memAddress, phys_area->memByte);
+out:
+	return handle;
+}
+
+int memory_writeback_release(struct _memory_verified_handle *handle,
+	struct _memory_verified_handle *phys_area)
+{
+	int ret = 0;
+	void *tmp_addr;
+
+	if (!handle) {
+		ret = -1;
+		goto out;
+	}
+
+	if (!handle->memAddress) {
+		ret = -1;
+		goto free_out;
+	}
+
+	tmp_addr = phys_to_virt((phys_addr_t)phys_area->memAddress);
+	hexdump("[RTD129x_PM] Resume back dump:**********************",
+		(unsigned char *) tmp_addr, phys_area->memByte);
+	memcpy(tmp_addr, handle->memAddress, handle->memByte);
+	__flush_dcache_area(tmp_addr, phys_area->memByte);
+	hexdump("[RTD129x_PM] After write back dump:",
+		(unsigned char *) tmp_addr, phys_area->memByte);
+
+	kfree(handle->memAddress);
+
+free_out:
+	kfree(handle);
+out:
+	return ret;
 }
 
 int rtk_suspend_valid(suspend_state_t state)
 {
-    return state == PM_SUSPEND_MEM || state == PM_SUSPEND_STANDBY;
+	return state == PM_SUSPEND_MEM || state == PM_SUSPEND_STANDBY;
 }
 
 static int notrace rtk_iso_suspend(unsigned long param)
 {
-    enum _suspend_mode mode = (enum _suspend_mode)param;
+	enum _suspend_mode mode = (enum _suspend_mode)param;
+	int max_count = 100;
+	int i = 0;
 
-    printk(KERN_INFO "[RTD129x_PM] Flush Cache ...\n");
-    flush_cache_all();
+	pr_info("[%s] Flush Cache ...\n", DEV_NAME);
+
+	flush_cache_all();
 
 #ifdef CONFIG_SMP
-    dsb(ishst);
-    sev();
+	dsb(ishst);
+	sev();
 #endif
 
-    printk(KERN_INFO "[RTD129x_PM] Ready to Suspend ! (mode:%d)", mode);
-    if (mode == SUSPEND_TO_COOLBOOT)
-        notify_acpu(NOTIFY_SUSPEND_TO_COOLBOOT);
-    else if (mode == SUSPEND_TO_RAM){
-        notify_acpu(NOTIFY_SUSPEND_TO_RAM);
-    }else {
-        printk(KERN_ERR "[RTD129x_PM] Suspend Mode Not Support : %d\n" ,mode);
-        BUG();
-    }
+	pr_info("[%s] Ready to Suspend ! (mode:%d)", DEV_NAME, mode);
 
-    {
-        int MaxCounter = 100,i = 0;
-        for (i = MaxCounter; i > 0 ; i--) {
-            __delay(10000000);
-        }
-    }
+	if (mode == SUSPEND_TO_COOLBOOT)
+		notify_acpu(NOTIFY_SUSPEND_TO_COOLBOOT);
+	else if (mode == SUSPEND_TO_RAM) {
+		notify_acpu(NOTIFY_SUSPEND_TO_RAM);
+	} else {
+		pr_err("[%s] Suspend Mode Not Support : %d\n", DEV_NAME, mode);
+		BUG();
+	}
 
-    BUG();
+	for (i = max_count; i > 0 ; i--)
+		__delay(10000000);
 
-    return  -EINVAL;
+	BUG();
+
+	return  -EINVAL;
 }
 
 enum irq_report_state {
-    IRQ_REPORT_PREPARE,
-    IRQ_REPORT_PRINT,
+	IRQ_REPORT_PREPARE,
+	IRQ_REPORT_PRINT,
 };
 
 static void rtk_suspend_irq_report(enum irq_report_state state)
 {
-    int i;
-    static unsigned int data [32];
-    void __iomem * interrupt_state = RTK_GIC_DIST_BASE + 0x200;
+	int i;
+	int j;
+	int irq;
+	unsigned int mask;
+	unsigned int temp;
+	static unsigned int data[32];
+	void __iomem *irq_state = RTK_GIC_DIST_BASE + 0x200;
 
-    switch (state) {
-        case IRQ_REPORT_PREPARE:
-            for (i = 0 ; i < 32 ; i++)
-                data[i] = *(volatile unsigned int *)(interrupt_state + (i * 4));
-            break;
-        case IRQ_REPORT_PRINT:
-            for (i = 0 ; i < 32 ; i++) {
-                unsigned int temp =
-                    *(volatile unsigned int *)(interrupt_state + (i * 4));
-                if (temp != data[i]) {
-                    int j, irq = i * 32;
-                    printk(KERN_WARNING "[RTD129x_PM] Interrupt Addr:0x%08lx State: 0x%08x => 0x%08x\n",
-                            (unsigned long)(interrupt_state + (i*4)),
-                            data[i], temp);
-                    for (j = 0 ; j < 32 ; j++) {
-                        unsigned int mask = 0x1U << j;
-                        if (mask & temp)
-                            printk(KERN_WARNING "[RTD129x_PM] IRQ: %d\n", (irq+j));
-                    }
-                }
-            }
-            break;
-        default:
-            printk(KERN_ERR "[RTD129x_PM] Unknow CMD! %d\n", state);
-    }
+	switch (state) {
+	case IRQ_REPORT_PREPARE:
+		for (i = 0 ; i < 32 ; i++)
+			data[i] = *(unsigned int *)
+				(irq_state + (i * 4));
+		break;
+	case IRQ_REPORT_PRINT:
+		for (i = 0 ; i < 32 ; i++) {
+			irq = i * 32;
+			temp = *(unsigned int *)(irq_state + (i * 4));
+			if (temp != data[i]) {
+				pr_warn("[%s] Interrupt Addr:0x%08lx State: 0x%08x",
+					DEV_NAME,
+					(unsigned long)(irq_state + (i * 4)),
+					data[i]);
+				pr_warn(" => 0x%08x\n", temp);
+
+				for (j = 0 ; j < 32 ; j++) {
+					mask = 0x1U << j;
+					if (mask & temp)
+						pr_warn("[%s] IRQ: %d\n",
+							DEV_NAME, (irq + j));
+				}
+			}
+		}
+		break;
+	default:
+		pr_err("[%s] Unknow CMD! %d\n", DEV_NAME, state);
+	}
 }
 
 static int rtk_suspend_to_wfi(void)
 {
-    void __iomem *reg_sel = ioremap(SYS_GROUP1_CK_SEL, 0x4);
-    void __iomem *reg_pll = ioremap(SYS_PLL_SCPU1, 0x4);
+	void __iomem *reg_sel = ioremap(SYS_GROUP1_CK_SEL, 0x4);
+	void __iomem *reg_pll = ioremap(SYS_PLL_SCPU1, 0x4);
 
-    notify_acpu(NOTIFY_SUSPEND_TO_WFI);
+	notify_acpu(NOTIFY_SUSPEND_TO_WFI);
 
-    rtk_suspend_irq_report(IRQ_REPORT_PREPARE);
+	rtk_suspend_irq_report(IRQ_REPORT_PREPARE);
 
-    /* switch clk_scpu to osc (27 MHz) */
-    printk(KERN_INFO "[RTD129x_PM] switch scpu_clk to osc\n");
-    writel(readl(reg_sel) | 0x4, reg_sel);
+	/* switch clk_scpu to osc (27 MHz) */
+	pr_info("[%s] switch scpu_clk to osc\n", DEV_NAME);
+	writel(readl(reg_sel) | 0x4, reg_sel);
 
-    /* disable pll_scpu*/
-    printk(KERN_INFO "[RTD129x_PM] disable scpu_pll\n");
-    writel(0x4, reg_pll);
+	/* disable pll_scpu*/
+	pr_info("[%s] disable scpu_pll\n", DEV_NAME);
+	writel(0x4, reg_pll);
 
-    printk(KERN_INFO "[RTD129x_PM] wait for interrupt.\n");
+	pr_info("[%s] wait for interrupt\n", DEV_NAME);
 
-    asm("WFI");
+	asm("WFI");
 
-    /* enable pll_scpu, delay to wait it stable */
-    printk(KERN_INFO "[RTD129x_PM] enable scpu_pll\n");
-    writel(0x3, reg_pll);
-    __delay(100);
+	/* enable pll_scpu, delay to wait it stable */
+	pr_info("[%s] enable scpu_pll\n", DEV_NAME);
+	writel(0x3, reg_pll);
+	__delay(100);
 
-    /* NOTE: ACPU also set SYS_GROUP1_CK_SEL later */
-    printk(KERN_INFO "[RTD129x_PM] switch scpu_clk to scpu_pll\n");
-    writel(readl(reg_sel) & ~0x4, reg_sel);
+	/* NOTE: ACPU also set SYS_GROUP1_CK_SEL later */
+	pr_info("[%s] switch scpu_clk to scpu_pll\n", DEV_NAME);
+	writel(readl(reg_sel) & ~0x4, reg_sel);
 
-    iounmap(reg_pll);
-    iounmap(reg_sel);
+	iounmap(reg_pll);
+	iounmap(reg_sel);
 
-    rtk_suspend_irq_report(IRQ_REPORT_PRINT);
+	rtk_suspend_irq_report(IRQ_REPORT_PRINT);
 
-    return 0;
+	return 0;
 }
 
 
 static int rtk_suspend_to_ram(void)
 {
-    const int  MEM_VERIFIED_CNT = 20;
-    int ret = 0, i = 0;
-    memory_verified_handle_t mem_vhandle[MEM_VERIFIED_CNT];
-    void __iomem * resumeAddr = RTK_ISO_BASE + 0x54;
-    unsigned int ISODummy1Data = readl(resumeAddr);
+	const int  MEM_VERIFIED_CNT = 20;
+	int ret = 0;
+	int i = 0;
+	int size_tmp1 = 0;
+	int size_tmp2 = 0;
+	int size_tmp3 = 0;
+	struct _memory_verified_handle *mem_vhandle[MEM_VERIFIED_CNT];
+	struct _memory_verified_handle **mem_wbhandle;
+	void __iomem *resumeAddr = RTK_ISO_BASE + 0x54;
+	unsigned int ISODummy1Data = readl(resumeAddr);
 
-    printk(KERN_INFO "[RTD129x_PM] CPU Resume vaddr: 0x%08lx paddr: 0x%08lx\n", (unsigned long)cpu_resume, (unsigned long)__pa(cpu_resume));
+	pr_info("[%s] CPU Resume vaddr: 0x%08lx paddr: 0x%08lx\n",
+		DEV_NAME, (unsigned long)cpu_resume,
+		(unsigned long)__pa(cpu_resume));
 
-    hexdump("[RTD129x_PM] CPU Resume Entry Dump:", (unsigned char *) cpu_resume, 0x100);
+	hexdump("CPU Resume Entry Dump:",
+		(unsigned char *) cpu_resume, 0x100);
 
-	if(RTK_CHIP_VERSION >= RTD129x_CHIP_REVISION_B00) {
-	    //From B00, start to support TEE suspend/resume 
-	    //B00 romcode: core0 resume jump address is fixed to FSBL
-	    asm volatile("isb" : : : "cc"); 
-	    asm volatile("mov x1, %0" : : "r" (__pa(cpu_resume)) : "cc");
-	    asm volatile("ldr x0, =0x8400ff04" : : : "cc"); //RTK_SET_KERNEL_REUMSE_ENTRY
-	    asm volatile("isb" : : : "cc"); 
-	    asm volatile("smc #0" : : : "cc"); 
-	    asm volatile("isb" : : : "cc"); 
+	/*
+	 * From B00, start to support TEE suspend/resume
+	 * B00 romcode: core0 resume jump address is fixed to FSBL.
+	 */
+	if (RTD129x_CHIP_REVISION_B00 <= RTK_CHIP_VERSION) {
+		asm volatile("isb" : : : "cc");
+		asm volatile("mov x1, %0" : : "r" (__pa(cpu_resume)) : "cc");
+		/* RTK_SET_KERNEL_REUMSE_ENTRY */
+		asm volatile("ldr x0, =0x8400ff04" : : : "cc");
+		asm volatile("isb" : : : "cc");
+		asm volatile("smc #0" : : : "cc");
+		asm volatile("isb" : : : "cc");
+	} else {
+		writel(__pa(cpu_resume), resumeAddr);
 	}
-	else{
-    	writel(__pa(cpu_resume), resumeAddr);
+
+	BUG_ON(!irqs_disabled());
+
+	for (i = 0 ; i < MEM_VERIFIED_CNT ; i++)
+		mem_vhandle[i] = memory_verified_handle_create(0x4000);
+
+	size_tmp1 = sizeof(phys_wb_area);
+	size_tmp2 = sizeof(struct _memory_verified_handle);
+	size_tmp3 = sizeof(struct _memory_verified_handle *);
+	mem_wbhandle = kmalloc(size_tmp1 / size_tmp2 * size_tmp3, GFP_KERNEL);
+	if (mem_wbhandle) {
+		for (i = 0 ; i < (size_tmp1 / size_tmp2) ; i++)
+			mem_wbhandle[i] = memory_writeback_handle_create(
+					&phys_wb_area[i]);
 	}
 
-    BUG_ON(!irqs_disabled());
+	ret = cpu_suspend((unsigned long)SUSPEND_TO_RAM, rtk_iso_suspend);
 
-    for (i=0; i<MEM_VERIFIED_CNT; i++)
-        mem_vhandle[i] = memory_verified_handle_create(0x4000);
+	if (ret)
+		return ret;
 
-    ret = cpu_suspend((unsigned long)SUSPEND_TO_RAM, rtk_iso_suspend);
+	/* Restore iso dummy data */
+	writel(ISODummy1Data, resumeAddr);
 
-    if (ret)
-        return ret;
+	writel(readl(RTK_ISO_BASE + 0x0418) | BIT(0), RTK_ISO_BASE + 0x0418);
+	writel(readl(RTK_ISO_BASE + 0x0410) & ~BIT(10), RTK_ISO_BASE + 0x0410);
 
-    /* Restore iso dummy data */
-    writel(ISODummy1Data, resumeAddr);
+	rtk_suspend_irq_report(IRQ_REPORT_PRINT);
 
-    writel(readl(RTK_ISO_BASE + 0x0418) | BIT(0), RTK_ISO_BASE + 0x0418);
-    writel(readl(RTK_ISO_BASE + 0x0410) & ~BIT(10), RTK_ISO_BASE + 0x0410);
+	rtk_suspend_wakeup_acpu();
 
-    rtk_suspend_irq_report(IRQ_REPORT_PRINT);
+	flush_cache_all();
 
-    rtk_suspend_wakeup_acpu();
+	mdelay(5);
 
-    flush_cache_all();
-
-    mdelay(5);
-
-    printk(KERN_INFO "[RTD129x_PM] Resume Memory Verifying ... State 0\n");
-    for (i=0; i<MEM_VERIFIED_CNT; i++)
-        memory_verified_release(mem_vhandle[i]);
+	pr_info("[%s] Resume Memory Verifying ... State 0\n", DEV_NAME);
+	for (i = 0 ; i < MEM_VERIFIED_CNT ; i++)
+		memory_verified_release(mem_vhandle[i]);
 
 
-    printk(KERN_INFO "[RTD129x_PM] Resume Memory Verifying ... State 1\n");
-    for (i=0; i<MEM_VERIFIED_CNT; i++)
-        mem_vhandle[i] = memory_verified_handle_create(0x4000);
+	pr_info("[%s] Resume Memory Verifying ... State 1\n", DEV_NAME);
+	for (i = 0 ; i < MEM_VERIFIED_CNT; i++)
+		mem_vhandle[i] = memory_verified_handle_create(0x4000);
 
-    for (i=0; i<MEM_VERIFIED_CNT; i++)
-        memory_verified_release(mem_vhandle[i]);
+	for (i = 0; i < MEM_VERIFIED_CNT; i++)
+		memory_verified_release(mem_vhandle[i]);
+
+	if (mem_wbhandle) {
+		for (i = 0 ; i < (size_tmp1 / size_tmp2) ; i++)
+			memory_writeback_release(
+				mem_wbhandle[i], &phys_wb_area[i]);
+		kfree(mem_wbhandle);
+	}
 
 #ifdef CONFIG_SMP
-    dsb(ishst);
-    sev();
+	dsb(ishst);
+	sev();
 #endif
 
-    return ret;
+	return ret;
 }
 
 static int rtk_suspend_to_coolboot(void)
 {
-    int ret = 0;
-   ret = cpu_suspend((unsigned long)SUSPEND_TO_COOLBOOT, rtk_iso_suspend);
-    return ret;
+	int ret = 0;
+
+	ret = cpu_suspend((unsigned long)SUSPEND_TO_COOLBOOT, rtk_iso_suspend);
+	return ret;
 }
 
-void rtk_suspend_gpio_output_change_suspend(void)
+void rtk_suspend_gpip_output_change_suspend(void)
 {
-    int i = 0;
-    unsigned int val;
+	int i = 0;
+	unsigned int val;
 	unsigned int mask;
+	int tmp;
 
-    val = rtk_suspend_gpio_output_change_en_get();
-	if (val == -1U)
-		val = 0;
+	/* IGPIO0 ~ IGPIO23 */
+	val = rtk_suspend_gpio_out_en_get();
+	for (i = 0 ; i < GPIO_OUTPUT_CHANGE_EN_BITS ; i++) {
+		mask = 0x1U << i;
 
-    for (i = 0 ; i < GPIO_OUTPUT_CHANGE_EN_BITS ; i++) {// IGPIO0 ~ IGPIO23
-        mask = 0x1U << i;
+		if (!(val & mask))
+			continue;
 
-        if (!(val & mask))
-            continue;
+		pr_info("[%s] gpio:%d set ouput =>  %s\n",
+			DEV_NAME, i + SUSPEND_ISO_GPIO_BASE,
+			(rtk_suspend_gpio_out_act_get() & mask) ?
+			"HIGH" : "LOW");
+		tmp = (rtk_suspend_gpio_out_act_get() & mask) ? 1 : 0;
+		gpio_direction_output(i + SUSPEND_ISO_GPIO_BASE, tmp);
+	}
 
-        printk(KERN_INFO "[RTD129x_PM] gpio:%d set ouput =>  %s\n", i + SUSPEND_ISO_GPIO_BASE,
-                (rtk_suspend_gpio_output_change_act_get() & mask) ? "HIGH" : "LOW");
+	/* IGPIO24 ~ IGPIO34 */
+	val = rtk_suspend_gpio_out_en2_get();
+	i = GPIO_OUTPUT_CHANGE_EN_BITS;
+	for (; i < SUSPEND_ISO_GPIO_SIZE ; i++) {
+		mask = 0x1U << (i-GPIO_OUTPUT_CHANGE_EN_BITS);
 
-        gpio_direction_output(i+SUSPEND_ISO_GPIO_BASE,
-                (rtk_suspend_gpio_output_change_act_get() & mask) ? 1 : 0 );
-    }
+		if (!(val & mask))
+			continue;
 
-	val = rtk_suspend_gpio_output_change_en2_get();
-	if (val == -1U)
-		val = 0;
-
-	for (i = GPIO_OUTPUT_CHANGE_EN_BITS ; i < SUSPEND_ISO_GPIO_SIZE ; i++) {// IGPIO24 ~ IGPIO34
-        mask = 0x1U << (i-GPIO_OUTPUT_CHANGE_EN_BITS);
-
-        if (!(val & mask))
-            continue;
-
-        printk(KERN_INFO "[RTD129x_PM] gpio:%d set ouput =>  %s\n", i + SUSPEND_ISO_GPIO_BASE,
-                (rtk_suspend_gpio_output_change_act2_get() & mask) ? "HIGH" : "LOW");
-
-        gpio_direction_output(i+SUSPEND_ISO_GPIO_BASE,
-                (rtk_suspend_gpio_output_change_act2_get() & mask) ? 1 : 0 );
-    }
+		pr_info("[%s] gpio:%d set ouput =>  %s\n",
+			DEV_NAME, i + SUSPEND_ISO_GPIO_BASE,
+			(rtk_suspend_gpio_out_act2_get() & mask) ?
+			"HIGH" : "LOW");
+		tmp = (rtk_suspend_gpio_out_act2_get() & mask) ? 1 : 0;
+		gpio_direction_output(i+SUSPEND_ISO_GPIO_BASE, tmp);
+	}
 }
 
-void rtk_suspend_gpio_output_change_resume(void)
+void rtk_suspend_gpip_output_change_resume(void)
 {
-    int i = 0;
-    unsigned int val;
-    unsigned int mask;
+	int i = 0;
+	unsigned int val;
+	unsigned int mask;
+	int tmp;
 
-    val = rtk_suspend_gpio_output_change_en_get();
-    if (val == -1U)
-		val = 0;
+	/* IGPIO0 ~ IGPIO23 */
+	val = rtk_suspend_gpio_out_en_get();
+	for (i = 0 ; i < GPIO_OUTPUT_CHANGE_EN_BITS ; i++) {
+		mask = 0x1U << i;
 
-    for (i = 0 ; i < GPIO_OUTPUT_CHANGE_EN_BITS ; i++) {// IGPIO0 ~ IGPIO23
-        mask = 0x1U << i;
+		if (!(val & mask))
+			continue;
 
-        if (!(val & mask))
-            continue;
+		pr_info("[%s] gpio:%d set ouput =>  %s\n",
+			DEV_NAME, i + SUSPEND_ISO_GPIO_BASE,
+			(rtk_suspend_gpio_out_act_get() & mask) ?
+			"LOW" : "HIGH");
+		tmp = (rtk_suspend_gpio_out_act_get() & mask) ? 0 : 1;
+		gpio_direction_output(i + SUSPEND_ISO_GPIO_BASE, tmp);
+	}
 
-        printk(KERN_INFO "[RTD129x_PM] gpio:%d set ouput =>  %s\n", i + SUSPEND_ISO_GPIO_BASE,
-                (rtk_suspend_gpio_output_change_act_get() & mask) ? "LOW" : "HIGH");
+	/* IGPIO24 ~ IGPIO34 */
+	val = rtk_suspend_gpio_out_en2_get();
+	i = GPIO_OUTPUT_CHANGE_EN_BITS;
+	for (; i < SUSPEND_ISO_GPIO_SIZE ; i++) {
+		mask = 0x1U << (i-GPIO_OUTPUT_CHANGE_EN_BITS);
 
-        gpio_direction_output(i+SUSPEND_ISO_GPIO_BASE,
-                (rtk_suspend_gpio_output_change_act_get() & mask) ? 0 : 1 );
-    }
+		if (!(val & mask))
+			continue;
 
-	val = rtk_suspend_gpio_output_change_en2_get();
-	if (val == -1U)
-		val = 0;
+		pr_info("[%s] gpio:%d set ouput =>  %s\n",
+			DEV_NAME, i + SUSPEND_ISO_GPIO_BASE,
+			(rtk_suspend_gpio_out_act2_get() & mask) ?
+			"LOW" : "HIGH");
+		tmp = (rtk_suspend_gpio_out_act2_get() & mask) ? 0 : 1;
+		gpio_direction_output(i + SUSPEND_ISO_GPIO_BASE, tmp);
+	}
+}
 
-	for (i = GPIO_OUTPUT_CHANGE_EN_BITS ; i < SUSPEND_ISO_GPIO_SIZE ; i++) {// IGPIO24 ~ IGPIO34
-        mask = 0x1U << (i-GPIO_OUTPUT_CHANGE_EN_BITS);
+static void rtk_suspend_cpu_pwr_down(void) {
+	unsigned int cpu = 1;
 
-        if (!(val & mask))
-            continue;
-
-        printk(KERN_INFO "[RTD129x_PM] gpio:%d set ouput =>  %s\n", i + SUSPEND_ISO_GPIO_BASE,
-                (rtk_suspend_gpio_output_change_act2_get() & mask) ? "LOW" : "HIGH");
-
-        gpio_direction_output(i+SUSPEND_ISO_GPIO_BASE,
-                (rtk_suspend_gpio_output_change_act2_get() & mask) ? 0 : 1 );
-    }
-
+	for (cpu = 1 ; cpu < NR_CPUS ; cpu++) {
+		rtk_cpu_power_down(cpu);
+	}
 }
 
 static int rtk_suspend_enter(suspend_state_t suspend_state)
 {
-    int ret = 0;
+	int ret = 0;
 
-    printk(KERN_INFO "[RTD129x_PM] Platform Suspend Enter ...\n");
+	pr_info("[%s] Platform Suspend Enter ...\n", DEV_NAME);
 
-    if (!rtk_suspend_valid(suspend_state)) {
-        printk(KERN_ERR "[RTD129x_PM] suspend_state:%d not support !\n", (int) suspend_state);
-        return  -EINVAL;
-    }
+	rtk_suspend_cpu_pwr_down();
 
-    switch(suspend_state) {
-        case PM_SUSPEND_STANDBY:
-            if (suspend_mode == SUSPEND_TO_WFI)
-                 ret = rtk_suspend_to_wfi();
+	if (!rtk_suspend_valid(suspend_state)) {
+		pr_err("[%s] suspend_state:%d not support !\n",
+			DEV_NAME, (int) suspend_state);
+		return  -EINVAL;
+	}
 
-            suspend_context++;
+	switch (suspend_state) {
+	case PM_SUSPEND_STANDBY:
+		ret = rtk_suspend_to_wfi();
 
-            printk(KERN_INFO "[RTD129x_PM] Platform Resume ...\n");
-            notify_acpu(NOTIFY_RESUME_PLATFORM);
-            break;
-        case PM_SUSPEND_MEM:
-			if(pwm_used)
-				pwm_enable(pwm);
+		suspend_context++;
 
-			rtk_suspend_gpio_output_change_suspend();
+		pr_info("[%s] Platform Resume ...\n", DEV_NAME);
+		notify_acpu(NOTIFY_RESUME_PLATFORM);
+		break;
+	case PM_SUSPEND_MEM:
+		rtk_suspend_gpip_output_change_suspend();
 
-			printk(KERN_INFO "[RTD129x_PM] rtk suspend_mode = %d\n", suspend_mode);
+		ret = rtk_suspend_to_ram();
 
-            if (suspend_mode == SUSPEND_TO_WFI)
-                ret = rtk_suspend_to_wfi();
-            else if (suspend_mode == SUSPEND_TO_COOLBOOT)
-                ret = rtk_suspend_to_coolboot();
-            else if (suspend_mode == SUSPEND_TO_RAM)
-                ret = rtk_suspend_to_ram();
-            else
-                BUG();
+		suspend_context++;
 
-            suspend_context++;
+		if (ret) {
+			pr_err("[%s] ERROR ! to suspend! (%d)\n",
+				DEV_NAME, ret);
+			BUG();
+			break;
+		}
 
-            if (ret) {
-                printk(KERN_ERR "[RTD129x_PM] ERROR ! to suspend! (%d)\n", ret);
-                BUG();
-                break;
-            }
+		pr_info("[%s] Platform Resume ...\n", DEV_NAME);
 
-            printk(KERN_INFO "[RTD129x_PM] Platform Resume ...\n");
-            notify_acpu(NOTIFY_RESUME_PLATFORM);
+		notify_acpu(NOTIFY_RESUME_PLATFORM);
+		rtk_suspend_gpip_output_change_resume();
 
-			rtk_suspend_gpio_output_change_resume();
+		break;
+	default:
+		ret = -EINVAL;
+		break;
+	}
 
-			if(pwm_used)
-				pwm_disable(pwm);
-
-            break;
-        default:
-            ret = -EINVAL;
-            break;
-    }
-
-    return  ret;
+	return  ret;
 }
 
 static int rtk_suspend_begin(suspend_state_t suspend_state)
 {
-    printk(KERN_INFO "[RTD129x_PM] Suspend Begin\n");
+	pr_info("[%s] Suspend Begin\n", DEV_NAME);
 
-    if (!rtk_suspend_valid(suspend_state)) {
-        printk(KERN_ERR "[RTD129x_PM] suspend_state:%d not Support!\n",(int) suspend_state);
-        return  -EINVAL;
-    }
-
-	pwm = devm_of_pwm_get(&pdev_locad->dev, pdev_locad->dev.of_node, NULL);
-	if (IS_ERR(pwm)) {
-		printk(KERN_ERR "[RTD129x_PM] Can't get pwm pin (21)\n");
-		pwm_used = 0;
-	}
-	else {
-		printk(KERN_ERR "[RTD129x_PM] get pwm pin (21)\n");
-		pwm_used = 1;
+	if (!rtk_suspend_valid(suspend_state)) {
+		pr_err("[%s] suspend_state:%d not Support!\n",
+			DEV_NAME, (int) suspend_state);
+		return -EINVAL;
 	}
 
-    switch(suspend_state) {
-        case PM_SUSPEND_STANDBY:
-            cpu_idle_poll_ctrl(true);
-            break;
-        case PM_SUSPEND_MEM:
-            cpu_idle_poll_ctrl(true);
-            break;
-        default:
-            return  -EINVAL;
-    }
-    return 0;
+	switch (suspend_state) {
+	case PM_SUSPEND_STANDBY:
+		cpu_idle_poll_ctrl(true);
+		break;
+	case PM_SUSPEND_MEM:
+		cpu_idle_poll_ctrl(true);
+		break;
+	default:
+		return  -EINVAL;
+	}
+
+	return 0;
 }
 
 static void rtk_suspend_end(void)
 {
-    printk(KERN_INFO "[RTD129x_PM] Suspend End\n");
+	pr_info("[%s] Suspend End\n", DEV_NAME);
 
-	if(pwm_used)
-		devm_pwm_put(&pdev_locad->dev, pwm);
-
-    notify_acpu(NOTIFY_RESUME_END);
-    cpu_idle_poll_ctrl(false);
+	notify_acpu(NOTIFY_RESUME_END);
+	cpu_idle_poll_ctrl(false);
 }
 
-struct platform_suspend_ops rtk_suspend_ops = {
-    .begin = rtk_suspend_begin,
-    .end = rtk_suspend_end,
-    .enter = rtk_suspend_enter,
-    .valid = rtk_suspend_valid,
+const struct platform_suspend_ops rtk_suspend_ops = {
+	.begin = rtk_suspend_begin,
+	.end = rtk_suspend_end,
+	.enter = rtk_suspend_enter,
+	.valid = rtk_suspend_valid,
 };
-
-void (*rtk_do_poweroff)(void);
 
 static void rtk_poweroff(void)
 {
-    printk(KERN_INFO "[RTD129x_PM] Power off\n");
+	pr_info("[%s] Power off\n", DEV_NAME);
 
-    if (rtk_do_poweroff) {
-        rtk_do_poweroff();
-    }
+	rtk_suspend_to_coolboot();
 
-    rtk_suspend_to_coolboot();
-
-    return;
+	return;
 };
 
-static int rtk_pm_probe(struct platform_device *pdev)
+static void rtk_gpio_init_wu(struct device_node *nd)
 {
-    struct device_node *p_suspend_nd = pdev->dev.of_node;
-    struct device_node *p_gic_nd = NULL;
-    struct device_node *p_cpu_wrapper_nd = NULL;
+	const u32 *prop_en;
+	const u32 *prop_act;
+	int wu_gpio_en = 0;
+	int wu_gpio_act = 0;
+	int wu_gpio_list = 0;
+	int en;
+	int act;
+	int wu_gpio;
+	int gpio_iso_num;
+	int tmp;
+	unsigned int val;
+	int i = 0;
 
-    pdev_locad = pdev;
+	wu_gpio_list = of_gpio_named_count(nd, "wakeup-gpio-list");
+	prop_en = of_get_property(nd, "wakeup-gpio-enable", &wu_gpio_en);
+	prop_act = of_get_property(nd, "wakeup-gpio-activity", &wu_gpio_act);
+	wu_gpio_en  /= sizeof(u32);
+	wu_gpio_act /= sizeof(u32);
 
-    acpu_set_flag(0x00000000);
-    rtk_suspend_wakeup_flags_set(0);
-    rtk_suspend_resume_state_set(RESUME_NONE);
-    rtk_suspend_resume_data_set(0);
-    rtk_suspend_gpio_wakeup_en_set(0);
-    rtk_suspend_gpio_wakeup_act_set(0);
-    rtk_suspend_gpio_output_change_en_set(0);
-    rtk_suspend_gpio_output_change_act_set(0);
-    rtk_suspend_gpio_wakeup_en2_set(0);
-    rtk_suspend_gpio_wakeup_act2_set(0);
-    rtk_suspend_gpio_output_change_en2_set(0);
-    rtk_suspend_gpio_output_change_act2_set(0);
-    rtk_suspend_timer_sec_set(0);
+	pr_info("[%s] wakeup-gpio Cnt: en(%d) act(%d) list(%d)\n",
+		DEV_NAME, wu_gpio_en, wu_gpio_act, wu_gpio_list);
 
-    printk(KERN_INFO "[RTD129x_PM] Initial RTD129x Power Management Driver.\n");
+	if (wu_gpio_en != 0 && (wu_gpio_en == wu_gpio_act)
+		&& (wu_gpio_act == wu_gpio_list)) {
 
-    p_gic_nd = of_find_compatible_node(NULL, NULL, "arm,cortex-a15-gic");
-    p_cpu_wrapper_nd = of_find_compatible_node(NULL, NULL, "Realtek,rtk-scpu_wrapper");
+		for (i = 0 ; i < wu_gpio_list ; i++) {
+			en  = of_read_number(prop_en, 1 + i);
+			act = of_read_number(prop_act, 1 + i);
+			wu_gpio = of_get_named_gpio(nd, "wakeup-gpio-list", i);
+			gpio_iso_num = wu_gpio - SUSPEND_ISO_GPIO_BASE;
 
-    RTK_CPU_WRAPPER_BASE = of_iomap(p_cpu_wrapper_nd, 0);
-    RTK_GIC_DIST_BASE = of_iomap(p_gic_nd, 0);
-    RTK_CRT_BASE = of_iomap(p_suspend_nd, 0);
-    RTK_AIO_BASE = of_iomap(p_suspend_nd, 1);
-    RTK_ISO_BASE = of_iomap(p_suspend_nd, 2);
-    RTK_TVE_BASE = of_iomap(p_suspend_nd, 3);
-    RTK_SB2_BASE = of_iomap(p_suspend_nd, 4);
-    RTK_MISC_BASE = of_iomap(p_suspend_nd, 5);
+			if (!en) {
+				pr_err("[%s] wakeup-gpio[%d] States is disable!",
+					DEV_NAME, i);
+				pr_err(" (en:%d act:%d gpio:%d)\n",
+					en, act, wu_gpio);
+				continue;
+			}
 
-    RTK_CHIP_VERSION = get_rtd129x_cpu_revision();
+			tmp = gpio_iso_num < 0 || gpio_iso_num;
+			if (tmp >= SUSPEND_ISO_GPIO_SIZE) {
+				pr_err("[%s] wakeup-gpio[%d] Out of iso range!",
+					DEV_NAME, i);
 
-    if(p_suspend_nd && of_device_is_available(p_suspend_nd)){
-        const u32 *prop;
-        int size;
+				pr_err(" (en:%d act:%d gpio:%d)\n",
+					en, act, wu_gpio);
+				continue;
+			}
 
-        {
-            int cnt_wakeup_gpio_en = 0;
-            int cnt_wakeup_gpio_act = 0;
-            int cnt_wakeup_gpio_list = of_gpio_named_count(p_suspend_nd, "wakeup-gpio-list");
-            const u32 * prop_en = of_get_property(p_suspend_nd, "wakeup-gpio-enable", &cnt_wakeup_gpio_en);
-            const u32 * prop_act = of_get_property(p_suspend_nd, "wakeup-gpio-activity", &cnt_wakeup_gpio_act);
+			if (gpio_request(wu_gpio, nd->name)) {
+				pr_err("[%s] wakeup-gpio[%d] Request failed!",
+					DEV_NAME, i);
+				pr_err(" (en:%d act:%d gpio:%d)\n",
+					en, act, wu_gpio);
+			} else {
+				gpio_free(wu_gpio);
+			}
 
-            cnt_wakeup_gpio_en  /= sizeof(u32);
-            cnt_wakeup_gpio_act /= sizeof(u32);
+			pr_info("[%s] wakeup-gpio[%d] Successful registration!",
+				DEV_NAME, i);
+			pr_info(" (en:%d act:%d gpio:%d)\n",
+				en, act, wu_gpio);
 
-            printk(KERN_INFO "[RTD129x_PM] wakeup-gpio Cnt: en(%d) act(%d) list(%d)\n",
-                    cnt_wakeup_gpio_en,
-                    cnt_wakeup_gpio_act,
-                    cnt_wakeup_gpio_list);
+			/* IGPIO0 ~ IGPIO23 */
+			if (gpio_iso_num < GPIO_WAKEUP_EN_BITS) {
+				val = rtk_suspend_gpio_wakeup_en_get();
+				tmp = gpio_iso_num;
+				val = en ?
+					val | (0x1U << tmp) :
+					val & ~(0x1U << tmp);
+				rtk_suspend_gpio_wakeup_en_set(val);
 
-            if (cnt_wakeup_gpio_en != 0
-                && (cnt_wakeup_gpio_en == cnt_wakeup_gpio_act)
-                && (cnt_wakeup_gpio_act == cnt_wakeup_gpio_list)){
+				val = rtk_suspend_gpio_wakeup_act_get();
+				tmp = gpio_iso_num;
+				val = act ?
+					val | (0x1U << tmp) :
+					val & ~(0x1U << tmp);
+				rtk_suspend_gpio_wakeup_act_set(val);
+			} else {
+				/* IGPIO24 ~ IGPIO34 */
+				val = rtk_suspend_gpio_wakeup_en2_get();
+				tmp = (gpio_iso_num - GPIO_WAKEUP_EN_BITS);
+				val = en ?
+					val | (0x1U << tmp) :
+					val & ~(0x1U << tmp);
+				rtk_suspend_gpio_wakeup_en2_set(val);
 
-                int i = 0;
-                for (i = 0 ; i < cnt_wakeup_gpio_list ; i++) {
-
-                    int en  = of_read_number(prop_en,   1 + i);
-                    int act = of_read_number(prop_act,  1 + i);
-                    int wakeup_gpio = of_get_named_gpio(p_suspend_nd, "wakeup-gpio-list", i);
-                    int gpio_iso_num = wakeup_gpio - SUSPEND_ISO_GPIO_BASE;
-
-                    if (!en) {
-                        printk(KERN_WARNING "[RTD129x_PM] wakeup-gpio[%d] States is disable! (en:%d act:%d gpio:%d)\n",
-                                i, en, act, wakeup_gpio);
-                        continue;
-                    }
-
-                    if (gpio_iso_num < 0 || gpio_iso_num >= SUSPEND_ISO_GPIO_SIZE) {
-                        printk(KERN_ERR "[RTD129x_PM] wakeup-gpio[%d] Out of iso range! (en:%d act:%d gpio:%d)\n",
-                                i, en, act, wakeup_gpio);
-                        continue;
-                    }
-
-                    if(gpio_request(wakeup_gpio, p_suspend_nd->name)) {
-                        printk(KERN_ERR "[RTD129x_PM] wakeup-gpio[%d] Request failed! (en:%d act:%d gpio:%d)\n",
-                                i, en, act, wakeup_gpio);
-					} else {
-						gpio_free(wakeup_gpio);
-					}
-
-                    printk(KERN_INFO "[RTD129x_PM] wakeup-gpio[%d] Successful registration! (en:%d act:%d gpio:%d)\n",
-                            i, en, act, wakeup_gpio);
-
-					if(gpio_iso_num<GPIO_WAKEUP_EN_BITS)// IGPIO0 ~ IGPIO23
-                    {
-                        unsigned int val;
-                        val = rtk_suspend_gpio_wakeup_en_get();
-                        if (val == -1U)
-                            val = 0;
-                        if (en)
-                            val |= (0x1U << gpio_iso_num);
-                        else
-                            val &= ~(0x1U << gpio_iso_num);
-                        rtk_suspend_gpio_wakeup_en_set(val);
-
-                        val = rtk_suspend_gpio_wakeup_act_get();
-                        if (act)
-                            val |= (0x1U << gpio_iso_num);
-                        else
-                            val &= ~(0x1U << gpio_iso_num);
-                        rtk_suspend_gpio_wakeup_act_set(val);
-                    }
-                    else// IGPIO24 ~ IGPIO34
-                    {
-						unsigned int val;
-						val = rtk_suspend_gpio_wakeup_en2_get();
-						if (val == -1U)
-							val = 0;
-						if (en)
-							val |= (0x1U << (gpio_iso_num-GPIO_WAKEUP_EN_BITS));
-						else
-							val &= ~(0x1U << (gpio_iso_num-GPIO_WAKEUP_EN_BITS));
-                        rtk_suspend_gpio_wakeup_en2_set(val);
-
-                        val = rtk_suspend_gpio_wakeup_act2_get();
-                        if (act)
-                            val |= (0x1U << (gpio_iso_num-GPIO_WAKEUP_EN_BITS));
-                        else
-                            val &= ~(0x1U << (gpio_iso_num-GPIO_WAKEUP_EN_BITS));
-                        rtk_suspend_gpio_wakeup_act2_set(val);
-                    }
-                }
-            }
-        }
-
-        {
-            int cnt_output_change_gpio_en = 0;
-            int cnt_output_change_gpio_act = 0;
-            int cnt_output_change_gpio_list = of_gpio_named_count(p_suspend_nd, "gpio-output-change-list");
-            const u32 * prop_en = of_get_property(p_suspend_nd, "gpio-output-change-enable", &cnt_output_change_gpio_en);
-            const u32 * prop_act = of_get_property(p_suspend_nd, "gpio-output-change-activity", &cnt_output_change_gpio_act);
-
-            cnt_output_change_gpio_en /= sizeof(u32);
-            cnt_output_change_gpio_act /= sizeof(u32);
-
-            printk(KERN_INFO "[RTD129x_PM] gpio-output-change Cnt: en(%d) act(%d) list(%d)\n",
-                    cnt_output_change_gpio_en,
-                    cnt_output_change_gpio_act,
-                    cnt_output_change_gpio_list);
-
-            if (cnt_output_change_gpio_en != 0
-                    && (cnt_output_change_gpio_en == cnt_output_change_gpio_act)
-                    && (cnt_output_change_gpio_act == cnt_output_change_gpio_list))
-            {
-                int i;
-                for (i = 0 ; i < cnt_output_change_gpio_list ; i++) {
-                    int en  = of_read_number(prop_en, 1 + i);
-                    int act = of_read_number(prop_act, 1 + i);
-                    int output_change_gpio = of_get_named_gpio(p_suspend_nd, "gpio-output-change-list", i);
-                    int gpio_iso_num = output_change_gpio - SUSPEND_ISO_GPIO_BASE;
-
-                    if (!en) {
-                        printk(KERN_WARNING "[RTD129x_PM] gpio-output-change[%d] States is disable! (en:%d act:%d gpio:%d)\n",
-                                i, en, act, output_change_gpio);
-                        continue;
-                    }
-
-                    if (gpio_iso_num < 0 || gpio_iso_num >= SUSPEND_ISO_GPIO_SIZE) {
-                        printk(KERN_ERR "[RTD129x_PM] gpio-output-change[%d] Out of iso range! (en:%d act:%d gpio:%d)\n",
-                                i, en, act, output_change_gpio);
-                        continue;
-                    }
-
-                    if(gpio_request(output_change_gpio, p_suspend_nd->name)) {
-                        printk(KERN_ERR "[RTD129x_PM] gpio-output-change[%d] Request failed! (en:%d act:%d gpio:%d)\n",
-                                i, en, act, output_change_gpio);
-					} else {
-						gpio_free(output_change_gpio);
-					}
-
-                    printk(KERN_INFO "[RTD129x_PM] gpio-output-change[%d] Successful registration! (en:%d act:%d gpio:%d)\n",
-                            i, en, act, output_change_gpio);
-
-					if(gpio_iso_num<GPIO_OUTPUT_CHANGE_EN_BITS)// IGPIO0 ~ IGPIO23
-                    {
-                        unsigned int val;
-                        val = rtk_suspend_gpio_output_change_en_get();
-                        if (val == -1U)
-                            val = 0;
-                        if (en)
-                            val |= (0x1U << gpio_iso_num);
-                        else
-                            val &= ~(0x1U << gpio_iso_num);
-                        rtk_suspend_gpio_output_change_en_set(val);
-                        val = rtk_suspend_gpio_output_change_act_get();
-                        if (act)
-                            val |= (0x1U << gpio_iso_num);
-                        else
-                            val &= ~(0x1U << gpio_iso_num);
-                        rtk_suspend_gpio_output_change_act_set(val);
-                    }
-                    else// IGPIO24 ~ IGPIO34
-                    {
-						unsigned int val;
-                        val = rtk_suspend_gpio_output_change_en2_get();
-                        if (val == -1U)
-                            val = 0;
-                        if (en)
-                            val |= (0x1U << (gpio_iso_num-GPIO_OUTPUT_CHANGE_EN_BITS));
-                        else
-                            val &= ~(0x1U << (gpio_iso_num-GPIO_OUTPUT_CHANGE_EN_BITS));
-                        rtk_suspend_gpio_output_change_en2_set(val);
-                        val = rtk_suspend_gpio_output_change_act2_get();
-                        if (act)
-                            val |= (0x1U << (gpio_iso_num-GPIO_OUTPUT_CHANGE_EN_BITS));
-                        else
-                            val &= ~(0x1U << (gpio_iso_num-GPIO_OUTPUT_CHANGE_EN_BITS));
-                        rtk_suspend_gpio_output_change_act2_set(val);
-                    }
-                }
-            }
-        }
-
-        /*
-         * Suspend Mode
-         */
-        prop = of_get_property(p_suspend_nd, "suspend-mode", &size);
-        if(prop){
-            int temp = of_read_number(prop,1);
-            if(temp > MAX_SUSPEND_MODE || temp < 0){
-                printk(KERN_ERR "[RTD129x_PM] Set suspend-mode Error! %d (default:%d) \n",temp,(int)suspend_mode);
-            }else{
-                suspend_mode = temp;
-                printk(KERN_INFO "[RTD129x_PM] Set suspend-mode = %s\n", rtk_suspend_states[suspend_mode]);
-            }
-        }
-
-        /*
-         * wakeup flags
-         */
-        prop = of_get_property(p_suspend_nd, "wakeup-flags", &size);
-        if(prop){
-            int temp = of_read_number(prop,1);
-            if(temp < 0){
-                printk(KERN_ERR "[RTD129x_PM] Set wakeup-flags error! 0x%x\n", temp);
-                rtk_suspend_wakeup_flags_set(fWAKEUP_ON_IR|fWAKEUP_ON_GPIO|fWAKEUP_ON_ALARM|fWAKEUP_ON_CEC);
-                printk(KERN_INFO "[RTD129x_PM] wakeup flags set default : 0x%x\n", rtk_suspend_wakeup_flags_get());
-            }else{
-                rtk_suspend_wakeup_flags_set(temp);
-                printk(KERN_INFO "[RTD129x_PM] Set set wakeup-flags = 0x%x\n", rtk_suspend_wakeup_flags_get());
-            }
-        }else{
-            rtk_suspend_wakeup_flags_set(fWAKEUP_ON_IR|fWAKEUP_ON_GPIO|fWAKEUP_ON_ALARM|fWAKEUP_ON_CEC);
-            printk(KERN_INFO "[RTD129x_PM] Wakeup Flags Set Default : 0x%x\n", rtk_suspend_wakeup_flags_get());
-        }
-    }
-
-    suspend_set_ops(&rtk_suspend_ops);
-
-    if (of_device_is_system_power_controller(pdev->dev.of_node)) {
-        dev_info(&pdev->dev, "is system-power-controller\n");
-        pm_power_off = rtk_poweroff;
-    }
-
-    return 0;
+				val = rtk_suspend_gpio_wakeup_act2_get();
+				tmp = (gpio_iso_num - GPIO_WAKEUP_EN_BITS);
+				val = act ?
+					val | (0x1U << tmp) :
+					val & ~(0x1U << tmp);
+				rtk_suspend_gpio_wakeup_act2_set(val);
+			}
+		}
+	}
 }
 
-__maybe_unused static struct of_device_id rtk_pm_ids[] = {
-	{.compatible = "Realtek,power-management" },
-	{/* Sentinel */ },
-};
-
-static struct platform_driver rtk_pm_driver = {
-	.probe = rtk_pm_probe,
-	.driver = {
-		.name = "RTD129x_PM",
-		.of_match_table = rtk_pm_ids,
-	},
-};
-
-int rtk_suspend_init(void)
+static void rtk_gpio_init_out(struct device_node *nd)
 {
-	int result = 0;
+	const u32 *prop_en;
+	const u32 *prop_act;
+	int out_gpio_en = 0;
+	int out_gpio_act = 0;
+	int out_gpio_list = 0;
+	int en;
+	int act;
+	int gpio_iso_num;
+	int output_change_gpio;
+	int tmp;
+	unsigned int val;
+	int i = 0;
 
-	if ((result = platform_driver_register(&rtk_pm_driver)) != 0) {
-		printk(KERN_ERR "[RTD129x_PM] Can't register power management driver\n");
+	out_gpio_list = of_gpio_named_count(nd, "gpio-output-change-list");
+	prop_en = of_get_property(nd, "gpio-output-change-enable",
+		&out_gpio_en);
+	prop_act = of_get_property(nd, "gpio-output-change-activity",
+		&out_gpio_act);
+	out_gpio_en /= sizeof(u32);
+	out_gpio_act /= sizeof(u32);
+
+	pr_info("[%s] gpio-output-change Cnt: en(%d) act(%d) list(%d)\n",
+			DEV_NAME, out_gpio_en, out_gpio_act, out_gpio_list);
+
+	if (out_gpio_en != 0 && (out_gpio_en == out_gpio_act)
+		&& (out_gpio_act == out_gpio_list)) {
+
+		for (i = 0 ; i < out_gpio_list ; i++) {
+			en  = of_read_number(prop_en, 1 + i);
+			act = of_read_number(prop_act, 1 + i);
+			output_change_gpio = of_get_named_gpio(nd,
+				"gpio-output-change-list", i);
+			gpio_iso_num = output_change_gpio -
+				SUSPEND_ISO_GPIO_BASE;
+
+			if (!en) {
+				pr_warn("[%s] gpio-output-change[%d]",
+					DEV_NAME, i);
+				pr_warn(" States is disable! ");
+				pr_warn("(en:%d act:%d gpio:%d)\n",
+					en, act, output_change_gpio);
+				continue;
+			}
+
+			if (gpio_iso_num < 0 ||
+				gpio_iso_num >= SUSPEND_ISO_GPIO_SIZE) {
+				pr_err("[%s] gpio-output-change[%d]",
+					DEV_NAME, i);
+				pr_err(" Out of iso range! ");
+				pr_err("(en:%d act:%d gpio:%d)\n",
+					en, act, output_change_gpio);
+				continue;
+			}
+
+			if (gpio_request(output_change_gpio, nd->name)) {
+				pr_err("[%s] gpio-output-change[%d]",
+					DEV_NAME, i);
+				pr_err(" Request failed! ");
+				pr_err("(en:%d act:%d gpio:%d)\n",
+					en, act, output_change_gpio);
+			} else {
+				gpio_free(output_change_gpio);
+			}
+
+			pr_info("[%s] gpio-output-change[%d]",
+				DEV_NAME, i);
+			pr_info(" Successful registration! ");
+			pr_info("(en:%d act:%d gpio:%d)\n",
+				en, act, output_change_gpio);
+
+			/* IGPIO0 ~ IGPIO23 */
+			if (gpio_iso_num < GPIO_OUTPUT_CHANGE_EN_BITS) {
+				val = rtk_suspend_gpio_out_en_get();
+				tmp = gpio_iso_num;
+				val = en ?
+					val | (0x1U << tmp) :
+					val & ~(0x1U << tmp);
+				rtk_suspend_gpio_out_en_set(val);
+
+				val = rtk_suspend_gpio_out_act_get();
+				tmp = gpio_iso_num;
+				val = act ?
+					val | (0x1U << tmp) :
+					val & ~(0x1U << tmp);
+				rtk_suspend_gpio_out_act_set(val);
+			} else {
+				/* IGPIO24 ~ IGPIO34 */
+				val = rtk_suspend_gpio_out_en2_get();
+				tmp = gpio_iso_num -
+					GPIO_OUTPUT_CHANGE_EN_BITS;
+				val = en ?
+					val | (0x1U << tmp) :
+					val & ~(0x1U << tmp);
+				rtk_suspend_gpio_out_en2_set(val);
+
+				val = rtk_suspend_gpio_out_act2_get();
+				tmp = gpio_iso_num -
+					GPIO_OUTPUT_CHANGE_EN_BITS;
+				val = act ?
+					val | (0x1U << tmp) :
+					val & ~(0x1U << tmp);
+				rtk_suspend_gpio_out_act2_set(val);
+			}
+		}
+	}
+}
+
+static void rtk_gpio_init(struct device_node *nd)
+{
+	rtk_gpio_init_wu(nd);
+	rtk_gpio_init_out(nd);
+}
+
+int __init rtk_suspend_init(void)
+{
+	struct device_node *p_suspend_nd = NULL;
+	struct device_node *p_gic_nd = NULL;
+	struct device_node *p_cpu_wrapper_nd = NULL;
+	const u32 *prop;
+	int size;
+	int temp;
+
+	acpu_set_flag(0x00000000);
+	rtk_suspend_wakeup_flags_set(0);
+	rtk_suspend_resume_state_set(RESUME_NONE);
+	rtk_suspend_resume_data_set(0);
+	rtk_suspend_gpio_wakeup_en_set(0);
+	rtk_suspend_gpio_wakeup_act_set(0);
+	rtk_suspend_gpio_out_en_set(0);
+	rtk_suspend_gpio_out_act_set(0);
+	rtk_suspend_gpio_wakeup_en2_set(0);
+	rtk_suspend_gpio_wakeup_act2_set(0);
+	rtk_suspend_gpio_out_en2_set(0);
+	rtk_suspend_gpio_out_act2_set(0);
+	rtk_suspend_timer_sec_set(0);
+
+	pr_info("[%s] Initial Power Management Driver\n", DEV_NAME);
+
+	p_suspend_nd =
+		of_find_compatible_node(NULL, NULL, "Realtek,power-management");
+	p_gic_nd =
+		of_find_compatible_node(NULL, NULL, "arm,cortex-a15-gic");
+	p_cpu_wrapper_nd =
+		of_find_compatible_node(NULL, NULL, "Realtek,rtk-scpu_wrapper");
+
+	RTK_CPU_WRAPPER_BASE = of_iomap(p_cpu_wrapper_nd, 0);
+	RTK_GIC_DIST_BASE = of_iomap(p_gic_nd, 0);
+	RTK_CRT_BASE = of_iomap(p_suspend_nd, 0);
+	RTK_AIO_BASE = of_iomap(p_suspend_nd, 1);
+	RTK_ISO_BASE = of_iomap(p_suspend_nd, 2);
+	RTK_TVE_BASE = of_iomap(p_suspend_nd, 3);
+	RTK_SB2_BASE = of_iomap(p_suspend_nd, 4);
+	RTK_MISC_BASE = of_iomap(p_suspend_nd, 5);
+
+	RTK_CHIP_VERSION = get_rtd129x_cpu_revision();
+
+	if (p_suspend_nd && of_device_is_available(p_suspend_nd)) {
+
+		rtk_gpio_init(p_suspend_nd);
+
+		/* wakeup flags */
+		prop = of_get_property(p_suspend_nd, "wakeup-flags", &size);
+		if (prop) {
+			temp = of_read_number(prop, 1);
+			if (temp < 0) {
+				pr_err("[%s] Set wakeup-flags error! 0x%x\n",
+					DEV_NAME, temp);
+				rtk_suspend_wakeup_flags_set(
+#ifdef CONFIG_RTK_IR
+					fWAKEUP_ON_IR |
+#endif
+					fWAKEUP_ON_GPIO |
+					fWAKEUP_ON_ALARM | fWAKEUP_ON_CEC);
+				pr_info("[%s] wakeup flags set default : 0x%x\n",
+					DEV_NAME,
+					rtk_suspend_wakeup_flags_get());
+			} else {
+				rtk_suspend_wakeup_flags_set(temp);
+				pr_info("[%s] Set set wakeup-flags = 0x%x\n",
+					DEV_NAME,
+					rtk_suspend_wakeup_flags_get());
+			}
+		} else {
+			rtk_suspend_wakeup_flags_set(
+#ifdef CONFIG_RTK_IR
+			fWAKEUP_ON_IR |
+#endif
+			fWAKEUP_ON_GPIO |
+				fWAKEUP_ON_ALARM | fWAKEUP_ON_CEC);
+			pr_info("[%s] Wakeup Flags Set Default : 0x%x\n",
+				DEV_NAME, rtk_suspend_wakeup_flags_get());
+		}
 	}
 
-	return result;
+	suspend_set_ops(&rtk_suspend_ops);
+
+	if (of_device_is_system_power_controller(p_suspend_nd)) {
+		if (!pm_power_off) {
+			pr_info("[%s] as system-power-controller\n", DEV_NAME);
+			pm_power_off = rtk_poweroff;
+		} else {
+			pr_warn("[%s] pm_power_off is already defined\n",
+				DEV_NAME);
+		}
+	}
+
+	return 0;
 }
 
 subsys_initcall(rtk_suspend_init);
 
 #ifdef CONFIG_SYSFS
-#define RTK_SUSPEND_ATTR(_name)             \
-{                                           \
-    .attr = {.name = #_name, .mode = 0644}, \
-    .show =  rtk_suspend_##_name##_show,    \
-    .store = rtk_suspend_##_name##_store,   \
+#define RTK_SUSPEND_ATTR(_name) \
+{ \
+	.attr = {.name = #_name, .mode = 0644}, \
+	.show =  rtk_suspend_##_name##_show, \
+	.store = rtk_suspend_##_name##_store, \
 }
 
-static enum _suspend_mode rtk_suspend_decode_mode(const char *buf, size_t n)
+static enum _suspend_wakeup rtk_suspend_decode_wakeup(const char *buf,
+	size_t n)
 {
-    const char * const *s;
-    char *p;
-    int len;
-    int i;
+	const char *const *s;
+	char *p;
+	int len;
+	int i;
 
-    p = memchr(buf, '\n', n);
-    len = p ? p - buf : n;
+	p = memchr(buf, '\n', n);
+	len = p ? p - buf : n;
 
-    for (i=0;i<MAX_SUSPEND_MODE;i++) {
-        s = &rtk_suspend_states[i];
-        if (*s && len == strlen(*s) && !strncmp(buf, *s, len))
-            return i;
-    }
+	for (i = 0 ; i < eWAKEUP_ON_MAX ; i++) {
+		s = &rtk_suspend_wakeup_states[i];
+		if (*s && len == strlen(*s) && !strncmp(buf, *s, len))
+			return i;
+	}
 
-    return MAX_SUSPEND_MODE;
+	return eWAKEUP_ON_MAX;
 }
 
-static ssize_t rtk_suspend_mode_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t rtk_suspend_wakeup_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
 {
-    int i,n = 0;
-    for (i=0;i<MAX_SUSPEND_MODE;i++) {
-        if (i == suspend_mode)
-            n += sprintf(buf+n, "=> ");
-        else
-            n += sprintf(buf+n, "   ");
-        n += sprintf(buf+n, "%s\n",rtk_suspend_states[i]);
-    }
-    n += sprintf(buf+n, "\n");
-    return n;
+	int i;
+	int n = 0;
+	unsigned int val = rtk_suspend_wakeup_flags_get();
+
+	for (i = 0 ; i < eWAKEUP_ON_MAX ; i++) {
+
+		if (val & (0x1U << i))
+			n += sprintf(buf + n, " * ");
+		else
+			n += sprintf(buf + n, "   ");
+		n += sprintf(buf + n, "%s\n", rtk_suspend_wakeup_states[i]);
+	}
+	n += sprintf(buf + n, "\n");
+	return n;
 }
 
-static ssize_t rtk_suspend_mode_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t rtk_suspend_wakeup_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-    enum _suspend_mode mode = rtk_suspend_decode_mode(buf,count);
-    if (mode < MAX_SUSPEND_MODE) {
-        suspend_mode = mode;
-        suspend_mode_stored = 1;
-        return count;
-    }
-    return -ENOMEM;
+	enum _suspend_wakeup wakeup = rtk_suspend_decode_wakeup(buf, count);
+
+	if (wakeup < eWAKEUP_ON_MAX) {
+		rtk_suspend_wakeup_flags_set(
+			rtk_suspend_wakeup_flags_get() ^ (0x1U << wakeup));
+		return count;
+	}
+	return -ENOMEM;
 }
 
-static enum _suspend_wakeup rtk_suspend_decode_wakeup(const char *buf, size_t n)
+static ssize_t rtk_suspend_resume_state_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
 {
-    const char * const *s;
-    char *p;
-    int len;
-    int i;
+	int n = 0;
+	unsigned int val = rtk_suspend_resume_state_get();
 
-    p = memchr(buf, '\n', n);
-    len = p ? p - buf : n;
+	if (val >= RESUME_MAX_STATE) {
+		n += sprintf(buf + n, "(not ready)\n");
+		goto done;
+	}
 
-    for (i=0;i<eWAKEUP_ON_MAX;i++) {
-        s = &rtk_suspend_wakeup_states[i];
-        if (*s && len == strlen(*s) && !strncmp(buf, *s, len))
-            return i;
-    }
-
-    return eWAKEUP_ON_MAX;
-}
-
-static ssize_t rtk_suspend_wakeup_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-    int i,n = 0;
-    unsigned int val = rtk_suspend_wakeup_flags_get();
-    for (i=0;i<eWAKEUP_ON_MAX;i++) {
-
-        if (val & (0x1U << i))
-            n += sprintf(buf+n, " * ");
-        else
-            n += sprintf(buf+n, "   ");
-        n += sprintf(buf+n, "%s\n", rtk_suspend_wakeup_states[i]);
-    }
-    n += sprintf(buf+n, "\n");
-    return n;
-}
-
-static ssize_t rtk_suspend_wakeup_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
-{
-    enum _suspend_wakeup wakeup = rtk_suspend_decode_wakeup(buf,count);
-    if (wakeup < eWAKEUP_ON_MAX) {
-        rtk_suspend_wakeup_flags_set(rtk_suspend_wakeup_flags_get() ^ (0x1U << wakeup));
-        return count;
-    }
-    return -ENOMEM;
-}
-
-static ssize_t rtk_suspend_resume_state_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-    int n = 0;
-    unsigned int val = rtk_suspend_resume_state_get();
-    if (val >= RESUME_MAX_STATE) {
-        n += sprintf(buf+n, "(not ready)\n");
-        goto done;
-    }
-
-    if (val == RESUME_GPIO)
-        n += sprintf(buf+n, " %s %d\n",rtk_suspend_resume_states[val], rtk_suspend_resume_data_get() + SUSPEND_ISO_GPIO_BASE);
-    else
-        n += sprintf(buf+n, " %s %d\n",rtk_suspend_resume_states[val], rtk_suspend_resume_data_get());
+	if (val == RESUME_GPIO)
+		n += sprintf(buf + n, " %s %d\n",
+			rtk_suspend_resume_states[val],
+			rtk_suspend_resume_data_get() + SUSPEND_ISO_GPIO_BASE);
+	else
+		n += sprintf(buf + n, " %s %d\n",
+			rtk_suspend_resume_states[val],
+			rtk_suspend_resume_data_get());
 
 done:
-    n += sprintf(buf+n, " (write reset => change state to 'none')\n");
-    return n;
+	n += sprintf(buf + n, " (write reset => change state to 'none')\n");
+	return n;
 }
 
-static ssize_t rtk_suspend_resume_state_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t rtk_suspend_resume_state_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-    const char * const s = "reset";
-    char *p;
-    int len;
+	const char *const s = "reset";
+	char *p;
+	int len;
 
-    p = memchr(buf, '\n', count);
+	p = memchr(buf, '\n', count);
 
-    len = p ? p - buf : count;
+	len = p ? p - buf : count;
 
-    if (s && len == strlen(s) && !strncmp(buf, s, len))
-        rtk_suspend_resume_state_set(RESUME_NONE);
+	if (s && len == strlen(s) && !strncmp(buf, s, len))
+		rtk_suspend_resume_state_set(RESUME_NONE);
 
-    return count;
+	return count;
 }
 
-static ssize_t rtk_suspend_gpio_wakeup_en_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t rtk_suspend_gpio_wakeup_en_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
 {
-    int i,n = 0;
-    unsigned int val,val2;
+	int i;
+	int n = 0;
+	unsigned int val;
+	unsigned int val2;
 
 	val = rtk_suspend_gpio_wakeup_en_get();
 	val2 = rtk_suspend_gpio_wakeup_en2_get();
 
-    if ((val == -1U)&&(val2 == -1U))
-        return sprintf(buf, "(not ready)\n");
+	if ((val == -1U) && (val2 == -1U))
+		return sprintf(buf, "(not ready)\n");
 
-    n += sprintf(buf+n, " En | GPIO(ISO)\n");
-    n += sprintf(buf+n, " ---+----------\n");
-	for (i=0;i<GPIO_WAKEUP_EN_BITS;i++) {
+	n += sprintf(buf + n, " En | GPIO(ISO)\n");
+	n += sprintf(buf + n, " ---+----------\n");
+	for (i = 0 ; i < GPIO_WAKEUP_EN_BITS ; i++) {
 		if (val == -1U)
-			n += sprintf(buf+n, "    |  %d\n",i);
-        else if (val & (0x1U << i))
-            n += sprintf(buf+n, "  * |  %d\n",i);
-        else
-            n += sprintf(buf+n, "    |  %d\n",i);
-    }
+			n += sprintf(buf + n, "	| %d\n", i);
+		else if (val & (0x1U << i))
+			n += sprintf(buf + n, "  * | %d\n", i);
+		else
+			n += sprintf(buf + n, "	| %d\n", i);
+	}
 
-    for (i=0;i<GPIO_WAKEUP_EN2_BITS;i++) {
+	for (i = 0 ; i < GPIO_WAKEUP_EN2_BITS ; i++) {
 		if (val2 == -1U)
-			n += sprintf(buf+n, "    |  %d\n",i+GPIO_WAKEUP_EN_BITS);
-        else if (val2 & (0x1U << i))
-            n += sprintf(buf+n, "  * |  %d\n",i+GPIO_WAKEUP_EN_BITS);
-        else
-            n += sprintf(buf+n, "    |  %d\n",i+GPIO_WAKEUP_EN_BITS);
-    }
-    n += sprintf(buf+n, "\n");
-    return n;
+			n += sprintf(buf + n, "	| %d\n",
+				i + GPIO_WAKEUP_EN_BITS);
+		else if (val2 & (0x1U << i))
+			n += sprintf(buf + n, "  * | %d\n",
+				i + GPIO_WAKEUP_EN_BITS);
+		else
+			n += sprintf(buf + n, "	| %d\n",
+				i + GPIO_WAKEUP_EN_BITS);
+	}
+	n += sprintf(buf + n, "\n");
+	return n;
 
 }
 
-static ssize_t rtk_suspend_gpio_wakeup_en_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t rtk_suspend_gpio_wakeup_en_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-    long val;
-    int ret = kstrtol(buf, 10, &val);
-    if (ret < 0)
-        return -ENOMEM;
+	long val;
+	int ret = kstrtol(buf, 10, &val);
 
-    if (val >= SUSPEND_ISO_GPIO_SIZE)
-        return -ENOMEM;
+	if (ret < 0)
+		return -ENOMEM;
+
+	if (val >= SUSPEND_ISO_GPIO_SIZE)
+		return -ENOMEM;
 
 #if 1
-    return count;
+	return count;
 #endif
 
-	if(val<GPIO_WAKEUP_EN_BITS)
-		rtk_suspend_gpio_wakeup_en_set(rtk_suspend_gpio_wakeup_en_get() ^ (0x1U << val));
+	if (val < GPIO_WAKEUP_EN_BITS)
+		rtk_suspend_gpio_wakeup_en_set(
+			rtk_suspend_gpio_wakeup_en_get() ^ (0x1U << val));
 	else
-		rtk_suspend_gpio_wakeup_en2_set(rtk_suspend_gpio_wakeup_en2_get() ^ (0x1U << (val-GPIO_WAKEUP_EN_BITS)));
+		rtk_suspend_gpio_wakeup_en2_set(
+			rtk_suspend_gpio_wakeup_en2_get() ^ (0x1U <<
+			(val-GPIO_WAKEUP_EN_BITS)));
 
-    return count;
+	return count;
 }
 
-static ssize_t rtk_suspend_gpio_wakeup_act_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t rtk_suspend_gpio_wakeup_act_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
 {
-    int i,n = 0;
-    unsigned int val,val2;
+	int i;
+	int n = 0;
+	unsigned int val;
+	unsigned int val2;
 
-    val = rtk_suspend_gpio_wakeup_act_get();
-    val2 = rtk_suspend_gpio_wakeup_act2_get();
+	val = rtk_suspend_gpio_wakeup_act_get();
+	val2 = rtk_suspend_gpio_wakeup_act2_get();
 
-    if ((val == -1U)&&(val2 == -1U))
-        return sprintf(buf, "(not ready)\n");
+	if ((val == -1U) && (val2 == -1U))
+		return sprintf(buf, "(not ready)\n");
 
-    n += sprintf(buf+n, " Act| GPIO(ISO)\n");
-    n += sprintf(buf+n, " ---+----------\n");
-    for (i=0;i<GPIO_WAKEUP_ACT_BITS;i++) {
+	n += sprintf(buf + n, " Act| GPIO(ISO)\n");
+	n += sprintf(buf + n, " ---+----------\n");
+	for (i = 0 ; i < GPIO_WAKEUP_ACT_BITS ; i++) {
 		if (val == -1U)
-			n += sprintf(buf+n, "    |  %d\n",i);
-        else if (!(rtk_suspend_gpio_wakeup_en_get() &  (0x1U << i)))
-            n += sprintf(buf+n, "    |  %d\n",i);
-        else if (val & (0x1U << i))
-            n += sprintf(buf+n, "  H |  %d\n",i);
-        else
-            n += sprintf(buf+n, "  L |  %d\n",i);
-    }
+			n += sprintf(buf + n, "	| %d\n", i);
+		else if (!(rtk_suspend_gpio_wakeup_en_get() & (0x1U << i)))
+			n += sprintf(buf + n, "	| %d\n", i);
+		else if (val & (0x1U << i))
+			n += sprintf(buf + n, "  H | %d\n", i);
+		else
+			n += sprintf(buf + n, "  L | %d\n", i);
+	}
 
-    for (i=0;i<GPIO_WAKEUP_ACT2_BITS;i++) {
+	for (i = 0 ; i < GPIO_WAKEUP_ACT2_BITS ; i++) {
 		if (val2 == -1U)
-			n += sprintf(buf+n, "    |  %d\n",i+GPIO_WAKEUP_ACT_BITS);
-        else if (!(rtk_suspend_gpio_wakeup_en2_get() &  (0x1U << i)))
-            n += sprintf(buf+n, "    |  %d\n",i+GPIO_WAKEUP_ACT_BITS);
-        else if (val2 & (0x1U << i))
-            n += sprintf(buf+n, "  H |  %d\n",i+GPIO_WAKEUP_ACT_BITS);
-        else
-            n += sprintf(buf+n, "  L |  %d\n",i+GPIO_WAKEUP_ACT_BITS);
-    }
-    n += sprintf(buf+n, "\n");
+			n += sprintf(buf + n, "	| %d\n",
+				i + GPIO_WAKEUP_ACT_BITS);
+		else if (!(rtk_suspend_gpio_wakeup_en2_get() & (0x1U << i)))
+			n += sprintf(buf + n, "	| %d\n",
+				i + GPIO_WAKEUP_ACT_BITS);
+		else if (val2 & (0x1U << i))
+			n += sprintf(buf + n, "  H | %d\n",
+				i + GPIO_WAKEUP_ACT_BITS);
+		else
+			n += sprintf(buf + n, "  L | %d\n",
+				i + GPIO_WAKEUP_ACT_BITS);
+	}
+	n += sprintf(buf + n, "\n");
 
-    return n;
+	return n;
 }
 
-static ssize_t rtk_suspend_gpio_wakeup_act_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t rtk_suspend_gpio_wakeup_act_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-    long val;
-    int ret = kstrtol(buf, 10, &val);
-    if (ret < 0)
-        return -ENOMEM;
+	long val;
+	int ret = kstrtol(buf, 10, &val);
+	int tmp;
 
-    if (val >= SUSPEND_ISO_GPIO_SIZE)
-        return -ENOMEM;
+	if (ret < 0)
+		return -ENOMEM;
+
+	if (val >= SUSPEND_ISO_GPIO_SIZE)
+		return -ENOMEM;
 
 #if 1
-    return count;
+	return count;
 #endif
 
-	if(val<GPIO_WAKEUP_ACT_BITS)
-	{
-		if (rtk_suspend_gpio_wakeup_en_get() &  (0x1U << val))
-			rtk_suspend_gpio_wakeup_act_set(rtk_suspend_gpio_wakeup_act_get() ^ (0x1U << val));
-	}
-	else
-	{
-		if (rtk_suspend_gpio_wakeup_en2_get() &  (0x1U << (val-GPIO_WAKEUP_ACT_BITS)))
-			rtk_suspend_gpio_wakeup_act2_set(rtk_suspend_gpio_wakeup_act2_get() ^ (0x1U << (val-GPIO_WAKEUP_ACT_BITS)));
+	if (val < GPIO_WAKEUP_ACT_BITS) {
+		tmp = (0x1U << val);
+		if (rtk_suspend_gpio_wakeup_en_get() & tmp)
+			rtk_suspend_gpio_wakeup_act_set(
+				rtk_suspend_gpio_wakeup_act_get() ^ tmp);
+	} else {
+		tmp = (0x1U << (val - GPIO_WAKEUP_ACT_BITS));
+		if (rtk_suspend_gpio_wakeup_en2_get() & tmp) {
+			rtk_suspend_gpio_wakeup_act2_set(
+				rtk_suspend_gpio_wakeup_act2_get() ^
+				(0x1U << (val-GPIO_WAKEUP_ACT_BITS)));
+		}
 	}
 
-    return count;
+	return count;
 }
 
-static ssize_t rtk_suspend_gpio_output_change_en_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t rtk_suspend_gpio_out_en_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
 {
-    int i,n = 0;
-    unsigned int val,val2;
+	int i;
+	int n = 0;
+	unsigned int val;
+	unsigned int val2;
 
-	val = rtk_suspend_gpio_output_change_en_get();
-	val2 = rtk_suspend_gpio_output_change_en2_get();
+	val = rtk_suspend_gpio_out_en_get();
+	val2 = rtk_suspend_gpio_out_en2_get();
 
-    if ((val == -1U)&&(val2 == -1U))
-        return sprintf(buf, "(not ready)\n");
+	if ((val == -1U) && (val2 == -1U))
+		return sprintf(buf, "(not ready)\n");
 
-    n += sprintf(buf+n, " En | GPIO(ISO)\n");
-    n += sprintf(buf+n, " ---+----------\n");
-    for (i=0;i<GPIO_OUTPUT_CHANGE_EN_BITS;i++) {
-		if(val == -1U)
-			n += sprintf(buf+n, "    |  %d\n",i);
-        else if (val & (0x1U << i))
-            n += sprintf(buf+n, "  * |  %d\n",i);
-        else
-            n += sprintf(buf+n, "    |  %d\n",i);
-    }
+	n += sprintf(buf + n, " En | GPIO(ISO)\n");
+	n += sprintf(buf + n, " ---+----------\n");
+	for (i = 0 ; i < GPIO_OUTPUT_CHANGE_EN_BITS ; i++) {
+		if (val == -1U)
+			n += sprintf(buf + n, "	| %d\n", i);
+		else if (val & (0x1U << i))
+			n += sprintf(buf + n, "  * | %d\n", i);
+		else
+			n += sprintf(buf + n, "	| %d\n", i);
+	}
 
-	for (i=0;i<GPIO_OUTPUT_CHANGE_EN2_BITS;i++) {
-		if(val2 == -1U)
-			n += sprintf(buf+n, "    |  %d\n",i+GPIO_OUTPUT_CHANGE_EN_BITS);
-        else if (val2 & (0x1U << i))
-            n += sprintf(buf+n, "  * |  %d\n",i+GPIO_OUTPUT_CHANGE_EN_BITS);
-        else
-            n += sprintf(buf+n, "    |  %d\n",i+GPIO_OUTPUT_CHANGE_EN_BITS);
-    }
-    n += sprintf(buf+n, "\n");
-    return n;
+	for (i = 0 ; i < GPIO_OUTPUT_CHANGE_EN2_BITS ; i++) {
+		if (val2 == -1U)
+			n += sprintf(buf + n, "	| %d\n",
+				i + GPIO_OUTPUT_CHANGE_EN_BITS);
+		else if (val2 & (0x1U << i))
+			n += sprintf(buf + n, "  * | %d\n",
+				i + GPIO_OUTPUT_CHANGE_EN_BITS);
+		else
+			n += sprintf(buf + n, "	| %d\n",
+				i + GPIO_OUTPUT_CHANGE_EN_BITS);
+	}
+	n += sprintf(buf + n, "\n");
+	return n;
 
 }
 
-static ssize_t rtk_suspend_gpio_output_change_en_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t rtk_suspend_gpio_out_en_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-    long val;
-    int ret = kstrtol(buf, 10, &val);
-    if (ret < 0)
-        return -ENOMEM;
+	long val;
+	int ret = kstrtol(buf, 10, &val);
 
-    if (val >= SUSPEND_ISO_GPIO_SIZE)
-        return -ENOMEM;
+	if (ret < 0)
+		return -ENOMEM;
+
+	if (val >= SUSPEND_ISO_GPIO_SIZE)
+		return -ENOMEM;
 
 #if 1
-    return count;
+	return count;
 #endif
 
-	if(val<GPIO_OUTPUT_CHANGE_EN_BITS)
-		rtk_suspend_gpio_output_change_en_set(rtk_suspend_gpio_output_change_en_get() ^ (0x1U << val));
+	if (val < GPIO_OUTPUT_CHANGE_EN_BITS)
+		rtk_suspend_gpio_out_en_set(
+			rtk_suspend_gpio_out_en_get() ^ (0x1U << val));
 	else
-		rtk_suspend_gpio_output_change_en2_set(rtk_suspend_gpio_output_change_en2_get() ^ (0x1U << (val-GPIO_OUTPUT_CHANGE_EN_BITS)));
+		rtk_suspend_gpio_out_en2_set(rtk_suspend_gpio_out_en2_get() ^
+			(0x1U << (val-GPIO_OUTPUT_CHANGE_EN_BITS)));
 
-    return count;
+	return count;
 }
 
-static ssize_t rtk_suspend_gpio_output_change_act_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t rtk_suspend_gpio_out_act_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
 {
-    int i,n = 0;
-    unsigned int val,val2;
+	int i;
+	int n = 0;
+	unsigned int val;
+	unsigned int val2;
 
-    val = rtk_suspend_gpio_output_change_act_get();
-    val2 = rtk_suspend_gpio_output_change_act2_get();
+	val = rtk_suspend_gpio_out_act_get();
+	val2 = rtk_suspend_gpio_out_act2_get();
 
-    if ((val == -1U)&&(val2 == -1U))
-        return sprintf(buf, "(not ready)\n");
+	if ((val == -1U) && (val2 == -1U))
+		return sprintf(buf, "(not ready)\n");
 
-    n += sprintf(buf+n, " Act| GPIO(ISO)\n");
-    n += sprintf(buf+n, " ---+----------\n");
-    for (i=0;i<GPIO_OUTPUT_CHANGE_ACT_BITS;i++) {
-		if(val == -1U)
-			n += sprintf(buf+n, "    |  %d\n",i);
-        else if (!(rtk_suspend_gpio_output_change_en_get() &  (0x1U << i)))
-            n += sprintf(buf+n, "    |  %d\n",i);
-        else if (val & (0x1U << i))
-            n += sprintf(buf+n, "  H |  %d\n",i);
-        else
-            n += sprintf(buf+n, "  L |  %d\n",i);
-    }
+	n += sprintf(buf + n, " Act| GPIO(ISO)\n");
+	n += sprintf(buf + n, " ---+----------\n");
+	for (i = 0 ; i < GPIO_OUTPUT_CHANGE_ACT_BITS ; i++) {
+		if (val == -1U)
+			n += sprintf(buf + n, "	| %d\n", i);
+		else if (!(rtk_suspend_gpio_out_en_get() & (0x1U << i)))
+			n += sprintf(buf + n, "	| %d\n", i);
+		else if (val & (0x1U << i))
+			n += sprintf(buf + n, "  H | %d\n", i);
+		else
+			n += sprintf(buf + n, "  L | %d\n", i);
+	}
 
-	for (i=0;i<GPIO_WAKEUP_ACT2_BITS;i++) {
-		if(val2 == -1U)
-			n += sprintf(buf+n, "    |  %d\n",i+GPIO_OUTPUT_CHANGE_ACT_BITS);
-        else if (!(rtk_suspend_gpio_output_change_en2_get() &  (0x1U << i)))
-            n += sprintf(buf+n, "    |  %d\n",i+GPIO_OUTPUT_CHANGE_ACT_BITS);
-        else if (val2 & (0x1U << i))
-            n += sprintf(buf+n, "  H |  %d\n",i+GPIO_OUTPUT_CHANGE_ACT_BITS);
-        else
-            n += sprintf(buf+n, "  L |  %d\n",i+GPIO_OUTPUT_CHANGE_ACT_BITS);
-    }
-    n += sprintf(buf+n, "\n");
+	for (i = 0 ; i < GPIO_WAKEUP_ACT2_BITS ; i++) {
+		if (val2 == -1U)
+			n += sprintf(buf + n, "	| %d\n",
+				i + GPIO_OUTPUT_CHANGE_ACT_BITS);
+		else if (!(rtk_suspend_gpio_out_en2_get() &  (0x1U << i)))
+			n += sprintf(buf + n, "	| %d\n",
+				i + GPIO_OUTPUT_CHANGE_ACT_BITS);
+		else if (val2 & (0x1U << i))
+			n += sprintf(buf + n, "  H | %d\n",
+				i + GPIO_OUTPUT_CHANGE_ACT_BITS);
+		else
+			n += sprintf(buf + n, "  L | %d\n",
+				i + GPIO_OUTPUT_CHANGE_ACT_BITS);
+	}
+	n += sprintf(buf + n, "\n");
 
-    return n;
+	return n;
 }
 
-static ssize_t rtk_suspend_gpio_output_change_act_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t rtk_suspend_gpio_out_act_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-    long val;
-    int ret = kstrtol(buf, 10, &val);
-    if (ret < 0)
-        return -ENOMEM;
+	long val;
+	int ret = kstrtol(buf, 10, &val);
+	int tmp;
 
-    if (val >= SUSPEND_ISO_GPIO_SIZE)
-        return -ENOMEM;
+	if (ret < 0)
+		return -ENOMEM;
+
+	if (val >= SUSPEND_ISO_GPIO_SIZE)
+		return -ENOMEM;
 
 #if 1
-    return count;
+	return count;
 #endif
 
-	if(val<GPIO_OUTPUT_CHANGE_ACT_BITS)
-	{
-		if (rtk_suspend_gpio_output_change_en_get() &  (0x1U << val))
-			rtk_suspend_gpio_output_change_act_set(rtk_suspend_gpio_output_change_act_get() ^ (0x1U << val));
+	if (val < GPIO_OUTPUT_CHANGE_ACT_BITS) {
+		if (rtk_suspend_gpio_out_en_get() &  (0x1U << val)) {
+			tmp = (0x1U << val);
+			rtk_suspend_gpio_out_act_set(
+				rtk_suspend_gpio_out_act_get() ^ tmp);
+		}
+	} else {
+		if (rtk_suspend_gpio_out_en2_get() &
+			(0x1U << (val-GPIO_OUTPUT_CHANGE_ACT_BITS))) {
+			tmp = (0x1U << (val-GPIO_OUTPUT_CHANGE_ACT_BITS));
+			rtk_suspend_gpio_out_act2_set(
+				rtk_suspend_gpio_out_act2_get() ^ tmp);
+		}
 	}
-	else
-	{
-		if (rtk_suspend_gpio_output_change_en2_get() &  (0x1U << (val-GPIO_OUTPUT_CHANGE_ACT_BITS)))
-			rtk_suspend_gpio_output_change_act2_set(rtk_suspend_gpio_output_change_act2_get() ^ (0x1U << (val-GPIO_OUTPUT_CHANGE_ACT_BITS)));
-	}
 
-    return count;
+	return count;
 }
 
-static ssize_t rtk_suspend_timer_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t rtk_suspend_timer_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
 {
-    return sprintf(buf, " %d sec (reciprocal timer)\n", rtk_suspend_timer_sec_get());
+	return sprintf(buf, " %d sec (reciprocal timer)\n",
+		rtk_suspend_timer_sec_get());
 }
 
-static ssize_t rtk_suspend_timer_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t rtk_suspend_timer_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-    long val;
-    int ret = kstrtol(buf, 10, &val);
-    if (ret < 0)
-        return -ENOMEM;
+	long val;
+	int ret = kstrtol(buf, 10, &val);
 
-    if (val > (AUDIO_RECIPROCAL_TIMER_GET(-1UL)))
-        return -ENOMEM;
+	if (ret < 0)
+		return -ENOMEM;
 
-    rtk_suspend_timer_sec_set(val);
-    return count;
+	if (val > (AUDIO_RECIPROCAL_TIMER_GET(-1UL)))
+		return -ENOMEM;
+
+	rtk_suspend_timer_sec_set(val);
+	return count;
 }
 
-static ssize_t rtk_suspend_context_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t rtk_suspend_context_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
 {
-    return sprintf(buf, "%d \n", suspend_context);
+	return sprintf(buf, "%d\n", suspend_context);
 }
 
-static ssize_t rtk_suspend_context_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t rtk_suspend_context_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
-    long val;
-    int ret = kstrtol(buf, 10, &val);
-    if (ret < 0)
-        return -ENOMEM;
+	long val;
+	int ret = kstrtol(buf, 10, &val);
 
-    suspend_context = val;
-    return count;
+	if (ret < 0)
+		return -ENOMEM;
+
+	suspend_context = val;
+	return count;
 }
 
-static struct kobj_attribute rtk_suspend_mode_attr = RTK_SUSPEND_ATTR(mode);
-static struct kobj_attribute rtk_suspend_wakeup_attr = RTK_SUSPEND_ATTR(wakeup);
-static struct kobj_attribute rtk_suspend_resume_state_attr = RTK_SUSPEND_ATTR(resume_state);
-static struct kobj_attribute rtk_suspend_gpio_wakeup_en_attr = RTK_SUSPEND_ATTR(gpio_wakeup_en);
-static struct kobj_attribute rtk_suspend_gpio_wakeup_act_attr = RTK_SUSPEND_ATTR(gpio_wakeup_act);
-static struct kobj_attribute rtk_suspend_gpio_output_change_en_attr = RTK_SUSPEND_ATTR(gpio_output_change_en);
-static struct kobj_attribute rtk_suspend_gpio_output_change_act_attr = RTK_SUSPEND_ATTR(gpio_output_change_act);
-static struct kobj_attribute rtk_suspend_timer_attr = RTK_SUSPEND_ATTR(timer);
-static struct kobj_attribute rtk_suspend_context_attr = RTK_SUSPEND_ATTR(context);
+#ifdef CONFIG_RTK_XEN_SUPPORT
+void rtk_domu_suspend_context_increase(void)
+{
+	suspend_context++;
+}
+#endif
+
+static struct kobj_attribute rtk_suspend_wakeup_attr =
+	RTK_SUSPEND_ATTR(wakeup);
+static struct kobj_attribute rtk_suspend_resume_state_attr =
+	RTK_SUSPEND_ATTR(resume_state);
+static struct kobj_attribute rtk_suspend_gpio_wakeup_en_attr =
+	RTK_SUSPEND_ATTR(gpio_wakeup_en);
+static struct kobj_attribute rtk_suspend_gpio_wakeup_act_attr =
+	RTK_SUSPEND_ATTR(gpio_wakeup_act);
+static struct kobj_attribute rtk_suspend_gpio_out_en_attr =
+	RTK_SUSPEND_ATTR(gpio_out_en);
+static struct kobj_attribute rtk_suspend_gpio_out_act_attr =
+	RTK_SUSPEND_ATTR(gpio_out_act);
+static struct kobj_attribute rtk_suspend_timer_attr =
+	RTK_SUSPEND_ATTR(timer);
+static struct kobj_attribute rtk_suspend_context_attr =
+	RTK_SUSPEND_ATTR(context);
 
 static struct attribute *rtk_suspend_attrs[] = {
-    &rtk_suspend_mode_attr.attr,
-    &rtk_suspend_wakeup_attr.attr,
-    &rtk_suspend_resume_state_attr.attr,
-    &rtk_suspend_gpio_wakeup_en_attr.attr,
-    &rtk_suspend_gpio_wakeup_act_attr.attr,
-    &rtk_suspend_gpio_output_change_en_attr.attr,
-    &rtk_suspend_gpio_output_change_act_attr.attr,
-    &rtk_suspend_timer_attr.attr,
-    &rtk_suspend_context_attr.attr,
-    NULL,
+	&rtk_suspend_wakeup_attr.attr,
+	&rtk_suspend_resume_state_attr.attr,
+	&rtk_suspend_gpio_wakeup_en_attr.attr,
+	&rtk_suspend_gpio_wakeup_act_attr.attr,
+	&rtk_suspend_gpio_out_en_attr.attr,
+	&rtk_suspend_gpio_out_act_attr.attr,
+	&rtk_suspend_timer_attr.attr,
+	&rtk_suspend_context_attr.attr,
+	NULL,
 };
 
 static struct attribute_group rtk_suspend_attr_group = {
-    .attrs = rtk_suspend_attrs,
+	.attrs = rtk_suspend_attrs,
 };
 
 static struct kobject *rtk_suspend_kobj;
 
-static int __init suspend_sysfs_init(void)
+static ssize_t pm_state_show(struct device *dev, struct device_attribute *attr,
+	char *buf)
 {
-    int ret;
-
-    rtk_suspend_kobj = kobject_create_and_add("suspend", kernel_kobj);
-    if (!rtk_suspend_kobj)
-        return -ENOMEM;
-    ret = sysfs_create_group(rtk_suspend_kobj, &rtk_suspend_attr_group);
-    if (ret)
-        kobject_put(rtk_suspend_kobj);
-    return ret;
+	return sprintf(buf, "%d\n", pm_state);
 }
 
-module_init(suspend_sysfs_init)
+static ssize_t pm_state_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	long val;
+	int ret = kstrtol(buf, 10, &val);
+
+	if (ret < 0)
+		return -ENOMEM;
+
+	pm_state = val;
+
+	return count;;
+}
+
+static ssize_t pm_wakelock_mode_show(struct device *dev, struct device_attribute *attr,
+	char *buf)
+{
+	return sprintf(buf, "%d\n", pm_wakelock_mode);
+}
+
+static ssize_t pm_wakelock_mode_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	long val;
+	int ret = kstrtol(buf, 10, &val);
+
+	if (ret < 0)
+		return -ENOMEM;
+
+	pm_wakelock_mode = val;
+
+	return count;;
+}
+
+static ssize_t pm_block_wakelock_show(
+    struct device *dev,
+    struct device_attribute *attr,
+    char *buf)
+{
+	return sprintf(buf, "%d\n", pm_block_wakelock);
+}
+
+static ssize_t pm_block_wakelock_store(
+    struct device *dev,
+    struct device_attribute *attr,
+    const char *buf,
+    size_t count)
+{
+	long val;
+	int ret = kstrtol(buf, 10, &val);
+
+	if (ret < 0)
+		return -ENOMEM;
+
+	pm_block_wakelock = val;
+
+	return count;;
+}
+
+static struct device_attribute pm_state_attr =
+	__ATTR(pm_state, (S_IRUGO|S_IWUSR|S_IWGRP),
+	pm_state_show, pm_state_store);
+
+static struct device_attribute pm_wakelock_mode_attr =
+	__ATTR(pm_wakelock_mode, (S_IRUGO|S_IWUSR|S_IWGRP),
+	pm_wakelock_mode_show, pm_wakelock_mode_store);
+
+static struct device_attribute pm_block_wakelock_attr =
+	__ATTR(pm_block_wakelock, (S_IRUGO|S_IWUSR|S_IWGRP),
+	pm_block_wakelock_show, pm_block_wakelock_store);
+
+struct class *rtk_pm_class;
+struct device *rtk_pm_dev;
+
+static int __init suspend_sysfs_init(void)
+{
+	int ret;
+
+	pm_state = 0;
+	pm_wakelock_mode = 0;
+    pm_block_wakelock = 0;
+
+	rtk_pm_class = class_create(THIS_MODULE, "rtk_pm");
+	if (IS_ERR(rtk_pm_class))
+		return PTR_ERR(rtk_pm_class);
+
+	rtk_pm_dev =  device_create(rtk_pm_class, NULL,
+		MKDEV(0, 1), NULL, "android_control");
+	if (IS_ERR(rtk_pm_dev))
+		return PTR_ERR(rtk_pm_dev);
+
+	ret = device_create_file(rtk_pm_dev, &pm_state_attr);
+	if (ret < 0) {
+		device_destroy(rtk_pm_class, MKDEV(0, 1));
+		return -1;
+	}
+
+	ret = device_create_file(rtk_pm_dev, &pm_wakelock_mode_attr);
+	if (ret < 0) {
+		device_destroy(rtk_pm_class, MKDEV(0, 1));
+		return -1;
+	}
+
+	ret = device_create_file(rtk_pm_dev, &pm_block_wakelock_attr);
+	if (ret < 0) {
+		device_destroy(rtk_pm_class, MKDEV(0, 1));
+		return -1;
+	}
+
+	rtk_suspend_kobj = kobject_create_and_add("suspend", kernel_kobj);
+	if (!rtk_suspend_kobj)
+		return -ENOMEM;
+	ret = sysfs_create_group(rtk_suspend_kobj, &rtk_suspend_attr_group);
+	if (ret)
+		kobject_put(rtk_suspend_kobj);
+	return ret;
+}
+
+module_init(suspend_sysfs_init);
 #endif
 

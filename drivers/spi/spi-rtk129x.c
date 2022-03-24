@@ -244,11 +244,11 @@ static int rtk_gspi_setup(struct spi_device *spi)
 	/* initialise the state from the device */
 	rtk_gspi_setupxfer(spi, NULL);
 
-	spin_lock(&hw->bitbang.lock);
+	//spin_lock(&hw->bitbang.lock);
 	if (!hw->bitbang.busy) {
 		hw->bitbang.chipselect(spi, BITBANG_CS_INACTIVE);
 	}
-	spin_unlock(&hw->bitbang.lock);
+	//spin_unlock(&hw->bitbang.lock);
 
 
 	return 0;

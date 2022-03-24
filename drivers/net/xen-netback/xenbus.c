@@ -21,6 +21,15 @@
 #include "common.h"
 #include <linux/vmalloc.h>
 #include <linux/rtnetlink.h>
+#if defined(CONFIG_XEN_REMOTE_CMD)
+#include <linux/kmod.h>
+#include <xen/events.h>
+#include <linux/string.h>
+
+#ifdef CONFIG_PROC_FS
+#include <linux/proc_fs.h>
+#endif /* CONFIG_PROC_FS */
+#endif /* CONFIG_XEN_REMOTE_CMD */
 
 struct backend_info {
 	struct xenbus_device *dev;
@@ -38,7 +47,8 @@ struct backend_info {
 	const char *hotplug_script;
 };
 
-static int connect_rings(struct backend_info *be, struct xenvif_queue *queue);
+static int connect_data_rings(struct backend_info *be,
+			      struct xenvif_queue *queue);
 static void connect(struct backend_info *be);
 static int read_xenbus_vif_flags(struct backend_info *be);
 static int backend_create_xenvif(struct backend_info *be);
@@ -164,7 +174,7 @@ xenvif_write_io_ring(struct file *filp, const char __user *buf, size_t count,
 	return count;
 }
 
-static int xenvif_dump_open(struct inode *inode, struct file *filp)
+static int xenvif_io_ring_open(struct inode *inode, struct file *filp)
 {
 	int ret;
 	void *queue = NULL;
@@ -178,11 +188,33 @@ static int xenvif_dump_open(struct inode *inode, struct file *filp)
 
 static const struct file_operations xenvif_dbg_io_ring_ops_fops = {
 	.owner = THIS_MODULE,
-	.open = xenvif_dump_open,
+	.open = xenvif_io_ring_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
 	.release = single_release,
 	.write = xenvif_write_io_ring,
+};
+
+static int xenvif_read_ctrl(struct seq_file *m, void *v)
+{
+	struct xenvif *vif = m->private;
+
+	xenvif_dump_hash_info(vif, m);
+
+	return 0;
+}
+
+static int xenvif_ctrl_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, xenvif_read_ctrl, inode->i_private);
+}
+
+static const struct file_operations xenvif_dbg_ctrl_ops_fops = {
+	.owner = THIS_MODULE,
+	.open = xenvif_ctrl_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
 };
 
 static void xenvif_debugfs_addif(struct xenvif *vif)
@@ -209,6 +241,17 @@ static void xenvif_debugfs_addif(struct xenvif *vif)
 				pr_warn("Creation of io_ring file returned %ld!\n",
 					PTR_ERR(pfile));
 		}
+
+		if (vif->ctrl_irq) {
+			pfile = debugfs_create_file("ctrl",
+						    S_IRUSR,
+						    vif->xenvif_dbg_root,
+						    vif,
+						    &xenvif_dbg_ctrl_ops_fops);
+			if (IS_ERR_OR_NULL(pfile))
+				pr_warn("Creation of ctrl file returned %ld!\n",
+					PTR_ERR(pfile));
+		}
 	} else
 		netdev_warn(vif->dev,
 			    "Creation of vif debugfs dir returned %ld!\n",
@@ -225,6 +268,207 @@ static void xenvif_debugfs_delif(struct xenvif *vif)
 	vif->xenvif_dbg_root = NULL;
 }
 #endif /* CONFIG_DEBUG_FS */
+
+#if defined(CONFIG_XEN_REMOTE_CMD)
+static irqreturn_t xenvif_cmd_interrupt(int irq, void *dev_id)
+{
+	struct backend_info *be = dev_id;
+	struct xenvif *vif = be->vif;
+
+	schedule_work(&vif->work_q);
+
+	return IRQ_HANDLED;
+}
+
+static int connect_remote_cmd(struct backend_info *be)
+{
+	struct xenbus_device *dev = be->dev;
+	int err;
+	unsigned int cmd_evtchn;
+
+	err = xenbus_scanf(XBT_NIL, dev->otherend,
+			    "event-channel-cmd", "%u", &cmd_evtchn);
+	if (err < 0) {
+		xenbus_dev_error(dev, err,
+				 "reading %s/event-channel-cmd",
+				 dev->otherend);
+		goto err;
+	}
+
+	if (be->vif->cmd_evtchn != cmd_evtchn) {
+		err = bind_interdomain_evtchn_to_irqhandler(
+			be->vif->domid, cmd_evtchn, xenvif_cmd_interrupt, 0,
+			be->vif->dev->name, be);
+		if (err < 0)
+			goto err;
+		be->vif->cmd_irq = err;
+		be->vif->cmd_evtchn = cmd_evtchn;
+		pr_info("%s: domid %d, cmd_evtchn %d irq %d\n",
+			be->vif->dev->name, be->vif->domid,
+			be->vif->cmd_evtchn, be->vif->cmd_irq);
+	}
+
+	err = 0;
+err: /* Regular return falls through with err == 0 */
+	return err;
+}
+
+#ifdef CONFIG_PROC_FS
+static int rmt_cmd_read_proc(struct seq_file *m, void *v)
+{
+	struct backend_info *be = m->private;
+	struct xenbus_device *dev = be->dev;
+	struct xenvif *vif = be->vif;
+	char *rmt_cmd;
+
+	seq_printf(m, "%s: cmd event channel %d IRQ %d\n",
+		vif->dev->name, vif->cmd_evtchn, vif->cmd_irq);
+	seq_printf(m, "The lastest shell command:\n");
+	rmt_cmd = xenbus_read(XBT_NIL, dev->nodename, "rmt_cmd", NULL);
+	if (!IS_ERR(rmt_cmd))
+		seq_printf(m, "REMOTE: [%s]\n", rmt_cmd);
+
+	rmt_cmd = xenbus_read(XBT_NIL, dev->otherend, "rmt_cmd", NULL);
+	if (!IS_ERR(rmt_cmd))
+		seq_printf(m, "LOCAL: [%s]\n", rmt_cmd);
+
+	return 0;
+
+}
+
+#define CMD_BUF_SIZE	128
+#define CMD_ARGV_SIZE	32
+static ssize_t rmt_cmd_write_proc(struct file *file, const char __user *buffer,
+				size_t count, loff_t *pos)
+{
+	char rmt_cmd[CMD_BUF_SIZE];
+	char *ptr;
+	int err;
+	struct backend_info *be = (struct backend_info *)
+					PDE_DATA(file_inode(file));
+	struct xenbus_device *dev = be->dev;
+	struct xenvif *vif = be->vif;
+
+	memset(rmt_cmd, 0, CMD_BUF_SIZE);
+	if (buffer && !copy_from_user(rmt_cmd, buffer, sizeof(rmt_cmd)))
+	{
+		ptr = strchr(rmt_cmd, '\n');
+		if (ptr)
+			*ptr = '\0';
+		pr_info("send remote command [%s], len %ld\n", rmt_cmd, strlen(rmt_cmd));
+		err = xenbus_printf(XBT_NIL, dev->nodename, "rmt_cmd", "%s",
+			rmt_cmd);
+		if (!err) {
+			 notify_remote_via_irq(vif->cmd_irq);
+		} else {
+			pr_err("fail to add remote command in xenstore: %s/rmt_cmd",
+				dev->nodename);
+		}
+	}
+
+	return count;
+}
+
+/*
+ * seq_file wrappers for procfile show routines.
+ */
+static int rmt_cmd_proc_open(struct inode *inode, struct file *file)
+{
+	struct backend_info *be = PDE_DATA(inode);
+
+	return single_open(file, rmt_cmd_read_proc, be);
+}
+
+static const struct file_operations rmt_cmd_proc_fops = {
+	.open           = rmt_cmd_proc_open,
+	.read           = seq_read,
+	.write          = rmt_cmd_write_proc,
+	.llseek         = seq_lseek,
+	.release        = single_release,
+};
+
+static void xen_rmt_cmd_work(struct work_struct * work)
+{
+	struct xenvif *vif = container_of(work, struct xenvif, work_q);
+	struct xenbus_device *dev = xenvif_to_xenbus_device(vif);
+	char *rmt_cmd;
+	static char *envp[] = {
+		"HOME=/",
+		"TERM=linux",
+		"PATH=/usr/sbin:/usr/bin:/sbin:/usr/local/sbin:/usr/local/bin:/bin",
+		NULL };
+
+	char *argv[CMD_ARGV_SIZE];
+	char buf[CMD_BUF_SIZE];
+	char *ptr, *tok;
+	int i;
+
+	rmt_cmd = xenbus_read(XBT_NIL, dev->otherend, "rmt_cmd", NULL);
+	if (!IS_ERR(rmt_cmd)) {
+		pr_info("%s: Receving remote command [%s]\n",
+			vif->dev->name, rmt_cmd);
+		memset(argv, 0, sizeof(argv));
+		memset(buf, 0, sizeof(buf));
+		strcpy(buf, rmt_cmd);
+		ptr = buf;
+		tok = ptr;
+
+		i = 0;
+		do {
+			tok = strsep(&ptr, " ");
+			if (*tok == '\0')
+				continue;
+			argv[i] = tok;
+			i++;
+		} while ((i < CMD_ARGV_SIZE - 1) && tok && ptr);
+		argv[i] = NULL;
+
+		call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+	}
+
+}
+
+static void xen_procfs_add_rmt_cmd(struct backend_info *be)
+{
+	struct proc_dir_entry *parent;
+	struct proc_dir_entry *entry;
+	char path[80];
+
+	INIT_WORK(&be->vif->work_q, xen_rmt_cmd_work);
+
+	parent = proc_mkdir_data(be->vif->dev->name,  S_IRUGO|S_IXUGO,
+				 init_net.proc_net, NULL);
+	if (!parent) {
+		sprintf(path, "/proc/net");
+		pr_err("fail to create %s/%s\n", path, be->vif->dev->name);
+	} else {
+		sprintf(path, "/proc/net/%s", be->vif->dev->name);
+		pr_info("create %s\n", path);
+	}
+	be->vif->proc_parent = parent;
+
+	entry = proc_create_data("rmt_cmd", S_IFREG | S_IRUGO,
+				 parent, &rmt_cmd_proc_fops, be);
+	if (!entry)
+		pr_err("fail to create %s/rmt_cmd\n", path);
+	else
+		pr_info("create %s/rmt_cmd\n", path);
+}
+
+static void xen_procfs_del_rmt_cmd(struct backend_info *be)
+{
+	pr_info("delete /proc/net/%s/rmt_cmd\n", be->vif->dev->name);
+	remove_proc_entry("rmt_cmd", be->vif->proc_parent);
+	remove_proc_entry(be->vif->dev->name, init_net.proc_net);
+	be->vif->proc_parent = NULL;
+	cancel_work_sync(&be->vif->work_q);
+}
+
+#endif /* CONFIG_PROC_FS */
+#endif /* CONFIG_XEN_REMOTE_CMD */
+
+#ifdef CONFIG_PROC_FS
+#endif /* CONFIG_PROC_FS */
 
 static int netback_remove(struct xenbus_device *dev)
 {
@@ -270,6 +514,11 @@ static int netback_probe(struct xenbus_device *dev,
 	be->dev = dev;
 	dev_set_drvdata(&dev->dev, be);
 
+	be->state = XenbusStateInitialising;
+	err = xenbus_switch_state(dev, XenbusStateInitialising);
+	if (err)
+		goto fail;
+
 	sg = 1;
 
 	do {
@@ -299,10 +548,27 @@ static int netback_probe(struct xenbus_device *dev,
 			goto abort_transaction;
 		}
 
+		#if defined(CONFIG_XEN_NO_CSUM_OFFLOAD)
+		err = xenbus_printf(xbt, dev->nodename,
+				    "feature-no-csum-offload",
+				    "%d", 1);
+		if (err) {
+			message = "writing feature-no-csum-offload";
+			goto abort_transaction;
+		}
+		#endif /* CONFIG_XEN_NO_CSUM_OFFLOAD */
+
+		#if defined(CONFIG_XEN_NO_CSUM_OFFLOAD)
+		err = xenbus_printf(xbt, dev->nodename,
+				    "feature-ipv6-csum-offload",
+				    "%d", 0);
+		#else /* CONFIG_XEN_NO_CSUM_OFFLOAD */
 		/* We support partial checksum setup for IPv6 packets */
 		err = xenbus_printf(xbt, dev->nodename,
 				    "feature-ipv6-csum-offload",
 				    "%d", 1);
+		#endif /* CONFIG_XEN_NO_CSUM_OFFLOAD */
+
 		if (err) {
 			message = "writing feature-ipv6-csum-offload";
 			goto abort_transaction;
@@ -324,6 +590,22 @@ static int netback_probe(struct xenbus_device *dev,
 				    "feature-rx-flip", "%d", 0);
 		if (err) {
 			message = "writing feature-rx-flip";
+			goto abort_transaction;
+		}
+
+		/* We support dynamic multicast-control. */
+		err = xenbus_printf(xbt, dev->nodename,
+				    "feature-multicast-control", "%d", 1);
+		if (err) {
+			message = "writing feature-multicast-control";
+			goto abort_transaction;
+		}
+
+		err = xenbus_printf(xbt, dev->nodename,
+				    "feature-dynamic-multicast-control",
+				    "%d", 1);
+		if (err) {
+			message = "writing feature-dynamic-multicast-control";
 			goto abort_transaction;
 		}
 
@@ -351,6 +633,12 @@ static int netback_probe(struct xenbus_device *dev,
 	if (err)
 		pr_debug("Error writing multi-queue-max-queues\n");
 
+	err = xenbus_printf(XBT_NIL, dev->nodename,
+			    "feature-ctrl-ring",
+			    "%u", true);
+	if (err)
+		pr_debug("Error writing feature-ctrl-ring\n");
+
 	script = xenbus_read(XBT_NIL, dev->nodename, "script", NULL);
 	if (IS_ERR(script)) {
 		err = PTR_ERR(script);
@@ -360,11 +648,6 @@ static int netback_probe(struct xenbus_device *dev,
 
 	be->hotplug_script = script;
 
-	err = xenbus_switch_state(dev, XenbusStateInitWait);
-	if (err)
-		goto fail;
-
-	be->state = XenbusStateInitWait;
 
 	/* This kicks hotplug scripts, so do it immediately. */
 	err = backend_create_xenvif(be);
@@ -436,12 +719,33 @@ static int backend_create_xenvif(struct backend_info *be)
 
 static void backend_disconnect(struct backend_info *be)
 {
+#if defined(CONFIG_XEN_REMOTE_CMD)
+	unbind_from_irqhandler(be->vif->cmd_irq, be);
+#ifdef CONFIG_PROC_FS
+	xen_procfs_del_rmt_cmd(be);
+#endif /* CONFIG_PROC_FS */
+	be->vif->cmd_irq = 0;
+	be->vif->cmd_evtchn = 0;
+#endif /* CONFIG_XEN_REMOTE_CMD */
+
 	if (be->vif) {
+		unsigned int queue_index;
+
 		xen_unregister_watchers(be->vif);
 #ifdef CONFIG_DEBUG_FS
 		xenvif_debugfs_delif(be->vif);
 #endif /* CONFIG_DEBUG_FS */
-		xenvif_disconnect(be->vif);
+		xenvif_disconnect_data(be->vif);
+		for (queue_index = 0; queue_index < be->vif->num_queues; ++queue_index)
+			xenvif_deinit_queue(&be->vif->queues[queue_index]);
+
+		spin_lock(&be->vif->lock);
+		vfree(be->vif->queues);
+		be->vif->num_queues = 0;
+		be->vif->queues = NULL;
+		spin_unlock(&be->vif->lock);
+
+		xenvif_disconnect_ctrl(be->vif);
 	}
 }
 
@@ -468,20 +772,20 @@ static inline void backend_switch_state(struct backend_info *be,
 
 /* Handle backend state transitions:
  *
- * The backend state starts in InitWait and the following transitions are
+ * The backend state starts in Initialising and the following transitions are
  * allowed.
  *
- * InitWait -> Connected
+ * Initialising -> InitWait -> Connected
+ *          \
+ *           \        ^    \         |
+ *            \       |     \        |
+ *             \      |      \       |
+ *              \     |       \      |
+ *               \    |        \     |
+ *                \   |         \    |
+ *                 V  |          V   V
  *
- *    ^    \         |
- *    |     \        |
- *    |      \       |
- *    |       \      |
- *    |        \     |
- *    |         \    |
- *    |          V   V
- *
- *  Closed  <-> Closing
+ *                  Closed  <-> Closing
  *
  * The state argument specifies the eventual state of the backend and the
  * function transitions to that state via the shortest path.
@@ -491,12 +795,24 @@ static void set_backend_state(struct backend_info *be,
 {
 	while (be->state != state) {
 		switch (be->state) {
+		case XenbusStateInitialising:
+			switch (state) {
+			case XenbusStateInitWait:
+			case XenbusStateConnected:
+			case XenbusStateClosing:
+				backend_switch_state(be, XenbusStateInitWait);
+				break;
+			case XenbusStateClosed:
+				backend_switch_state(be, XenbusStateClosed);
+				break;
+			default:
+				BUG();
+			}
+			break;
 		case XenbusStateClosed:
 			switch (state) {
 			case XenbusStateInitWait:
 			case XenbusStateConnected:
-				pr_info("%s: prepare for reconnect\n",
-					be->dev->nodename);
 				backend_switch_state(be, XenbusStateInitWait);
 				break;
 			case XenbusStateClosing:
@@ -675,7 +991,8 @@ static void xen_net_rate_changed(struct xenbus_watch *watch,
 	}
 }
 
-static int xen_register_watchers(struct xenbus_device *dev, struct xenvif *vif)
+static int xen_register_credit_watch(struct xenbus_device *dev,
+				     struct xenvif *vif)
 {
 	int err = 0;
 	char *node;
@@ -700,13 +1017,82 @@ static int xen_register_watchers(struct xenbus_device *dev, struct xenvif *vif)
 	return err;
 }
 
-static void xen_unregister_watchers(struct xenvif *vif)
+static void xen_unregister_credit_watch(struct xenvif *vif)
 {
 	if (vif->credit_watch.node) {
 		unregister_xenbus_watch(&vif->credit_watch);
 		kfree(vif->credit_watch.node);
 		vif->credit_watch.node = NULL;
 	}
+}
+
+static void xen_mcast_ctrl_changed(struct xenbus_watch *watch,
+				   const char **vec, unsigned int len)
+{
+	struct xenvif *vif = container_of(watch, struct xenvif,
+					  mcast_ctrl_watch);
+	struct xenbus_device *dev = xenvif_to_xenbus_device(vif);
+	int val;
+
+	if (xenbus_scanf(XBT_NIL, dev->otherend,
+			 "request-multicast-control", "%d", &val) < 0)
+		val = 0;
+	vif->multicast_control = !!val;
+}
+
+static int xen_register_mcast_ctrl_watch(struct xenbus_device *dev,
+					 struct xenvif *vif)
+{
+	int err = 0;
+	char *node;
+	unsigned maxlen = strlen(dev->otherend) +
+		sizeof("/request-multicast-control");
+
+	if (vif->mcast_ctrl_watch.node) {
+		pr_err_ratelimited("Watch is already registered\n");
+		return -EADDRINUSE;
+	}
+
+	node = kmalloc(maxlen, GFP_KERNEL);
+	if (!node) {
+		pr_err("Failed to allocate memory for watch\n");
+		return -ENOMEM;
+	}
+	snprintf(node, maxlen, "%s/request-multicast-control",
+		 dev->otherend);
+	vif->mcast_ctrl_watch.node = node;
+	vif->mcast_ctrl_watch.callback = xen_mcast_ctrl_changed;
+	err = register_xenbus_watch(&vif->mcast_ctrl_watch);
+	if (err) {
+		pr_err("Failed to set watcher %s\n",
+		       vif->mcast_ctrl_watch.node);
+		kfree(node);
+		vif->mcast_ctrl_watch.node = NULL;
+		vif->mcast_ctrl_watch.callback = NULL;
+	}
+	return err;
+}
+
+static void xen_unregister_mcast_ctrl_watch(struct xenvif *vif)
+{
+	if (vif->mcast_ctrl_watch.node) {
+		unregister_xenbus_watch(&vif->mcast_ctrl_watch);
+		kfree(vif->mcast_ctrl_watch.node);
+		vif->mcast_ctrl_watch.node = NULL;
+	}
+}
+
+static void xen_register_watchers(struct xenbus_device *dev,
+				  struct xenvif *vif)
+{
+	xen_register_credit_watch(dev, vif);
+	xen_register_mcast_ctrl_watch(dev, vif);
+}
+
+static void xen_unregister_watchers(struct xenvif *vif)
+{
+	xen_unregister_mcast_ctrl_watch(vif);
+	xen_unregister_credit_watch(vif);
 }
 
 static void unregister_hotplug_status_watch(struct backend_info *be)
@@ -739,6 +1125,48 @@ static void hotplug_status_changed(struct xenbus_watch *watch,
 		unregister_hotplug_status_watch(be);
 	}
 	kfree(str);
+}
+
+static int connect_ctrl_ring(struct backend_info *be)
+{
+	struct xenbus_device *dev = be->dev;
+	struct xenvif *vif = be->vif;
+	unsigned int val;
+	grant_ref_t ring_ref;
+	unsigned int evtchn;
+	int err;
+
+	err = xenbus_gather(XBT_NIL, dev->otherend,
+			    "ctrl-ring-ref", "%u", &val, NULL);
+	if (err)
+		goto done; /* The frontend does not have a control ring */
+
+	ring_ref = val;
+
+	err = xenbus_gather(XBT_NIL, dev->otherend,
+			    "event-channel-ctrl", "%u", &val, NULL);
+	if (err) {
+		xenbus_dev_fatal(dev, err,
+				 "reading %s/event-channel-ctrl",
+				 dev->otherend);
+		goto fail;
+	}
+
+	evtchn = val;
+
+	err = xenvif_connect_ctrl(vif, ring_ref, evtchn);
+	if (err) {
+		xenbus_dev_fatal(dev, err,
+				 "mapping shared-frame %u port %u",
+				 ring_ref, evtchn);
+		goto fail;
+	}
+
+done:
+	return 0;
+
+fail:
+	return err;
 }
 
 static void connect(struct backend_info *be)
@@ -777,9 +1205,21 @@ static void connect(struct backend_info *be)
 	xen_register_watchers(dev, be->vif);
 	read_xenbus_vif_flags(be);
 
+	err = connect_ctrl_ring(be);
+	if (err) {
+		xenbus_dev_fatal(dev, err, "connecting control ring");
+		return;
+	}
+
 	/* Use the number of queues requested by the frontend */
 	be->vif->queues = vzalloc(requested_num_queues *
 				  sizeof(struct xenvif_queue));
+	if (!be->vif->queues) {
+		xenbus_dev_fatal(dev, -ENOMEM,
+				 "allocating queues");
+		return;
+	}
+
 	be->vif->num_queues = requested_num_queues;
 	be->vif->stalled_queues = requested_num_queues;
 
@@ -806,17 +1246,28 @@ static void connect(struct backend_info *be)
 		queue->remaining_credit = credit_bytes;
 		queue->credit_usec = credit_usec;
 
-		err = connect_rings(be, queue);
+		err = connect_data_rings(be, queue);
 		if (err) {
-			/* connect_rings() cleans up after itself on failure,
-			 * but we need to clean up after xenvif_init_queue() here,
-			 * and also clean up any previously initialised queues.
+			/* connect_data_rings() cleans up after itself on
+			 * failure, but we need to clean up after
+			 * xenvif_init_queue() here, and also clean up any
+			 * previously initialised queues.
 			 */
 			xenvif_deinit_queue(queue);
 			be->vif->num_queues = queue_index;
 			goto err;
 		}
 	}
+
+	#if defined(CONFIG_XEN_REMOTE_CMD)
+	#ifdef CONFIG_PROC_FS
+	xen_procfs_add_rmt_cmd(be);
+	#endif /* CONFIG_PROC_FS */
+	err = connect_remote_cmd(be);
+	if (err)
+		pr_err("%s:%d: connect_remote_cmd err %d\n",
+			__func__, __LINE__, err);
+	#endif /* CONFIG_XEN_REMOTE_CMD */
 
 #ifdef CONFIG_DEBUG_FS
 	xenvif_debugfs_addif(be->vif);
@@ -845,15 +1296,19 @@ static void connect(struct backend_info *be)
 
 err:
 	if (be->vif->num_queues > 0)
-		xenvif_disconnect(be->vif); /* Clean up existing queues */
+		xenvif_disconnect_data(be->vif); /* Clean up existing queues */
+	for (queue_index = 0; queue_index < be->vif->num_queues; ++queue_index)
+		xenvif_deinit_queue(&be->vif->queues[queue_index]);
 	vfree(be->vif->queues);
 	be->vif->queues = NULL;
 	be->vif->num_queues = 0;
+	xenvif_disconnect_ctrl(be->vif);
 	return;
 }
 
 
-static int connect_rings(struct backend_info *be, struct xenvif_queue *queue)
+static int connect_data_rings(struct backend_info *be,
+			      struct xenvif_queue *queue)
 {
 	struct xenbus_device *dev = be->dev;
 	unsigned int num_queues = queue->vif->num_queues;
@@ -917,8 +1372,8 @@ static int connect_rings(struct backend_info *be, struct xenvif_queue *queue)
 	}
 
 	/* Map the shared frame, irq etc. */
-	err = xenvif_connect(queue, tx_ring_ref, rx_ring_ref,
-			     tx_evtchn, rx_evtchn);
+	err = xenvif_connect_data(queue, tx_ring_ref, rx_ring_ref,
+				  tx_evtchn, rx_evtchn);
 	if (err) {
 		xenbus_dev_fatal(dev, err,
 				 "mapping shared-frames %lu/%lu port tx %u rx %u",
@@ -972,7 +1427,6 @@ static int read_xenbus_vif_flags(struct backend_info *be)
 	vif->can_sg = !!val;
 
 	vif->gso_mask = 0;
-	vif->gso_prefix_mask = 0;
 
 	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv4",
 			 "%d", &val) < 0)
@@ -980,31 +1434,11 @@ static int read_xenbus_vif_flags(struct backend_info *be)
 	if (val)
 		vif->gso_mask |= GSO_BIT(TCPV4);
 
-	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv4-prefix",
-			 "%d", &val) < 0)
-		val = 0;
-	if (val)
-		vif->gso_prefix_mask |= GSO_BIT(TCPV4);
-
 	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv6",
 			 "%d", &val) < 0)
 		val = 0;
 	if (val)
 		vif->gso_mask |= GSO_BIT(TCPV6);
-
-	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv6-prefix",
-			 "%d", &val) < 0)
-		val = 0;
-	if (val)
-		vif->gso_prefix_mask |= GSO_BIT(TCPV6);
-
-	if (vif->gso_mask & vif->gso_prefix_mask) {
-		xenbus_dev_fatal(dev, err,
-				 "%s: gso and gso prefix flags are not "
-				 "mutually exclusive",
-				 dev->otherend);
-		return -EOPNOTSUPP;
-	}
 
 	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-no-csum-offload",
 			 "%d", &val) < 0)

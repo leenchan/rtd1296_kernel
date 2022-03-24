@@ -19,6 +19,8 @@
 #ifndef __ASM_KERNEL_PGTABLE_H
 #define __ASM_KERNEL_PGTABLE_H
 
+#include <asm/pgtable.h>
+#include <asm/sparsemem.h>
 
 /*
  * The linear mapping and the start of memory are both 2M aligned (per
@@ -39,16 +41,25 @@
  * map to pte level. The swapper also maps the FDT (see __create_page_tables
  * for more information). Note that the number of ID map translation levels
  * could be increased on the fly if system RAM is out of reach for the default
- * VA range, so 3 pages are reserved in all cases.
+ * VA range, so pages required to map highest possible PA are reserved in all
+ * cases.
  */
 #if ARM64_SWAPPER_USES_SECTION_MAPS
 #define SWAPPER_PGTABLE_LEVELS	(CONFIG_PGTABLE_LEVELS - 1)
+#define IDMAP_PGTABLE_LEVELS	(ARM64_HW_PGTABLE_LEVELS(PHYS_MASK_SHIFT) - 1)
 #else
 #define SWAPPER_PGTABLE_LEVELS	(CONFIG_PGTABLE_LEVELS)
+#define IDMAP_PGTABLE_LEVELS	(ARM64_HW_PGTABLE_LEVELS(PHYS_MASK_SHIFT))
 #endif
 
 #define SWAPPER_DIR_SIZE	(SWAPPER_PGTABLE_LEVELS * PAGE_SIZE)
-#define IDMAP_DIR_SIZE		(3 * PAGE_SIZE)
+#define IDMAP_DIR_SIZE		(IDMAP_PGTABLE_LEVELS * PAGE_SIZE)
+
+#ifdef CONFIG_ARM64_SW_TTBR0_PAN
+#define RESERVED_TTBR0_SIZE	(PAGE_SIZE)
+#else
+#define RESERVED_TTBR0_SIZE	(0)
+#endif
 
 /* Initial memory map size */
 #if ARM64_SWAPPER_USES_SECTION_MAPS
@@ -76,5 +87,31 @@
 #define SWAPPER_MM_MMUFLAGS	(PTE_ATTRINDX(MT_NORMAL) | SWAPPER_PTE_FLAGS)
 #endif
 
+/*
+ * To make optimal use of block mappings when laying out the linear
+ * mapping, round down the base of physical memory to a size that can
+ * be mapped efficiently, i.e., either PUD_SIZE (4k granule) or PMD_SIZE
+ * (64k granule), or a multiple that can be mapped using contiguous bits
+ * in the page tables: 32 * PMD_SIZE (16k granule)
+ */
+#if defined(CONFIG_ARM64_4K_PAGES)
+#define ARM64_MEMSTART_SHIFT		PUD_SHIFT
+#elif defined(CONFIG_ARM64_16K_PAGES)
+#define ARM64_MEMSTART_SHIFT		(PMD_SHIFT + 5)
+#else
+#define ARM64_MEMSTART_SHIFT		PMD_SHIFT
+#endif
+
+/*
+ * sparsemem vmemmap imposes an additional requirement on the alignment of
+ * memstart_addr, due to the fact that the base of the vmemmap region
+ * has a direct correspondence, and needs to appear sufficiently aligned
+ * in the virtual address space.
+ */
+#if defined(CONFIG_SPARSEMEM_VMEMMAP) && ARM64_MEMSTART_SHIFT < SECTION_SIZE_BITS
+#define ARM64_MEMSTART_ALIGN	(1UL << SECTION_SIZE_BITS)
+#else
+#define ARM64_MEMSTART_ALIGN	(1UL << ARM64_MEMSTART_SHIFT)
+#endif
 
 #endif	/* __ASM_KERNEL_PGTABLE_H */

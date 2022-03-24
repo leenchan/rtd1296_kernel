@@ -364,6 +364,7 @@ void menu_finalize(struct menu *parent)
 			menu->parent = parent;
 			last_menu = menu;
 		}
+		expr_free(basedep);
 		if (last_menu) {
 			parent->list = parent->next;
 			parent->next = last_menu->next;
@@ -477,7 +478,7 @@ bool menu_is_visible(struct menu *menu)
 
 	if (menu->visibility) {
 		if (expr_calc_value(menu->visibility) == no)
-			return no;
+			return false;
 	}
 
 	sym = menu->sym;

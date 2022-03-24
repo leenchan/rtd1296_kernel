@@ -47,15 +47,16 @@
 /* device generates spurious wakeup, ignore remote wakeup capability */
 #define USB_QUIRK_IGNORE_REMOTE_WAKEUP		BIT(9)
 
-#define USB_QUIRK_SNPS_XHCI_WA		BIT(11) //0x00000800
-
-/* hcy added */
-#define USB_QUIRK_U3_RESET 			BIT(12)//0x00000100
-
-/* hcy added */
-#define USB_QUIRK_DEVICE_PROBE 		BIT(13) //0x00000200
-
 /* device can't handle Link Power Management */
 #define USB_QUIRK_NO_LPM			BIT(10)
+
+/*
+ * Device reports its bInterval as linear frames instead of the
+ * USB 2.0 calculation.
+ */
+#define USB_QUIRK_LINEAR_FRAME_INTR_BINTERVAL	BIT(11)
+
+/* Device needs a pause after every control message. */
+#define USB_QUIRK_DELAY_CTRL_MSG		BIT(13)
 
 #endif /* __LINUX_USB_QUIRKS_H */

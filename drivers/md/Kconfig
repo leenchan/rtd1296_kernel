@@ -123,6 +123,7 @@ config MD_RAID456
 	tristate "RAID-4/RAID-5/RAID-6 mode"
 	depends on BLK_DEV_MD
 	select RAID6_PQ
+	select LIBCRC32C
 	select ASYNC_MEMCPY
 	select ASYNC_XOR
 	select ASYNC_PQ
@@ -239,6 +240,16 @@ config DM_BUFIO
 	 as a cache, holding recently-read blocks in memory and performing
 	 delayed writes.
 
+config DM_DEBUG_BLOCK_STACK_TRACING
+       bool "Keep stack trace of persistent data block lock holders"
+       depends on STACKTRACE_SUPPORT && DM_BUFIO
+       select STACKTRACE
+       ---help---
+	 Enable this for messages that may help debug problems with the
+	 block manager locking used by thin provisioning and caching.
+
+	 If unsure, say N.
+
 config DM_BIO_PRISON
        tristate
        depends on BLK_DEV_DM
@@ -259,7 +270,7 @@ config DM_CRYPT
 	  the ciphers you're going to use in the cryptoapi configuration.
 
 	  For further information on dm-crypt and userspace tools see:
-	  <http://code.google.com/p/cryptsetup/wiki/DMCrypt>
+	  <https://gitlab.com/cryptsetup/cryptsetup/wikis/DMCrypt>
 
 	  To compile this code as a module, choose M here: the module will
 	  be called dm-crypt.
@@ -294,15 +305,17 @@ config DM_CACHE
          algorithms used to select which blocks are promoted, demoted,
          cleaned etc.  It supports writeback and writethrough modes.
 
-config DM_CACHE_MQ
-       tristate "MQ Cache Policy (EXPERIMENTAL)"
+config DM_CACHE_SMQ
+       tristate "Stochastic MQ Cache Policy (EXPERIMENTAL)"
        depends on DM_CACHE
        default y
        ---help---
-         A cache policy that uses a multiqueue ordered by recent hit
-         count to select which blocks should be promoted and demoted.
+         A cache policy that uses a multiqueue ordered by recent hits
+         to select which blocks should be promoted and demoted.
          This is meant to be a general purpose policy.  It prioritises
-         reads over writes.
+         reads over writes.  This SMQ policy (vs MQ) offers the promise
+         of less memory utilization, improved performance and increased
+         adaptability in the face of changing workloads.
 
 config DM_CACHE_CLEANER
        tristate "Cleaner Cache Policy (EXPERIMENTAL)"
@@ -344,6 +357,7 @@ config DM_LOG_USERSPACE
 config DM_RAID
        tristate "RAID 1/4/5/6/10 target"
        depends on BLK_DEV_DM
+       select MD_RAID0
        select MD_RAID1
        select MD_RAID10
        select MD_RAID456
@@ -381,7 +395,7 @@ config DM_MULTIPATH
 	# of SCSI_DH if the latter isn't defined but if
 	# it is, DM_MULTIPATH must depend on it.  We get a build
 	# error if SCSI_DH=m and DM_MULTIPATH=y
-	depends on SCSI_DH || !SCSI_DH
+	depends on !SCSI_DH || SCSI
 	---help---
 	  Allow volume managers to support multipath hardware.
 
@@ -445,6 +459,21 @@ config DM_VERITY
 
 	  If unsure, say N.
 
+config DM_VERITY_HASH_PREFETCH_MIN_SIZE_128
+	bool "Prefetch size 128"
+
+config DM_VERITY_HASH_PREFETCH_MIN_SIZE
+	int "Verity hash prefetch minimum size"
+	depends on DM_VERITY
+	range 1 4096
+	default 128 if DM_VERITY_HASH_PREFETCH_MIN_SIZE_128
+	default 1
+	---help---
+	  This sets minimum number of hash blocks to prefetch for dm-verity.
+	  For devices like eMMC, having larger prefetch size like 128 can improve
+	  performance with increased memory consumption for keeping more hashes
+	  in RAM.
+
 config DM_VERITY_FEC
 	bool "Verity forward error correction support"
 	depends on DM_VERITY
@@ -478,7 +507,7 @@ config DM_LOG_WRITES
 	  This device-mapper target takes two devices, one device to use
 	  normally, one to log all write operations done to the first device.
 	  This is for use by file system developers wishing to verify that
-	  their fs is writing a consitent file system at all times by allowing
+	  their fs is writing a consistent file system at all times by allowing
 	  them to replay the log in a variety of ways and to check the
 	  contents.
 
@@ -488,15 +517,16 @@ config DM_LOG_WRITES
 	  If unsure, say N.
 
 config DM_ANDROID_VERITY
-	tristate "Android verity target support"
-	depends on DM_VERITY
+	bool "Android verity target support"
+	depends on BLK_DEV_DM=y
+	depends on DM_VERITY=y
 	depends on X509_CERTIFICATE_PARSER
 	depends on SYSTEM_TRUSTED_KEYRING
-	depends on PUBLIC_KEY_ALGO_RSA
+	depends on CRYPTO_RSA
 	depends on KEYS
 	depends on ASYMMETRIC_KEY_TYPE
 	depends on ASYMMETRIC_PUBLIC_KEY_SUBTYPE
-	depends on MD_LINEAR
+	select DM_VERITY_HASH_PREFETCH_MIN_SIZE_128
 	---help---
 	  This device-mapper target is virtually a VERITY target. This
 	  target is setup by reading the metadata contents piggybacked
@@ -504,4 +534,24 @@ config DM_ANDROID_VERITY
 	  of the metadata contents are verified against the key included
 	  in the system keyring. Upon success, the underlying verity
 	  target is setup.
+
+config DM_ANDROID_VERITY_AT_MOST_ONCE_DEFAULT_ENABLED
+	bool "Verity will validate blocks at most once"
+	depends on DM_VERITY
+	---help---
+	  Default enables at_most_once option for dm-verity
+
+	  Verify data blocks only the first time they are read from the
+	  data device, rather than every time.  This reduces the overhead
+	  of dm-verity so that it can be used on systems that are memory
+	  and/or CPU constrained.  However, it provides a reduced level
+	  of security because only offline tampering of the data device's
+	  content will be detected, not online tampering.
+
+	  Hash blocks are still verified each time they are read from the
+	  hash device, since verification of hash blocks is less performance
+	  critical than data blocks, and a hash block will not be verified
+	  any more after all the data blocks it covers have been verified anyway.
+
+	  If unsure, say N.
 endif # MD

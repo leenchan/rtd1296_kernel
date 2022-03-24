@@ -1,5 +1,6 @@
 /*
- * RTD1295 Low Speed ADC driver
+ *
+ * Realtek Low Speed ADC driver
  *
  * Copyright (C) 2017 Realtek Semiconductor Corporation.
  *
@@ -7,6 +8,7 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
+ *
  */
 
 #ifndef  __RTD1295_LSADC_H_
@@ -15,10 +17,11 @@
 extern "C" {
 #endif
 
+#if defined(CONFIG_ARCH_RTD129x)
 #define CRT_LSADC_CLK_ADDR                   (0x98000450)
 #define CRT_LSADC_CLK_EN_VALUE               (4)
+#endif /* CONFIG_ARCH_RTD129x */
 
-#define CRT_LSADC_PG_ADDR                    (0x9800034C)
 #define CRT_LSADC_PG_VALUE                   (0x00000002)
 #define CRT_LSADC_VDDMUX_EN_MASK             (0x00000002)
 #define CRT_LSADC_VDDMUX_EN_OFFSET           (1)
@@ -29,10 +32,16 @@ extern "C" {
 #define CRT_LSADC_VDDMUX_SEL_MASK            (0x00000400)
 #define CRT_LSADC_VDDMUX_SEL_OFFSET          (10)
 
-#define MIS_SYS_BASE_ADDR                    (0x9801B000)
-#define MIS_ISR_REG_ADDR                     (0x9801B00C)
-#define MIS_ISR_MASK_LSADC0_INT              (0x00200000)
-#define MIS_ISR_MASK_LSADC1_INT              (0x00400000)
+#if defined(CONFIG_ARCH_RTD129x)
+#define ISR_MASK_LSADC0_INT              (0x00200000)
+#define ISR_MASK_LSADC1_INT              (0x00400000)
+#elif defined(CONFIG_ARCH_RTD139x)
+#define ISR_MASK_LSADC0_INT              (0x00010000)
+#define ISR_MASK_LSADC1_INT              (0x00020000)
+#elif defined(CONFIG_ARCH_RTD16xx)
+#define ISR_MASK_LSADC0_INT              (0x00000008)
+#define ISR_MASK_LSADC1_INT              (0x00000010)
+#endif /* CONFIG_ARCH_RTD129x | CONFIG_ARCH_RTD139x | CONFIG_ARCH_RTD16xx */
 
 
 //#define LSADC_ANALOG_CTRL_VALUE              (0x00011101)
@@ -49,31 +58,31 @@ extern "C" {
 #define LSADC1_CTRL_MASK_VDD_GND_EN          (0x00000010)
 #define LSADC1_CTRL_MASK_VDD_GND_SEL         (0x00000020)
 
-#define LSADC0_PAD0_ADDR                     (0x98012800)
-#define LSADC0_PAD1_ADDR                     (0x98012804)
+#define LSADC0_PAD0_ADDR                     (0x00000000)
+#define LSADC0_PAD1_ADDR                     (0x00000004)
 
-#define LSADC0_CTRL_ADDR                     (0x98012820)
-#define LSADC0_STATUS_ADDR                   (0x98012824)
-#define LSADC0_ANALOG_CTRL_ADDR              (0x98012828)
-//#define LSADC0_PERI_TOP_DEBUG_ADDR           (0x9801282c)
+#define LSADC0_CTRL_ADDR                     (0x00000020)
+#define LSADC0_STATUS_ADDR                   (0x00000024)
+#define LSADC0_ANALOG_CTRL_ADDR              (0x00000028)
+//#define LSADC0_PERI_TOP_DEBUG_ADDR           (0x0000002c)
 
-#define LSADC0_PAD0_LEVEL_SET0_ADDR          (0x98012830)
-#define LSADC0_PAD0_LEVEL_SET1_ADDR          (0x98012834)
-#define LSADC0_PAD0_LEVEL_SET2_ADDR          (0x98012838)
-#define LSADC0_PAD0_LEVEL_SET3_ADDR          (0x9801283c)
-#define LSADC0_PAD0_LEVEL_SET4_ADDR          (0x98012840)
-#define LSADC0_PAD0_LEVEL_SET5_ADDR          (0x98012844)
+#define LSADC0_PAD0_LEVEL_SET0_ADDR          (0x00000030)
+#define LSADC0_PAD0_LEVEL_SET1_ADDR          (0x00000034)
+#define LSADC0_PAD0_LEVEL_SET2_ADDR          (0x00000038)
+#define LSADC0_PAD0_LEVEL_SET3_ADDR          (0x0000003c)
+#define LSADC0_PAD0_LEVEL_SET4_ADDR          (0x00000040)
+#define LSADC0_PAD0_LEVEL_SET5_ADDR          (0x00000044)
 
-#define LSADC0_PAD1_LEVEL_SET0_ADDR          (0x98012848)
-#define LSADC0_PAD1_LEVEL_SET1_ADDR          (0x9801284c)
-#define LSADC0_PAD1_LEVEL_SET2_ADDR          (0x98012850)
-#define LSADC0_PAD1_LEVEL_SET3_ADDR          (0x98012854)
-#define LSADC0_PAD1_LEVEL_SET4_ADDR          (0x98012858)
-#define LSADC0_PAD1_LEVEL_SET5_ADDR          (0x9801285c)
+#define LSADC0_PAD1_LEVEL_SET0_ADDR          (0x00000048)
+#define LSADC0_PAD1_LEVEL_SET1_ADDR          (0x0000004c)
+#define LSADC0_PAD1_LEVEL_SET2_ADDR          (0x00000050)
+#define LSADC0_PAD1_LEVEL_SET3_ADDR          (0x00000054)
+#define LSADC0_PAD1_LEVEL_SET4_ADDR          (0x00000058)
+#define LSADC0_PAD1_LEVEL_SET5_ADDR          (0x0000005c)
 
-//#define LSADC0_INT_PAD0_ADDR                 (0x98012878)
-//#define LSADC0_INT_PAD1_ADDR                 (0x9801287c)
-#define LSADC0_POWER_ADDR                    (0x98012880)
+//#define LSADC0_INT_PAD0_ADDR                 (0x00000078)
+//#define LSADC0_INT_PAD1_ADDR                 (0x0000007c)
+#define LSADC0_POWER_ADDR                    (0x00000080)
 #define LSADC0_CLK_GATING_EN                 (0x00000001)
 #define LSADC1_CLK_GATING_EN                 (0x00000002)
 
@@ -85,31 +94,31 @@ extern "C" {
 #define LSADC1_PAD_MASK_ADC_VAL              (0x0000007F)
 
 
-#define LSADC1_PAD0_ADDR                     (0x98012900)
-#define LSADC1_PAD1_ADDR                     (0x98012904)
+#define LSADC1_PAD0_ADDR                     (0x00000100)
+#define LSADC1_PAD1_ADDR                     (0x00000104)
 
-#define LSADC1_CTRL_ADDR                     (0x98012920)
-#define LSADC1_STATUS_ADDR                   (0x98012924)
-#define LSADC1_ANALOG_CTRL_ADDR              (0x98012928)
-//#define LSADC1_PERI_TOP_DEBUG_ADDR           (0x9801292c)
+#define LSADC1_CTRL_ADDR                     (0x00000120)
+#define LSADC1_STATUS_ADDR                   (0x00000124)
+#define LSADC1_ANALOG_CTRL_ADDR              (0x00000128)
+//#define LSADC1_PERI_TOP_DEBUG_ADDR           (0x0000012c)
 
-#define LSADC1_PAD0_LEVEL_SET0_ADDR          (0x98012930)
-#define LSADC1_PAD0_LEVEL_SET1_ADDR          (0x98012934)
-#define LSADC1_PAD0_LEVEL_SET2_ADDR          (0x98012938)
-#define LSADC1_PAD0_LEVEL_SET3_ADDR          (0x9801293c)
-#define LSADC1_PAD0_LEVEL_SET4_ADDR          (0x98012940)
-#define LSADC1_PAD0_LEVEL_SET5_ADDR          (0x98012944)
+#define LSADC1_PAD0_LEVEL_SET0_ADDR          (0x00000130)
+#define LSADC1_PAD0_LEVEL_SET1_ADDR          (0x00000134)
+#define LSADC1_PAD0_LEVEL_SET2_ADDR          (0x00000138)
+#define LSADC1_PAD0_LEVEL_SET3_ADDR          (0x0000013c)
+#define LSADC1_PAD0_LEVEL_SET4_ADDR          (0x00000140)
+#define LSADC1_PAD0_LEVEL_SET5_ADDR          (0x00000144)
 
-#define LSADC1_PAD1_LEVEL_SET0_ADDR          (0x98012948)
-#define LSADC1_PAD1_LEVEL_SET1_ADDR          (0x9801294c)
-#define LSADC1_PAD1_LEVEL_SET2_ADDR          (0x98012950)
-#define LSADC1_PAD1_LEVEL_SET3_ADDR          (0x98012954)
-#define LSADC1_PAD1_LEVEL_SET4_ADDR          (0x98012958)
-#define LSADC1_PAD1_LEVEL_SET5_ADDR          (0x9801295c)
+#define LSADC1_PAD1_LEVEL_SET0_ADDR          (0x00000148)
+#define LSADC1_PAD1_LEVEL_SET1_ADDR          (0x0000014c)
+#define LSADC1_PAD1_LEVEL_SET2_ADDR          (0x00000150)
+#define LSADC1_PAD1_LEVEL_SET3_ADDR          (0x00000154)
+#define LSADC1_PAD1_LEVEL_SET4_ADDR          (0x00000158)
+#define LSADC1_PAD1_LEVEL_SET5_ADDR          (0x0000015c)
 
-//#define LSADC1_INT_PAD0_ADDR                 (0x98012978)
-//#define LSADC1_INT_PAD1_ADDR                 (0x9801297c)
-#define LSADC1_POWER_ADDR                    (0x98012980)
+//#define LSADC1_INT_PAD0_ADDR                 (0x00000178)
+//#define LSADC1_INT_PAD1_ADDR                 (0x0000017c)
+#define LSADC1_POWER_ADDR                    (0x00000180)
 
 // define LSADC0_STATUS and LSADC1_STATUS MASK
 #define LSADC_STATUS_MASK_PAD0_STATUS       (0x00000001)

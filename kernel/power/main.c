@@ -15,10 +15,39 @@
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
+#include <linux/delay.h>
 
 #include "power.h"
 
 DEFINE_MUTEX(pm_mutex);
+
+#ifdef CONFIG_GLINUX_CURRENT
+#include <linux/delay.h>
+static char current_power[32]="none";//none->mem->ok->none
+
+static ssize_t mycurrent_show(struct kobject *kobj,
+                                      struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%s\n", current_power);
+}
+
+/* set ok to quit suspend waiting*/
+static ssize_t mycurrent_store(struct kobject *kobj,
+                                       struct kobj_attribute *attr,
+                                       const char *buf, size_t n)
+{
+    if (n < 32) {
+        snprintf(current_power,n, "%s\n", buf);
+        return n;
+    }
+    else {
+        return -EINVAL;
+    }
+}
+
+power_attr(mycurrent);
+
+#endif  /* CONFIG_GLINUX_CURRENT */
 
 #ifdef CONFIG_PM_SLEEP
 
@@ -38,11 +67,18 @@ int unregister_pm_notifier(struct notifier_block *nb)
 }
 EXPORT_SYMBOL_GPL(unregister_pm_notifier);
 
-int pm_notifier_call_chain(unsigned long val)
+int __pm_notifier_call_chain(unsigned long val, int nr_to_call, int *nr_calls)
 {
-	int ret = blocking_notifier_call_chain(&pm_chain_head, val, NULL);
+	int ret;
+
+	ret = __blocking_notifier_call_chain(&pm_chain_head, val, NULL,
+						nr_to_call, nr_calls);
 
 	return notifier_to_errno(ret);
+}
+int pm_notifier_call_chain(unsigned long val)
+{
+	return __pm_notifier_call_chain(val, -1, NULL);
 }
 
 /* If set, devices may be suspended and resumed asynchronously. */
@@ -272,7 +308,17 @@ static inline void pm_print_times_init(void)
 {
 	pm_print_times_enabled = !!initcall_debug;
 }
-#else /* !CONFIG_PP_SLEEP_DEBUG */
+
+static ssize_t pm_wakeup_irq_show(struct kobject *kobj,
+					struct kobj_attribute *attr,
+					char *buf)
+{
+	return pm_wakeup_irq ? sprintf(buf, "%u\n", pm_wakeup_irq) : -ENODATA;
+}
+
+power_attr_ro(pm_wakeup_irq);
+
+#else /* !CONFIG_PM_SLEEP_DEBUG */
 static inline void pm_print_times_init(void) {}
 #endif /* CONFIG_PM_SLEEP_DEBUG */
 
@@ -302,10 +348,6 @@ static ssize_t state_show(struct kobject *kobj, struct kobj_attribute *attr,
 #endif
 	if (hibernation_available())
 		s += sprintf(s, "disk ");
-
-    /* RTD129x extra power state */
-    s += sprintf(s, "off ");
-
 	if (s != buf)
 		/* convert the last space to a newline */
 		*(s-1) = '\n';
@@ -354,27 +396,23 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 		goto out;
 	}
 
-    /* hijack the following power states: 
-     *   standby -> mem [suspend_mode=wfi]
-     *   mem     -> mem [suspend_mode=ram]
-     *   off     -> mem [suspend_mode=coolboot]
-     *
-     * These states will be set as mem, but suspend_mode will 
-     *   be set to relative value.
-     */
-    do {
-        int rtk_set_suspend_mode(const char *buf, int n);
-        int ret = rtk_set_suspend_mode(buf, n);
-
-        if (ret == 0) {
-            strcpy((char *)buf, "mem\n");
-            n = strlen(buf);
-        } else if (ret == -EPERM) {
-            error = ret;
-            goto out;
+#ifdef CONFIG_GLINUX_CURRENT
+    {
+        int wait_count = 0;
+        if (n < 32) {
+            strcpy(current_power, buf);
+            for (wait_count = 0; wait_count < 5000; wait_count++) {
+                if (!strncmp("ok", current_power, 2)) {
+                    break;
+                }
+                else {
+                    udelay(1000);
+                }
+            }
+            strcpy(current_power, "none");
         }
-    } while (0);
-
+    }
+#endif
 	state = decode_state(buf, n);
 	if (state < PM_SUSPEND_MAX)
 		error = pm_suspend(state);
@@ -419,11 +457,33 @@ power_attr(state);
  * are any wakeup events detected after 'wakeup_count' was written to.
  */
 
+#ifdef CONFIG_RTK_PLATFORM
+extern unsigned int pm_wakelock_mode;
+extern unsigned int pm_block_wakelock;
+#endif /* CONFIG_RTK_PLATFORM */
+
 static ssize_t wakeup_count_show(struct kobject *kobj,
 				struct kobj_attribute *attr,
 				char *buf)
 {
 	unsigned int val;
+
+#ifdef CONFIG_RTK_PLATFORM
+
+#if 0
+    if(pm_wakelock_mode == 1) {
+        int count = 0;
+        while(pm_block_wakelock == 1) {
+            msleep(1); //udelay(1);
+            count++;
+        }
+        pr_err("[%s] count %d\n",__func__,count);
+        val = 0;
+        return sprintf(buf,"%u\n",val);
+    }
+#endif
+
+#endif /* CONFIG_RTK_PLATFORM */
 
 	return pm_get_wakeup_count(&val, true) ?
 		sprintf(buf, "%u\n", val) : -EINTR;
@@ -435,6 +495,16 @@ static ssize_t wakeup_count_store(struct kobject *kobj,
 {
 	unsigned int val;
 	int error;
+
+#ifdef CONFIG_RTK_PLATFORM
+
+#if 0
+	if(pm_wakelock_mode == 1) {
+		return n;
+	}
+#endif
+
+#endif /* CONFIG_RTK_PLATFORM */
 
 	error = pm_autosleep_lock();
 	if (error)
@@ -512,6 +582,7 @@ static ssize_t wake_lock_store(struct kobject *kobj,
 			       struct kobj_attribute *attr,
 			       const char *buf, size_t n)
 {
+    //pr_info("wake_lock:%s\n", buf);
 	int error = pm_wake_lock(buf);
 	return error ? error : n;
 }
@@ -529,6 +600,7 @@ static ssize_t wake_unlock_store(struct kobject *kobj,
 				 struct kobj_attribute *attr,
 				 const char *buf, size_t n)
 {
+    //pr_info("wake_unlock:%s\n", buf);
 	int error = pm_wake_unlock(buf);
 	return error ? error : n;
 }
@@ -573,14 +645,7 @@ static ssize_t pm_trace_dev_match_show(struct kobject *kobj,
 	return show_trace_dev_match(buf, PAGE_SIZE);
 }
 
-static ssize_t
-pm_trace_dev_match_store(struct kobject *kobj, struct kobj_attribute *attr,
-			 const char *buf, size_t n)
-{
-	return -EINVAL;
-}
-
-power_attr(pm_trace_dev_match);
+power_attr_ro(pm_trace_dev_match);
 
 #endif /* CONFIG_PM_TRACE */
 
@@ -629,10 +694,14 @@ static struct attribute * g[] = {
 #endif
 #ifdef CONFIG_PM_SLEEP_DEBUG
 	&pm_print_times_attr.attr,
+	&pm_wakeup_irq_attr.attr,
 #endif
 #endif
 #ifdef CONFIG_FREEZER
 	&pm_freeze_timeout_attr.attr,
+#endif
+#ifdef CONFIG_GLINUX_CURRENT
+	&mycurrent_attr.attr,
 #endif
 	NULL,
 };
@@ -658,6 +727,7 @@ static int __init pm_init(void)
 		return error;
 	hibernate_image_size_init();
 	hibernate_reserved_size_init();
+	pm_states_init();
 	power_kobj = kobject_create_and_add("power", NULL);
 	if (!power_kobj)
 		return -ENOMEM;
@@ -665,6 +735,9 @@ static int __init pm_init(void)
 	if (error)
 		return error;
 	pm_print_times_init();
+#ifdef CONFIG_RTK_PLATFORM //FIXME: acquire wakelock to prevent system from entering suspend state
+    pm_wake_lock("rtk_awake");
+#endif
 	return pm_autosleep_init();
 }
 

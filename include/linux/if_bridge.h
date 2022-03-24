@@ -45,13 +45,9 @@ struct br_ip_list {
 #define BR_PROXYARP		BIT(8)
 #define BR_LEARNING_SYNC	BIT(9)
 #define BR_PROXYARP_WIFI	BIT(10)
+#define BR_MCAST_FLOOD		BIT(11)
 
-#if defined (CONFIG_RTL_IGMP_SNOOPING)
-#define BRCTL_SET_IGMPPROXY_PID 200
-#if defined (CONFIG_RT_MULTIPLE_BR_SUPPORT)
-#define BRCTL_REGISTER_IGMPSNOOPING_MODULE 201
-#endif
-#endif
+#define BR_DEFAULT_AGEING_TIME	(300 * HZ)
 
 extern void brioctl_set(int (*ioctl_hook)(struct net *, unsigned int, void __user *));
 

@@ -287,10 +287,9 @@ int tcp_get_timeouts_by_state(u_int8_t state,void *ct_or_cp, int is_ct)
 	}
 	else {
 		struct ip_vs_conn *cp = (struct ip_vs_conn *)ct_or_cp;
-		net = ip_vs_conn_net(cp);
+		net = cp->ipvs->net;
 	}
 	unsigned int *tcp_timeouts_run = tcp_get_timeouts(net);
-	//net_warn_ratelimited("--%s--%d-- state = %d,  tcp_timeouts_run[%s] = %d\n",__FUNCTION__,__LINE__,state,tcp_conntrack_names[state],tcp_timeouts_run[state]);
 	return tcp_timeouts_run[state];
 }
 #else
@@ -307,13 +306,13 @@ static inline struct nf_tcp_net *tcp_pernet(struct net *net)
 }
 
 static bool tcp_pkt_to_tuple(const struct sk_buff *skb, unsigned int dataoff,
-			     struct nf_conntrack_tuple *tuple)
+			     struct net *net, struct nf_conntrack_tuple *tuple)
 {
 	const struct tcphdr *hp;
 	struct tcphdr _hdr;
 
-	/* Actually only need first 8 bytes. */
-	hp = skb_header_pointer(skb, dataoff, 8, &_hdr);
+	/* Actually only need first 4 bytes to get ports. */
+	hp = skb_header_pointer(skb, dataoff, 4, &_hdr);
 	if (hp == NULL)
 		return false;
 
@@ -343,13 +342,7 @@ static void tcp_print_tuple(struct seq_file *s,
 /* Print out the private part of the conntrack. */
 static void tcp_print_conntrack(struct seq_file *s, struct nf_conn *ct)
 {
-	enum tcp_conntrack state;
-
-	spin_lock_bh(&ct->lock);
-	state = ct->proto.tcp.state;
-	spin_unlock_bh(&ct->lock);
-
-	seq_printf(s, "%s ", tcp_conntrack_names[state]);
+	seq_printf(s, "%s ", tcp_conntrack_names[ct->proto.tcp.state]);
 }
 
 static unsigned int get_conntrack_index(const struct tcphdr *tcph)
@@ -440,6 +433,8 @@ static void tcp_options(const struct sk_buff *skb,
 			length--;
 			continue;
 		default:
+			if (length < 2)
+				return;
 			opsize=*ptr++;
 			if (opsize < 2) /* "silly options" */
 				return;
@@ -466,9 +461,8 @@ static void tcp_options(const struct sk_buff *skb,
 	}
 }
 
-#if defined(FAST_PATH_SPI_ENABLED) || !(defined(CONFIG_RTL_IPTABLES_FAST_PATH) ||defined(CONFIG_RTL_HARDWARE_NAT))
 static void tcp_sack(const struct sk_buff *skb, unsigned int dataoff,
-					 const struct tcphdr *tcph, __u32 *sack)
+                     const struct tcphdr *tcph, __u32 *sack)
 {
 	unsigned char buff[(15 * 4) - sizeof(struct tcphdr)];
 	const unsigned char *ptr;
@@ -501,6 +495,8 @@ static void tcp_sack(const struct sk_buff *skb, unsigned int dataoff,
 			length--;
 			continue;
 		default:
+			if (length < 2)
+				return;
 			opsize = *ptr++;
 			if (opsize < 2) /* "silly options" */
 				return;
@@ -527,9 +523,7 @@ static void tcp_sack(const struct sk_buff *skb, unsigned int dataoff,
 		}
 	}
 }
-#endif
 
-#if defined(FAST_PATH_SPI_ENABLED) || !(defined(CONFIG_RTL_IPTABLES_FAST_PATH) ||defined(CONFIG_RTL_HARDWARE_NAT))
 #if !defined(FAST_PATH_SPI_ENABLED)
 static
 #endif
@@ -768,7 +762,6 @@ bool tcp_in_window(const struct nf_conn *ct,
 
 	return res;
 }
-#endif
 
 /* table of valid flag combinations - PUSH, ECE and CWR are always valid */
 static const u8 tcp_valid_flags[(TCPHDR_FIN|TCPHDR_SYN|TCPHDR_RST|TCPHDR_ACK|
@@ -1150,13 +1143,7 @@ static int tcp_packet(struct nf_conn *ct,
 		set_bit(IPS_ASSURED_BIT, &ct->status);
 		nf_conntrack_event_cache(IPCT_ASSURED, ct);
 	}
-
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-	nf_ct_refresh_acct_tcp(ct, ctinfo, skb, timeout, old_state, new_state);
-#else
 	nf_ct_refresh_acct(ct, ctinfo, skb, timeout);
-#endif
-	//nf_ct_refresh_acct(ct, ctinfo, skb, timeout);
 
 	return NF_ACCEPT;
 }
@@ -1692,7 +1679,6 @@ static int tcp_kmemdup_compat_sysctl_table(struct nf_proto_net *pn,
 
 static int tcp_init_net(struct net *net, u_int16_t proto)
 {
-	int ret;
 	struct nf_tcp_net *tn = tcp_pernet(net);
 	struct nf_proto_net *pn = &tn->pn;
 
@@ -1707,18 +1693,7 @@ static int tcp_init_net(struct net *net, u_int16_t proto)
 		tn->tcp_max_retrans = nf_ct_tcp_max_retrans;
 	}
 
-	if (proto == AF_INET) {
-		ret = tcp_kmemdup_compat_sysctl_table(pn, tn);
-		if (ret < 0)
-			return ret;
-
-		ret = tcp_kmemdup_sysctl_table(pn, tn);
-		if (ret < 0)
-			nf_ct_kfree_compat_sysctl_table(pn);
-	} else
-		ret = tcp_kmemdup_sysctl_table(pn, tn);
-
-	return ret;
+	return tcp_kmemdup_sysctl_table(pn, tn);
 }
 
 static struct nf_proto_net *tcp_get_net_proto(struct net *net)

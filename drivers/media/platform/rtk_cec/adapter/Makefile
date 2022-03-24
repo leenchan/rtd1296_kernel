@@ -8,4 +8,8 @@ ccflags-y += -I$(srctree)/drivers/staging/android
 
 EXTRA_CFLAGS += -I ../
 
-obj-$(CONFIG_RTD1295_CEC) += cec_rtd1295.o
+ifndef CONFIG_XEN
+ccflags-y += -D USE_ION_AUDIO_HEAP
+endif
+
+obj-$(CONFIG_RTK_CEC) += rtk_cec.o

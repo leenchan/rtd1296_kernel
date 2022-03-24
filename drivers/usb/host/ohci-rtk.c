@@ -29,13 +29,15 @@
 
 extern int usb_disabled(void);
 
-static int ohci_rtk_setup(struct usb_hcd *hcd) {
+static int ohci_rtk_setup(struct usb_hcd *hcd)
+{
 	struct ohci_hcd	*ohci = hcd_to_ohci(hcd);
 	int ret;
 
 	ohci_dbg(ohci, "ohci_rtk_setup, ohci:%p", ohci);
 
-	if ((ret = ohci_init(ohci)) < 0)
+	ret = ohci_init(ohci);
+	if (ret < 0)
 		return ret;
 	return 0;
 }
@@ -47,7 +49,8 @@ static int ohci_rtk_dmp_start(struct usb_hcd *hcd)
 
 	ohci_dbg(ohci, "ohci_rtk_dmp_start, ohci:%p", ohci);
 
-	if ((ret = ohci_run(ohci)) < 0) {
+	ret = ohci_run(ohci);
+	if (ret < 0) {
 		printk ("can't start %s", hcd->self.bus_name);
 		ohci_stop(hcd);
 		return ret;
@@ -99,7 +102,7 @@ static const struct hc_driver ohci_rtk_dmp_hc_driver = {
 	.start_port_reset =	ohci_start_port_reset,
 };
 
-static struct ohci_rtk {
+struct ohci_rtk {
 	struct device *dev;
 	struct ohci_hcd *ohci;
 	struct usb_phy *phy;
@@ -108,10 +111,11 @@ static struct ohci_rtk {
 	struct work_struct work;
 };
 
-extern void rtk_usb_init_power_on(struct device *dev);
-extern int rtk_usb_power_manager_schedule_work(struct device *usb_dev, struct work_struct *work);
+extern void rtk_usb_init_port_power_on(struct device *dev);
+extern int rtk_usb_manager_schedule_work(struct device *usb_dev, struct work_struct *work);
 
-static void ohci_rtk_probe_work(struct work_struct *work) {
+static void ohci_rtk_probe_work(struct work_struct *work)
+{
 	struct ohci_rtk *rtk = container_of(work, struct ohci_rtk, work);
 	struct device		*dev = rtk->dev;
 	struct usb_hcd *hcd = ohci_to_hcd(rtk->ohci);
@@ -121,7 +125,7 @@ static void ohci_rtk_probe_work(struct work_struct *work) {
 
 	unsigned long probe_time = jiffies;
 
-	dev_info(dev, "%s Start ...\n",__func__);
+	dev_info(dev, "%s Start ...\n", __func__);
 
 	usb_phy_init(phy);
 
@@ -131,7 +135,7 @@ static void ohci_rtk_probe_work(struct work_struct *work) {
 		usb_put_hcd(hcd);
 	}
 
-	rtk_usb_init_power_on(dev);
+	rtk_usb_init_port_power_on(dev);
 
 	dev_info(dev, "%s End ... ok! (take %d ms)\n", __func__, jiffies_to_msecs(jiffies - probe_time));
 	return;
@@ -212,7 +216,14 @@ static int ohci_rtk_drv_probe(struct platform_device *pdev)
 	ohci_hcd_init(ohci);
 
 #ifdef CONFIG_USB_PATCH_ON_RTK
-	ohci->wrap_reg = ioremap(0x98013820, 0x4);
+	if (pdev->dev.of_node) {
+		u32 wrap_reg = 0;
+		of_property_read_u32(pdev->dev.of_node, "wrap_reg", &wrap_reg);
+		if (wrap_reg)
+			ohci->wrap_reg = ioremap(wrap_reg, 0x4);
+		else
+			ohci->wrap_reg = NULL;
+	}
 #endif
 
 	if (of_property_read_bool(pdev->dev.of_node, "delay_probe_work")) {
@@ -229,7 +240,7 @@ static int ohci_rtk_drv_probe(struct platform_device *pdev)
 		rtk->irq = irq;
 		INIT_WORK(&rtk->work, ohci_rtk_probe_work);
 		if (of_property_read_bool(pdev->dev.of_node, "ordered_probe"))
-			rtk_usb_power_manager_schedule_work(&pdev->dev, &rtk->work);
+			rtk_usb_manager_schedule_work(&pdev->dev, &rtk->work);
 		else
 			schedule_work(&rtk->work);
 	} else {
@@ -263,9 +274,12 @@ static int ohci_rtk_drv_remove(struct platform_device *pdev)
 	iounmap(hcd->regs);
 
 #ifdef CONFIG_USB_PATCH_ON_RTK
-	struct ohci_hcd *ohci;
-	ohci = hcd_to_ohci(hcd);
-	__iounmap(ohci->wrap_reg);
+	if (hcd) {
+		struct ohci_hcd *ohci;
+		ohci = hcd_to_ohci(hcd);
+		if (ohci->wrap_reg)
+			__iounmap(ohci->wrap_reg);
+	}
 #endif
 
 	release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
@@ -280,14 +294,13 @@ static int ohci_rtk_drv_remove(struct platform_device *pdev)
 extern int usb_runtime_suspend(struct device *dev);
 
 /* Add Workaround to fixed EHCI/OHCI Wrapper can't work simultaneously */
-int RTK_ohci_force_suspend(const char *func) {
+int RTK_ohci_force_suspend(const char *func)
+{
 	static struct ohci_hcd *s_ohci = NULL;
 	struct device_node *node = NULL;
 	struct platform_device *pdev = NULL;
 	struct usb_hcd *hcd = NULL;
 	struct ohci_hcd *ohci = NULL;
-	struct usb_bus *bus = NULL;
-	struct usb_device *roothub = NULL;
 	unsigned long	flags;
 
 	if (s_ohci == NULL) {
@@ -347,7 +360,7 @@ static int rtk_ohci_suspend(struct device *dev)
 
 	dev_info(dev, "[USB] Enter %s", __func__);
 
-	if (RTK_PM_STATE == PM_SUSPEND_STANDBY){
+	if (RTK_PM_STATE == PM_SUSPEND_STANDBY) {
 		//For idle mode
 		dev_info(dev, "[USB] %s Idle mode\n", __func__);
 		goto out;
@@ -375,7 +388,7 @@ static int rtk_ohci_resume(struct device *dev)
 	struct usb_phy *phy;
 
 	dev_info(dev, "[USB] Enter %s", __func__);
-	if (RTK_PM_STATE == PM_SUSPEND_STANDBY){
+	if (RTK_PM_STATE == PM_SUSPEND_STANDBY) {
 		//For idle mode
 		dev_info(dev, "[USB] %s Idle mode\n", __func__);
 		goto out;
@@ -406,7 +419,7 @@ static const struct dev_pm_ops rtk_ohci_pm_ops = {
 };
 
 static const struct of_device_id ohci_rtk_dt_ids[] = {
-	{ .compatible = "Realtek,rtk119x-ohci", },
+	{ .compatible = "Realtek,rtd119x-ohci", },
 	{ .compatible = "Realtek,rtd129x-ohci", },
 	{},
 };

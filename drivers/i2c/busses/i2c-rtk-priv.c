@@ -7,56 +7,9 @@
  * under the terms of the GNU General Public License as published by the
  * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
--------------------------------------------------------------------------
-Update List :
--------------------------------------------------------------------------
-    1.1     |   20080530    | Using for loop instead of while loop
--------------------------------------------------------------------------
-    1.1a    |   20080531    | Add 1 ms delay at the end of each xfer
-                            | for timing compatibility with old i2c driver
--------------------------------------------------------------------------
-    1.1b    |   20080531    | After Xfer complete, ISR will Disable All Interrupts
-                            | and Disable I2C first, then wakeup the caller
--------------------------------------------------------------------------
-    1.1c    |   20080617    | Add API get_tx_abort_reason
--------------------------------------------------------------------------
-    1.1d    |   20080630    | Add I2C bus jammed recover feature.
-            |               | send 10 bits clock with gpio 4 to recover bus jam problem.
--------------------------------------------------------------------------
-    1.1e    |   20080702    | Disable GP 4/5 interript during detect bus jam
--------------------------------------------------------------------------
-    1.1f    |   20080707    | Only do bus jam detect/recover after timeout occurs
--------------------------------------------------------------------------
-    1.2     |   20080711    | modified to support mars i2c
--------------------------------------------------------------------------
-    1.2a    |   20080714    | modified the way of i2c/GPIO selection
--------------------------------------------------------------------------
-    1.3     |   20080729    | Support Non Stop Write Transfer
--------------------------------------------------------------------------
-    1.3a    |   20080729    | Fix bug of non stop write transfer
-            |               |    1) MSB first
-            |               |    2) no stop after write ack
--------------------------------------------------------------------------
-    1.3b    |   20080730    | Support non stop write in Mars
-            |               | Support bus jam recorver in Mars
--------------------------------------------------------------------------
-    1.3c    |   20080807    | Support minimum delay feature
--------------------------------------------------------------------------
-    1.4     |   20081016    | Mars I2C_1 Support
--------------------------------------------------------------------------
-    1.5     |   20090330    | Add Spin Lock to Protect venus_i2c data structure
--------------------------------------------------------------------------
-    1.6     |   20090407    | Add FIFO threshold to avoid timing issue caused
-            |               | by performance issue
--------------------------------------------------------------------------
-    1.7     |   20090423    | Add Suspen/Resume Feature
--------------------------------------------------------------------------
-    2.0     |   20091019    | Add Set Speed feature
--------------------------------------------------------------------------
-    2.0a    |   20091020    | change speed of bus jam recover via spd argument
--------------------------------------------------------------------------
-    2.1     |   20100511    | Support GPIO Read Write
--------------------------------------------------------------------------*/
+ */
+
+
 #include <linux/kernel.h>
 #include <linux/kernel.h>
 #include <linux/ioport.h>
@@ -67,2893 +20,1369 @@ Update List :
 #include <linux/interrupt.h>
 #include <linux/wait.h>
 #include <linux/i2c.h>
-#include <asm/io.h>
+#include <linux/io.h>
+#include <linux/delay.h>
+#include <linux/arm-smccc.h>
 #include <asm/irq.h>
-#include <asm/delay.h>
-//#include <../../../arch/arm/mach-rtk119x/include/venus.h>
-//#include <../../../arch/arm/mach-rtk119x/include/mars.h>
-//#include <../../../arch/arm/mach-rtk119x/include/jupiter.h>
-//#include <../../../arch/arm/mach-rtk119x/include/saturn.h>
-//#include <../../../arch/arm/mach-rtk119x/include/darwin.h>
-//#include <../../../arch/arm/mach-rtk119x/include/macarthur.h>
-//#include <platform.h>
-//#include <../../../arch/arm/mach-rtk119x/include/venus_gpio.h>
-#include <soc/realtek/venus_gpio.h>
 
 #include "i2c-rtk-priv.h"
-////////////////////////////////////////////////////////////////////
-#ifdef CONFIG_REALTEK_JUPITER
-#include "i2c-venus-config-jupiter.h"
-#endif
 
-#ifdef CONFIG_REALTEK_SATURN
-#include "i2c-venus-config-saturn.h"
-#endif
+#ifdef CONFIG_I2C_RTK_SECURE_ACCESS
+extern bool secure_dvfs_is_disabled(void);
 
-#ifdef CONFIG_REALTEK_DARWIN
-#include "i2c-venus-config-darwin.h"
-#endif
-
-#ifdef CONFIG_REALTEK_MACARTHUR
-#include "i2c-venus-config-macarthur.h"
-#endif
-
-#ifdef CONFIG_REALTEK_NIKE
-#include "i2c-venus-config-nike.h"
-#endif
-
-#include "i2c-venus-config-saturn.h"
-//#include "i2c-phoenix-config.h"
-
-// for debug
-
-#define i2c_print                       printk
-#define dbg_char(x)                     wr_reg(0xb801b200, (unsigned long) (x))
-
-#ifdef SPIN_LOCK_PROTECT_EN
-    #define LOCK_VENUS_I2C(a,b)         spin_lock_irqsave(a, b)
-    #define UNLOCK_VENUS_I2C(a, b)      spin_unlock_irqrestore(a, b)
-#else
-    #define LOCK_VENUS_I2C(a,b)         do { b = 1; }while(0)
-    #define UNLOCK_VENUS_I2C(a, b)      do { b = 0; }while(0)
-#endif
-
-#ifdef I2C_PROFILEING_EN
-#define LOG_EVENT(x)                    log_event(x)
-#else
-#define LOG_EVENT(x)
-#endif
-
-#ifdef CONFIG_I2C_RTK_BUS_JAM_RECOVER
-void venus_i2c_bus_jam_recover(venus_i2c* p_this);
-int  venus_i2c_bus_jam_detect(venus_i2c* p_this);
-void venus_i2c_bus_jam_recover_proc(venus_i2c* p_this);
-#endif
-
-
-#define SA_SHIRQ IRQF_SHARED
-
-#define  phoenix_i2c_mdelay(x)  \
-            set_current_state(TASK_INTERRUPTIBLE); \
-            schedule_timeout(msecs_to_jiffies(x))
-
-static int phoenix_i2c_gpio_set_dir (VENUS_GPIO_ID gid,  unsigned char out)
+static void swc_write(unsigned int address, unsigned int value)
 {
-	u32 bit_n = gid % 32;
+	struct arm_smccc_res res;
 
-	/* Fix me */
-
-	return 0;
-}
-static int phoenix_i2c_gpio_input (VENUS_GPIO_ID gid)
-{
-	/* Fix me */
-
-}
-static int phoenix_i2c_gpio_output (VENUS_GPIO_ID gid, unsigned char    val)
-{
-	u32 bit_n = gid % 32;
-
-	/* Fix me */
-
-	return 0;
-}
-static int phoenix_i2c_gpio_set_irq_enable (VENUS_GPIO_ID gid,  unsigned char     on)
-{
-
-	u32 bit_n = gid % 32;
-
-	/* Fix me */
-
-	return 0;
+	arm_smccc_smc(0x8400ff0a, value, 0, 0, 0, 0, 0, 0, &res);
+//	ta_hdcp_lib_set_i2c_enable(value);
 }
 
-/*------------------------------------------------------------------
- * Func : venus_i2c_msater_write
- *
- * Desc : master write handler for venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *        event  : INT event of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_i2c_msater_write(venus_i2c* p_this, unsigned int event, unsigned int tx_abort_source)
+void SET_IC_ENABLE(struct rtk_i2c_handler *handler, int value)
 {
-#define TxComplete()              (p_this->xfer.tx_len >= p_this->xfer.tx_buff_len)
-
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    while(!TxComplete() && NOT_TXFULL(p_this))
-    {
-		RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-		if(p_this->xfer.tx_len == p_this->xfer.tx_buff_len-1)
-		{
-        		SET_IC_DATA_CMD(p_this, ((p_this->xfer.tx_buff[p_this->xfer.tx_len++]) |(0x1<<9)));//TODO: stop victor add 2014.3.3
-			RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-		}else{
-        		SET_IC_DATA_CMD(p_this, p_this->xfer.tx_buff[p_this->xfer.tx_len++]);
-			RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-		}
-    }
-
-    if (TxComplete())
-    {
-        SET_IC_INTR_MASK(p_this, GET_IC_INTR_MASK(p_this) & ~TX_EMPTY_BIT);
-    }
-
-    if (event & TX_ABRT_BIT)
-    {
-        p_this->xfer.ret = -ETXABORT;
-        p_this->xfer.tx_abort_source = tx_abort_source;
-    }
-    else if (event & STOP_DET_BIT)
-    {
-        p_this->xfer.ret = TxComplete() ? p_this->xfer.tx_len : -ECMDSPLIT;
-    }
-
-    if (p_this->xfer.ret)
-    {
-        SET_IC_INTR_MASK(p_this, 0);
-        SET_IC_ENABLE(p_this, 0);
-        p_this->xfer.mode = I2C_IDEL;	// change to idle state
-        wake_up(&p_this->wq);
-    }
-
-#undef TxComplete
+	if (handler->id == 0 && !secure_dvfs_is_disabled())
+		smc_write(handler->reg_map.IC_ENABLE, value);
+	else
+		wr_reg(handler->reg_map.IC_ENABLE, value);
 }
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_msater_read
- *
- * Desc : master read handler for venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_i2c_msater_read(venus_i2c* p_this, unsigned int event, unsigned int tx_abort_source)
+#endif
+/*
+ * Func : rtk_i2c_init
+ * Desc : init rtk i2c
+ * Parm : handler : handle of rtk i2c
+ * Retn : 0
+ */
+int rtk_i2c_handler_init(struct rtk_i2c_handler *handler)
 {
-#define TxComplete()        (p_this->xfer.tx_len >= p_this->xfer.rx_buff_len)
-#define RxComplete()        (p_this->xfer.rx_len >= p_this->xfer.rx_buff_len)
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    // TX Thread
-    while(!TxComplete() && NOT_TXFULL(p_this))
-    {
-		if(p_this->xfer.tx_len == ((p_this->xfer.rx_buff_len + p_this->xfer.tx_buff_len)-1)){
-			RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-			SET_IC_DATA_CMD(p_this, (READ_CMD|(0x1<<9)) );  // send stop command to rx fifo   //TODO: stop victor add 2014.3.3
-		}else{
-			SET_IC_DATA_CMD(p_this, READ_CMD);  // send read command to rx fifo
-		}
-		p_this->xfer.tx_len++;
-		while (!RxComplete() && NOT_RXEMPTY(p_this))
-		{
-	    	p_this->xfer.rx_buff[p_this->xfer.rx_len++] = (unsigned char)(GET_IC_DATA_CMD(p_this) & 0xFF);
-		}
-    }
+	RTK_DEBUG("%s\n", __func__);
 
-    // RX Thread
-    while (!RxComplete() && NOT_RXEMPTY(p_this))
-    {
-        p_this->xfer.rx_buff[p_this->xfer.rx_len++] = (unsigned char)(GET_IC_DATA_CMD(p_this) & 0xFF);
-    }
+#if defined(CONFIG_I2C_RTK_SECURE_ACCESS)
+//	if (handler->id == 0)
+//		ta_i2c_init();
+#endif
+#if 0
+	if (handler->flags & RTK_I2C_IRQ_RDY)
+		return 0;
 
-    if (TxComplete())
-    {
-        SET_IC_INTR_MASK(p_this, GET_IC_INTR_MASK(p_this) & ~TX_EMPTY_BIT);
-    }
+	if (rtk_i2c_probe(handler) < 0)
+		return -ENODEV;
 
-    if (event & TX_ABRT_BIT)
-    {
-        p_this->xfer.ret = -ETXABORT;
-        p_this->xfer.tx_abort_source = tx_abort_source;
-    }
-    else if ((event & STOP_DET_BIT) || RxComplete())
-    {
-        SET_IC_INTR_MASK(p_this, GET_IC_INTR_MASK(p_this) & ~RX_FULL_BIT);
-
-        p_this->xfer.ret = RxComplete() ? p_this->xfer.rx_len : -ECMDSPLIT;
-    }
-
-    if (p_this->xfer.ret)
-    {
-        SET_IC_INTR_MASK(p_this, 0);
-        SET_IC_ENABLE(p_this, 0);
-        p_this->xfer.mode = I2C_IDEL;	// change to idle state
-        wake_up(&p_this->wq);
-    }
-
-#undef TxComplete
-#undef RxComplete
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_msater_read
- *
- * Desc : master read handler for venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_i2c_msater_random_read(venus_i2c* p_this, unsigned int event, unsigned int tx_abort_source)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-#define TxComplete()        (p_this->xfer.tx_len >= (p_this->xfer.rx_buff_len + p_this->xfer.tx_buff_len))    // it should add the same number of read command to tx fifo
-#define RxComplete()        (p_this->xfer.rx_len >=  p_this->xfer.rx_buff_len)
-
-    // TX Thread
-    	while(!TxComplete() && NOT_TXFULL(p_this))
-	{
-		if (p_this->xfer.tx_len < p_this->xfer.tx_buff_len)
-	    {
-			RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-        	SET_IC_DATA_CMD(p_this, p_this->xfer.tx_buff[p_this->xfer.tx_len]);
-
-		}else{
-			if( (p_this->xfer.tx_len == (p_this->xfer.tx_buff_len))	&&
-				(p_this->xfer.tx_len == ((p_this->xfer.rx_buff_len + p_this->xfer.tx_buff_len)-1))	)
-			{
-				RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-				SET_IC_DATA_CMD(p_this, (READ_CMD|(0x3<<9)) );  // send Restart command and STOP to rx fifo  : first also last read cmd
-			}
-			else
-			if ( (p_this->xfer.tx_len == (p_this->xfer.tx_buff_len)) &&
-				(!(p_this->xfer.tx_len == ((p_this->xfer.rx_buff_len + p_this->xfer.tx_buff_len)-1))) )
-			{
-				RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-				SET_IC_DATA_CMD(p_this, (READ_CMD|(0x1<<10)) );  // send restart command to rx fifo : first but not last read cmd
-			}
-			else
-			if ( (!(p_this->xfer.tx_len == (p_this->xfer.tx_buff_len))) &&
-				(p_this->xfer.tx_len == ((p_this->xfer.rx_buff_len + p_this->xfer.tx_buff_len)-1)) )
-			{
-				RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-				SET_IC_DATA_CMD(p_this, (READ_CMD|(0x1<<9)) );  // send stop command to rx fifo  : not first but last read cmd
-			}
-			else
-			{
-				RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-				SET_IC_DATA_CMD(p_this, READ_CMD);  // send read command to rx fifo : not first also not last read cmd
-			}
-		}
-       	p_this->xfer.tx_len++;
-
-		// RX Thread, incase rxfifo overflow and the datas are droped
-	    	while(!RxComplete() && NOT_RXEMPTY(p_this))
-	    	{
-			RTK_DEBUG("[%s] %s  %d p_this->xfer.rx_len =%d \n", __FILE__,__FUNCTION__,__LINE__,p_this->xfer.rx_len);
-	        	p_this->xfer.rx_buff[p_this->xfer.rx_len++] = (unsigned char)(GET_IC_DATA_CMD(p_this) & 0xFF);
-	    	}
+	ret = request_irq(handler->irq, rtk_i2c_isr, SA_SHIRQ, "i2c",
+		(void *) handler);
+	if (ret < 0) {
+		pr_err("FATAL: Request irq %d failed(ret=%d)\n",
+			handler->irq, ret);
+		return -ENODEV;
 	}
-	RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
+#endif
 
-    // RX Thread
-    while(!RxComplete() && NOT_RXEMPTY(p_this))
-    {
-        p_this->xfer.rx_buff[p_this->xfer.rx_len++] = (unsigned char)(GET_IC_DATA_CMD(p_this) & 0xFF);
-    }
+	handler->flags = RTK_I2C_IRQ_RDY;
+	handler->rx_fifo_depth =
+		((GET_IC_COMP_PARAM_1(handler) >>  8) & 0xFF) + 1;
+	handler->tx_fifo_depth =
+		((GET_IC_COMP_PARAM_1(handler) >> 16) & 0xFF) + 1;
+	init_waitqueue_head(&handler->wq);
 
-    if TxComplete()
-    {
-        SET_IC_INTR_MASK(p_this, GET_IC_INTR_MASK(p_this) & ~TX_EMPTY_BIT);
-    }
+	spin_lock_init(&handler->lock);
 
-    if (event & TX_ABRT_BIT)
-    {
-        p_this->xfer.ret = -ETXABORT;
-        p_this->xfer.tx_abort_source = tx_abort_source;
-    }
-    else if ((event & STOP_DET_BIT) || RxComplete())
-    {
-        SET_IC_INTR_MASK(p_this, GET_IC_INTR_MASK(p_this) & ~RX_FULL_BIT);
-        p_this->xfer.ret = RxComplete() ? p_this->xfer.rx_len : -ECMDSPLIT;
-    }
-
-    if (p_this->xfer.ret)
-    {
-        SET_IC_INTR_MASK(p_this, 0);
-        SET_IC_ENABLE(p_this, 0);
-        p_this->xfer.mode = I2C_IDEL;	// change to idle state
-        wake_up(&p_this->wq);
-    }
-
-#undef TxComplete
-#undef RxComplete
+	return rtk_i2c_phy_init(handler);
 }
 
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_isr
- *
- * Desc : isr of venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *
+/*
+ * Func : rtk_i2c_uninit
+ * Desc : uninit rtk i2c
+ * Parm : handler : handle of rtk i2c
  * Retn : 0
- *------------------------------------------------------------------*/
-irqreturn_t venus_i2c_isr(int this_irq, void* dev_id){
-    venus_i2c* p_this = (venus_i2c*) dev_id;
-    unsigned long flags;
-    unsigned int event = 0;
-    unsigned int tx_abrt_source = 0;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    LOCK_VENUS_I2C(&p_this->lock, flags);
+ */
+int rtk_i2c_handler_uninit(struct rtk_i2c_handler *handler)
+{
+	RTK_DEBUG("%s\n", __func__);
 
-    if (!(GET_I2C_ISR(p_this) & p_this->reg_map.I2C_INT))    // interrupt belongs to I2C
-    {
-        UNLOCK_VENUS_I2C(&p_this->lock, flags);
-	    return IRQ_NONE;
-    }
+	SET_IC_ENABLE(handler, 0);
+	SET_IC_INTR_MASK(handler, 0);
 
-    LOG_EVENT(EVENT_ENTER_ISR);
-
-    event = GET_IC_INTR_STAT(p_this);
-    tx_abrt_source = GET_IC_TX_ABRT_SOURCE(p_this);
-
-	CLR_IC_INTR(p_this);	                    // clear interrupts of i2c_x
-
-	if ((GET_IC_CON(p_this) & IC_SLAVE_DISABLE)==0)
-    {
-        while (NOT_RXEMPTY(p_this) && p_this->slave_rx_len < sizeof(p_this->slave_rx_buffer))
-            p_this->slave_rx_buffer[p_this->slave_rx_len++] = (unsigned char)(GET_IC_DATA_CMD(p_this) & 0xFF);
-
-	    //if (event & START_DET_BIT)
-	    //    printk("start detect\n");
-
-        if (event & STOP_DET_BIT && p_this->slave_rx_len)
-        {
-            if (p_this->slave_ops.handle_command)
-                p_this->slave_ops.handle_command(
-                    p_this->slave_id,
-                    p_this->slave_rx_buffer,
-                    p_this->slave_rx_len);
-
-            p_this->slave_rx_len = 0;   // flush buffer
-	    }
-
-        if (event & RD_REQ_BIT)
-        {
-            if (p_this->slave_ops.read_data)
-                SET_IC_DATA_CMD(p_this, p_this->slave_ops.read_data(p_this->slave_id));
-            else
-	            SET_IC_DATA_CMD(p_this, 0xFF);
-	    }
+	if ((handler->flags & RTK_I2C_IRQ_RDY)) {
+		free_irq(handler->irq, handler);
+		handler->flags = 0;
 	}
-    else
-    {
-        switch (p_this->xfer.mode)
-        {
-        case I2C_MASTER_WRITE:
-            venus_i2c_msater_write(p_this, event, tx_abrt_source);
-            break;
 
-        case I2C_MASTER_READ:
-            venus_i2c_msater_read(p_this, event, tx_abrt_source);
-            break;
-
-        case I2C_MASTER_RANDOM_READ:
-            venus_i2c_msater_random_read(p_this, event, tx_abrt_source);
-            break;
-
-        default:
-            printk("Unexcepted Interrupt\n");
-            SET_IC_ENABLE(p_this, 0);
-        }
-    }
-
-    SET_I2C_ISR(p_this, p_this->reg_map.I2C_INT);   // clear I2C Interrupt Flag
-    UNLOCK_VENUS_I2C(&p_this->lock, flags);
-    return IRQ_HANDLED;
+	return 0;
 }
 
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_set_tar
- *
- * Desc : set tar of venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *        addr   : address of sar
- *        mode
-  : mode of sar
- *
+/*
+ * Func : rtk_i2c_phy_init
+ * Desc : init rtk i2c phy
+ * Parm : handler : handle of rtk i2c
  * Retn : 0
- *------------------------------------------------------------------*/
-int
-venus_i2c_set_tar(
-    venus_i2c*          p_this,
-    unsigned short      addr,
-    ADDR_MODE           mode
-    )
+ */
+int rtk_i2c_phy_init(struct rtk_i2c_handler *handler)
 {
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (mode==ADDR_MODE_10BITS)
-    {
-        if (addr > 0x3FF)
-            return -EADDROVERRANGE;
+	RTK_DEBUG("%s\n", __func__);
 
-        SET_IC_ENABLE(p_this, 0);
-        SET_IC_TAR(p_this, addr & 0x3FF);
-        SET_IC_CON(p_this, (GET_IC_CON(p_this) & (~IC_10BITADDR_MASTER)) | IC_10BITADDR_MASTER);
-    }
-    else
-    {
-        if (addr > 0x7F)
-            return -EADDROVERRANGE;
+	SET_IC_ENABLE(handler, 0);
+	SET_IC_INTR_MASK(handler, 0); /* disable all interrupt*/
+	SET_IC_CON(handler,
+		IC_SLAVE_DISABLE | IC_RESTART_EN | SPEED_SS | IC_MASTER_MODE);
+	SET_IC_TX_TL(handler, FIFO_THRESHOLD);
+	SET_IC_RX_TL(handler, handler->rx_fifo_depth - FIFO_THRESHOLD);
+	handler->set_spd(handler, handler->spd);
 
-        SET_IC_ENABLE(p_this, 0);
-        SET_IC_TAR(p_this, addr & 0x7F);
-        SET_IC_CON(p_this, GET_IC_CON(p_this) & (~IC_10BITADDR_MASTER));
-    }
-
-    p_this->tar      = addr;
-    p_this->tar_mode = mode;
-
-    return 0;
+#ifdef DEV_DEBUG
+	rtk_i2c_dump(handler);
+#endif
+	return 0;
 }
 
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_slave_mode_enable
- *
- * Desc : enable/disable i2c slave mode
- *
- * Parm : p_this : handle of venus i2c
- *        on     : enable /disable
- *
+/*
+ * Func : rtk_i2c_set_spd
+ * Desc : set speed of rtk i2c
+ * Parm : handler:handle of rtk i2c
+ *	KHz:operation speed of i2c
  * Retn : 0
- *------------------------------------------------------------------*/
-int venus_i2c_slave_mode_enable(
-    venus_i2c*              p_this,
-    unsigned char           on
-    )
+ */
+int rtk_i2c_set_spd(struct rtk_i2c_handler *handler, int KHz)
 {
-    unsigned long flags;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    LOCK_VENUS_I2C(&p_this->lock, flags);
+	unsigned int scl_time;
+	unsigned int div_h;
+	unsigned int div_l;
+	unsigned long sda_del;
+	unsigned int clk_time;
 
-    if (on)
-    {
-        printk("[I2C%d] i2c slave enabled, sar=%x\n", p_this->id, GET_IC_SAR(p_this));
-        SET_IC_ENABLE(p_this, 0);
-        p_this->set_sar(p_this, p_this->sar, p_this->sar_mode);
-        SET_IC_CON(p_this, GET_IC_CON(p_this) & ~(IC_SLAVE_DISABLE));
-        SET_IC_INTR_MASK(p_this, START_DET_BIT | STOP_DET_BIT | RD_REQ_BIT | RX_FULL_BIT);
-        if (p_this->reg_map.I2C_ISR_EN)
-            wr_reg(p_this->reg_map.I2C_ISR_EN, rd_reg(p_this->reg_map.I2C_ISR_EN) | p_this->reg_map.I2C_ISR_EN_MASK);
-        SET_IC_ENABLE(p_this, 1);
-        p_this->flags |= VENUS_I2C_SLAVE_ENABLE;
-    }
-    else
-    {
-        printk("[I2C%d] i2c slave disabled\n", p_this->id);
-        SET_IC_ENABLE(p_this, 0);
-        SET_IC_CON(p_this, GET_IC_CON(p_this) | IC_SLAVE_DISABLE);
-        SET_IC_INTR_MASK(p_this, 0);
-        p_this->flags &= ~VENUS_I2C_SLAVE_ENABLE;
-    }
+	RTK_DEBUG("%s\n", __func__);
 
-    UNLOCK_VENUS_I2C(&p_this->lock, flags);
+#ifdef CONFIG_ARCH_RTD16xx || CONFIG_ARCH_RTD13xx
+	if (handler->id == 0) {
+		if (KHz < 10 || KHz > 3400) {
+			pr_err("[I2C%d] warning, speed %d out of range,",
+				handler->id, KHz);
+			pr_err("speed should between 10 ~ 3400KHz\n");
+			return -1;
+		}
+	} else {
+		if (KHz < 10 || KHz > 800) {
+			pr_err("[I2C%d] warning, speed %d out of range,",
+				handler->id, KHz);
+			pr_err("speed should between 10 ~ 800KHz\n");
+			return -1;
+		}
+	}
+#else
+	if (KHz < 10 || KHz > 800) {
+		pr_err("[I2C%d] warning, speed %d out of range,",
+			handler->id, KHz);
+		pr_err("speed should between 10 ~ 800KHz\n");
+		return -1;
+	}
+#endif
 
-    return 0;
-}
+	clk_time = 37; /*27MHZ*/
 
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_register_slave_ops
- *
- * Desc : register slave mode ops
- *
- * Parm : p_this : handle of venus i2c
- *        ops    : slave mode ops
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-int venus_i2c_register_slave_ops(
-    venus_i2c*              p_this,
-    venus_i2c_slave_ops*    ops,
-    unsigned long           id
-    )
-{
-    unsigned long flags;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    LOCK_VENUS_I2C(&p_this->lock, flags);
-
-    if (ops==NULL)
-    {
-        p_this->slave_ops.handle_command = NULL;
-        p_this->slave_ops.read_data = NULL;
-        p_this->slave_id = 0;
-        venus_i2c_slave_mode_enable(p_this, 0);
-    }
-    else
-    {
-        p_this->slave_ops.handle_command = ops->handle_command;
-        p_this->slave_ops.read_data = ops->read_data;
-        p_this->slave_id = id;
-    }
-
-    UNLOCK_VENUS_I2C(&p_this->lock, flags);
-    return 0;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_set_port
- *
- * Desc : set port of venus i2c
- *
- * Parm : p_this  : handle of venus i2c
- *        port_id : output port selection
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-int
-venus_i2c_set_port(
-    venus_i2c*          p_this,
-    unsigned char       port_id
-    )
-{
-    venus_i2c_port* port = NULL;
-    RTK_DEBUG("[%s] %s  %d  port_id = %d\n", __FILE__,__FUNCTION__,__LINE__, port_id);
-
-    if (port_id >= p_this->n_port)
-    {
-        printk("[I2C%d] WARNING, zap to port %d failed, invalid port number\n", p_this->id, port_id);
-        return -EFAULT;
-    }
-
-    port = &p_this->p_port[port_id];
-
-    if (port->pin_mux[0].addr &&
-        (rd_reg(port->pin_mux[0].addr) & port->pin_mux[0].mask)!= port->pin_mux[0].i2c_val)
-    {
-        printk("[I2C%d] WARNING, zap to port %d failed, port has been occupied by other application\n", p_this->id, port_id);
-        return -EFAULT;
-    }
-
-    if (port->pin_mux[1].addr &&
-        (rd_reg(port->pin_mux[1].addr) & port->pin_mux[1].mask)!= port->pin_mux[1].i2c_val)
-    {
-        printk("[I2C%d] WARNING, zap to port %d failed, port has been occupied by other application\n", p_this->id, port_id);
-        return -EFAULT;
-    }
-
-    // set input mux
-    if (port->input_mux[0].addr)
-        wr_reg(port->input_mux[0].addr, (rd_reg(port->input_mux[0].addr) & ~port->input_mux[0].mask) | port->input_mux[0].val);
-
-    if (port->input_mux[1].addr)
-        wr_reg(port->input_mux[1].addr, (rd_reg(port->input_mux[1].addr) & ~port->input_mux[1].mask) | port->input_mux[1].val);
-
-    p_this->current_port = port;
-
-    return 0;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_set_sar
- *
- * Desc : set sar of venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *        addr   : address of sar
- *        mode
-  : mode of sar
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-int
-venus_i2c_set_sar(
-    venus_i2c*          p_this,
-    unsigned short      addr,
-    ADDR_MODE           mode
-    )
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (mode==ADDR_MODE_10BITS)
-    {
-        SET_IC_ENABLE(p_this, 0);
-        SET_IC_SAR(p_this, p_this->sar & 0x3FF);
-        SET_IC_CON(p_this, GET_IC_CON(p_this) | IC_10BITADDR_SLAVE);
-    }
-    else
-    {
-        SET_IC_ENABLE(p_this, 0);
-        SET_IC_SAR(p_this, p_this->sar & 0x7F);
-        SET_IC_CON(p_this, GET_IC_CON(p_this) & (~IC_10BITADDR_SLAVE));
-    }
-
-    p_this->sar      = addr;
-    p_this->sar_mode = mode;
-
-    return 0;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_set_spd
- *
- * Desc : set speed of venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *        KHz    : operation speed of i2c
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-int venus_i2c_set_spd(venus_i2c* p_this, int KHz)
-{
-    unsigned int scl_time;
-    unsigned int div_h;
-    unsigned int div_l;
-    unsigned long sda_del;
-
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-
-    if (KHz < 10 || KHz > 800)
-    {
-        i2c_print("[I2C%d] warning, speed %d out of range, speed should between 10 ~ 800KHz\n", p_this->id, KHz);
-        return -1;
-    }
-
-	scl_time = (1000000/KHz)/2; /* the time ns need for SCL high/low */
-
-	if(scl_time%37)	
-	{
-		if((scl_time%37)>18)
-			scl_time += (37 - (scl_time%37));
+	scl_time = (1000000 / KHz) / 2; /* the time ns need for SCL high/low */
+	if (scl_time % clk_time) {
+		if ((scl_time % clk_time) > clk_time / 2)
+			scl_time += (clk_time - (scl_time % clk_time));
 		else
-			scl_time -= (scl_time%37);
+			scl_time -= (scl_time % clk_time);
 	}
 
 	/*
 	 * 27MHz crystal generate one clock 37ns,
-	 * for synopsys design ware ip v1.14a, SCL_LCNT need -1, SCL_HCNT need -8
-	 * 400KHz SCL Low required min 1.3 us
+	 * 108MHz crystal generate one clock 9ns,
+	 * for synopsys design ware ip v1.14a, SCL_LCNT need -1,
+	 * SCL_HCNT need -8, 400KHz SCL Low required min 1.3 us
 	 */
-	if(KHz<400)
-	{
-		div_h = (scl_time/37)-8;
-		div_l = (scl_time/37)-1;
+
+#ifdef CONFIG_ARCH_RTD16xx || CONFIG_ARCH_RTD13xx
+
+	if (handler->id == 0) {
+		if (KHz == 100){
+			div_h = 524;
+			div_l = 531;
+		} else if (KHz == 400){
+			div_h = 119;
+			div_l = 126;
+		} else if (KHz == 3400) {
+			div_h = 7;
+			div_l = 15;
+		}
+	} else {
+		if (KHz < 400) {
+			div_h = (scl_time / clk_time) - 8;
+			div_l = (scl_time / clk_time) - 1;
+		} else {
+			div_h = 25;
+			div_l = 32;
+		}
 	}
-	else
-	{
+
+#else
+	if (KHz < 400) {
+		div_h = (scl_time / clk_time) - 8;
+		div_l = (scl_time / clk_time) - 1;
+	} else {
 		div_h = 24;
 		div_l = 34;
 	}
 
-	RTK_DEBUG("[I2C%d] KHz = %d, div_h = %d, div_l = %d\n", p_this->id, KHz, div_h, div_l);
-
-    if (div_h >= 0xFFFF || div_h==0 ||
-        div_l >= 0xFFFF || div_l==0)
-    {
-        i2c_print("[I2C%d] fatal, set speed failed : divider divider out of range. div_h = %d, div_l = %d\n", p_this->id, div_h, div_l);
-        return -1;
-    }
-
-    SET_IC_ENABLE(p_this, 0);
-
-	if(KHz<=100){
-		SET_IC_CON(p_this, (GET_IC_CON(p_this) & (~IC_SPEED)) | SPEED_SS);
-		SET_IC_SS_SCL_HCNT(p_this, div_h);
-		SET_IC_SS_SCL_LCNT(p_this, div_l);
-	}else{
-		SET_IC_CON(p_this, (GET_IC_CON(p_this) & (~IC_SPEED)) | SPEED_FS);
-		SET_IC_FS_SCL_HCNT(p_this, div_h);
-		SET_IC_FS_SCL_LCNT(p_this, div_l);
-
+	if (div_h >= 0xFFFF || div_h == 0 || div_l >= 0xFFFF || div_l == 0) {
+		pr_err("[I2C%d] fatal, set speed failed : ", handler->id);
+		pr_err("divider divider out of range.");
+		pr_err("div_h = %d, div_l = %d\n", div_h, div_l);
+		return -1;
 	}
 
-    p_this->spd  = KHz;
-    p_this->tick = 1000 / KHz;
-
-	/* Set SDA delay time */
-	sda_del = GET_IC_SDA_DEL(p_this) & ~I2C_SDA_DEL_MASK;
-	sda_del |= I2C_SDA_DEL_EN(1) | I2C_SDA_DEL_SEL(SDA_DEL_518NS);
-	SET_IC_SDA_DEL(p_this, sda_del);
-
-    return 0;
-}
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_set_guard_interval
- *
- * Desc : set guard_interval of venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *        us     : operation speed of i2c
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-int venus_i2c_set_guard_interval(venus_i2c* p_this, unsigned long us)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    p_this->guard_interval = us;
-    return 0;
-}
-
-
-#define current_port_id(p_this)     ((p_this->current_port) ? (((unsigned long) p_this->current_port - (unsigned long) p_this->p_port)/sizeof(venus_i2c_port)) : -1)
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_dump
- *
- * Desc : dump staus of venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0 for success
- *------------------------------------------------------------------*/
-int venus_i2c_dump(venus_i2c* p_this)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    i2c_print("=========================\n");
-    i2c_print("= VER : %s               \n", VERSION);
-    i2c_print("=========================\n");
-    i2c_print("= PHY : %d               \n", p_this->id);
-    i2c_print("= PORT: %ld               \n", current_port_id(p_this));
-    i2c_print("= MODEL: %s              \n", p_this->model_name);
-    i2c_print("= SPD : %d               \n", p_this->spd);
-    i2c_print("= SAR : 0x%03x (%d bits) \n", p_this->sar, p_this->sar_mode);
-    i2c_print("= TX FIFO DEPTH : %d     \n", p_this->tx_fifo_depth);
-    i2c_print("= RX FIFO DEPTH : %d     \n", p_this->rx_fifo_depth);
-    i2c_print("= FIFO THRESHOLD: %d     \n", FIFO_THRESHOLD);
-
-    if (p_this->gpio_map.valid)
-    {
-        i2c_print("= SDA GPIO : %s_GPIO %d\n", gpio_type(gpio_group(p_this->gpio_map.sda)), gpio_idx(p_this->gpio_map.sda));
-        i2c_print("= SCL GPIO : %s_GPIO %d\n", gpio_type(gpio_group(p_this->gpio_map.scl)), gpio_idx(p_this->gpio_map.scl));
-
-#ifdef CONFIG_I2C_RTK_BUS_JAM_RECOVER
-        i2c_print("= BUS JAM RECORVER 3: ON  \n");
-#else
-        i2c_print("= BUS JAM RECORVER 3: OFF  \n");
 #endif
 
-#ifdef CONFIG_I2C_VENUS_NON_STOP_WRITE_XFER
-        i2c_print("= NON STOP WRITE : ON  \n");
-#else
-        i2c_print("= NON STOP WRITE : OFF  \n");
-#endif
+	RTK_DEBUG("[I2C%d] KHz = %d, div_h = %d, div_l = %d\n",
+		handler->id, KHz, div_h, div_l);
 
-        i2c_print("= GPIO RW SUPPORT : ON \n");
-    }
-    i2c_print("=========================\n");
-    return 0;
+
+	SET_IC_ENABLE(handler, 0);
+
+	if (KHz <= 100) {
+		SET_IC_CON(handler, (GET_IC_CON(handler) &
+			(~IC_SPEED)) | SPEED_SS);
+		SET_IC_SS_SCL_HCNT(handler, div_h);
+		SET_IC_SS_SCL_LCNT(handler, div_l);
+	} else if(KHz == 400) {
+		SET_IC_CON(handler, (GET_IC_CON(handler) &
+			(~IC_SPEED)) | SPEED_FS);
+		SET_IC_FS_SCL_HCNT(handler, div_h);
+		SET_IC_FS_SCL_LCNT(handler, div_l);
+	} else if (KHz == 3400) {
+		SET_IC_CON(handler, (GET_IC_CON(handler) &
+			(~IC_SPEED)) | SPEED_HS);
+		SET_IC_HS_SCL_HCNT(handler, div_h);
+		SET_IC_HS_SCL_LCNT(handler, div_l);
+	}
+
+	handler->spd = KHz;
+	/*Todo: Fix tick for 3.4MHz*/
+	handler->tick = 1000 / KHz;
+
+	/*Set SDA delay time */
+	if (KHz == 3400) { /*disabled sda_del*/
+		sda_del = 0x0;
+	} else {
+		sda_del = GET_IC_SDA_DEL(handler) & ~I2C_SDA_DEL_MASK;
+		sda_del |= I2C_SDA_DEL_EN | I2C_SDA_DEL_SEL(SDA_DEL_518NS);
+	}
+	SET_IC_SDA_DEL(handler, sda_del);
+
+	return 0;
 }
 
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_find_current_port
- *
- * Desc : fi
- *
- * Parm : p_this : handle of venus i2c
- *
+/**
+ * Func : rtk_i2c_set_tar
+ * Desc : set tar of rtk i2c
+ * Parm : handler : handle of rtk i2c
+ *	addr : address of sar
+ *	mode : mode of sar
  * Retn : 0
- *------------------------------------------------------------------*/
-venus_i2c_port* venus_i2c_find_current_port(
-    venus_i2c*              p_this
-    )
+ */
+int rtk_i2c_set_tar(struct rtk_i2c_handler *handler, unsigned short addr,
+	enum ADDR_MODE mode)
 {
-    venus_i2c_port* p_port = p_this->p_port;
-    int i;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (p_port==NULL)
-        return NULL;
+	RTK_DEBUG("%s\n", __func__);
 
-    for (i=0; i<p_this->n_port; i++)
-    {
-        /*
-        i2c_print("port[%d] input_mux[0]={%08x, %08x, %08x}, input_mux[1]={%08x, %08x, %08x}, pin_mux[0]={%08x, %08x, %08x}, pin_mux[1]={%08x, %08x, %08x}\n",
-            i,
-            p_port[i].input_mux[0].addr, p_port[i].input_mux[0].mask, p_port[i].input_mux[0].val,
-            p_port[i].input_mux[1].addr, p_port[i].input_mux[1].mask, p_port[i].input_mux[1].val,
-            p_port[i].pin_mux[0].addr,   p_port[i].pin_mux[0].mask,   p_port[i].pin_mux[0].i2c_val,
-            p_port[i].pin_mux[1].addr,   p_port[i].pin_mux[1].mask,   p_port[i].pin_mux[1].i2c_val);
-        */
-        if (p_port[i].input_mux[0].addr)
-        {
-            if ((rd_reg(p_port[i].input_mux[0].addr) & p_port[i].input_mux[0].mask)!=p_port[i].input_mux[0].val)
-                continue;
-        }
+	if (mode == ADDR_MODE_10BITS) {
+		if (addr > ADDR_10BITS_MASK)
+			return -EADDROVERRANGE;
 
-        if (p_port[i].input_mux[1].addr)
-        {
-            if ((rd_reg(p_port[i].input_mux[1].addr) & p_port[i].input_mux[1].mask)!=p_port[i].input_mux[1].val)
-                continue;
-        }
+		SET_IC_ENABLE(handler, 0);
+		SET_IC_TAR(handler, addr & ADDR_10BITS_MASK);
+		SET_IC_CON(handler, (GET_IC_CON(handler) &
+			(~IC_10BITADDR_MASTER)) | IC_10BITADDR_MASTER);
+	} else {
+		if (addr > ADDR_7BITS_MASK)
+			return -EADDROVERRANGE;
 
-        if (p_port[i].pin_mux[0].addr)
-        {
-            if ((rd_reg(p_port[i].pin_mux[0].addr) & p_port[i].pin_mux[0].mask)!=p_port[i].pin_mux[0].i2c_val)
-                continue;
-        }
+		SET_IC_ENABLE(handler, 0);
+		SET_IC_TAR(handler, addr & ADDR_7BITS_MASK);
+		SET_IC_CON(handler, GET_IC_CON(handler) &
+			(~IC_10BITADDR_MASTER));
+	}
 
-        if (p_port[i].pin_mux[1].addr)
-        {
-            if ((rd_reg(p_port[i].pin_mux[1].addr) & p_port[i].pin_mux[1].mask)!=p_port[i].pin_mux[1].i2c_val)
-                continue;
-        }
+	handler->tar = addr;
+	handler->tar_mode = mode;
 
-        return &p_port[i];
-    }
-
-    return NULL;
+	return 0;
 }
 
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_probe
- *
- * Desc : probe venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-int venus_i2c_probe(venus_i2c* p_this)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (p_this->id >=I2C_PHY_CNT)
-        return -ENODEV;
-
-    p_this->model_name = MODLE_NAME;
-    p_this->reg_map    = *(i2c_phy[p_this->id].p_reg_map);
-    p_this->n_port     = i2c_phy[p_this->id].n_port;
-    p_this->p_port     = (venus_i2c_port *)i2c_phy[p_this->id].p_port;
-//    p_this->current_port = venus_i2c_find_current_port(p_this);
-
-    //if (p_this->current_port==NULL)
-    //{
-    //    i2c_print("Warning, check pinmux for i2c-%d failed\n",p_this->id);
-    //}
-
-    if (p_this->current_port && p_this->current_port->gpio_mapped)
-    {
-        p_this->gpio_map.muxpad      = p_this->current_port->pin_mux[0].addr;
-        p_this->gpio_map.muxpad_mask = p_this->current_port->pin_mux[0].mask;
-        p_this->gpio_map.muxpad_gpio = p_this->current_port->pin_mux[0].gpio_val;
-        p_this->gpio_map.muxpad_i2c  = p_this->current_port->pin_mux[0].i2c_val;
-        p_this->gpio_map.sda         = p_this->current_port->g2c_sda;
-        p_this->gpio_map.scl         = p_this->current_port->g2c_scl;
-        p_this->gpio_map.valid       = 1;
-    }
-    else
-    {
-        p_this->gpio_map.valid = 0;
-    }
-
-    return 0;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_phy_init
- *
- * Desc : init venus i2c phy
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-int venus_i2c_phy_init(venus_i2c* p_this)
-{
-	int i;
-	RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    SET_IC_ENABLE(p_this, 0);
-    SET_IC_INTR_MASK(p_this, 0);                // disable all interrupt
-    SET_IC_CON(p_this, IC_SLAVE_DISABLE | IC_RESTART_EN | SPEED_SS | IC_MASTER_MODE);
-    SET_IC_TX_TL(p_this, FIFO_THRESHOLD);
-    SET_IC_RX_TL(p_this, p_this->rx_fifo_depth - FIFO_THRESHOLD);
-
-    venus_i2c_set_spd(p_this, p_this->spd);
-    //venus_i2c_set_sar(p_this, p_this->sar, p_this->sar_mode);
 /*
-#ifdef CONFIG_I2C_RTK_BUS_JAM_RECOVER
-    if (venus_i2c_bus_jam_detect(p_this))
-    {
-        JAM_DEBUG("I2C%d Bus Status Check.... Error... Try to Recrver\n",p_this->id);
-        venus_i2c_bus_jam_recover_proc(p_this);
-    }
-    else
-        JAM_DEBUG("I2C%d Bus Status Check.... OK\n",p_this->id);
-#endif
-*/
-//	for (i = 0 ; i < 3 ; i++){
-//        venus_i2c_bus_jam_recover(p_this);
-//        phoenix_i2c_mdelay(10);
-//	}
-
-#ifdef DEV_DEBUG
-    venus_i2c_dump(p_this);
-#endif
-    return 0;
-}
-
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_init
- *
- * Desc : init venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *
+ * Func : rtk_i2c_set_guard_interval
+ * Desc : set guard_interval of rtk i2c
+ * Parm : handler : handle of rtk i2c
+ *		us : operation speed of i2c
  * Retn : 0
- *------------------------------------------------------------------*/
-int venus_i2c_init(venus_i2c* p_this)
+ */
+int rtk_i2c_set_guard_interval(struct rtk_i2c_handler *handler,
+	unsigned long us)
 {
-    int ret;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (p_this->flags & VENUS_I2C_IRQ_RDY)
-        return 0;
-
-    if (venus_i2c_probe(p_this)<0)
-        return -ENODEV;
-
-    if ((ret = request_irq(p_this->irq, venus_i2c_isr, SA_SHIRQ, "i2c", (void*) p_this)) < 0)
-    {
-        i2c_print("FATAL : Request irq%d failed(ret=%d)\n", p_this->irq, ret);
-        return -ENODEV;
-    }
-
-    p_this->flags = VENUS_I2C_IRQ_RDY;
-    p_this->rx_fifo_depth = ((GET_IC_COMP_PARAM_1(p_this) >>  8) & 0xFF)+1;
-    p_this->tx_fifo_depth = ((GET_IC_COMP_PARAM_1(p_this) >> 16) & 0xFF)+1;
-
-    init_waitqueue_head(&p_this->wq);
-
-    spin_lock_init(&p_this->lock);
-
-    return venus_i2c_phy_init(p_this);
+	RTK_DEBUG("%s\n", __func__);
+	handler->guard_interval = us;
+	return 0;
 }
 
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_uninit
- *
- * Desc : uninit venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-int venus_i2c_uninit(venus_i2c* p_this)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    SET_IC_ENABLE(p_this, 0);
-    SET_IC_INTR_MASK(p_this, 0);
-
-    if ((p_this->flags & VENUS_I2C_IRQ_RDY))
-    {
-        free_irq(p_this->irq, p_this);
-        p_this->flags = 0;
-    }
-
-    return 0;
-}
-
-
-
-
-enum {
-    I2C_MODE    = 0,
-    GPIO_MODE   = 1
-};
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_gpio_selection
- *
- * Desc : select i2c/GPIO mode
- *
- * Parm : p_this : handle of venus i2c
- *        mode : 0      : SDA / SCL
- *               others : GPIO
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_i2c_gpio_selection(venus_i2c* p_this, unsigned char mode)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (p_this->gpio_map.muxpad)
-    {
-        unsigned long val = rd_reg(p_this->gpio_map.muxpad);
-
-        val &= ~p_this->gpio_map.muxpad_mask;
-
-        val |= (mode==GPIO_MODE) ? p_this->gpio_map.muxpad_gpio
-                                 : p_this->gpio_map.muxpad_i2c;
-
-        wr_reg(p_this->gpio_map.muxpad, val);
-
-        //printk("GPIO Selection: [%08x] = %08x & %08x\n", p_this->gpio_map.muxpad, rd_reg(p_this->gpio_map.muxpad), p_this->gpio_map.muxpad_mask);
-    }
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_suspend
- *
- * Desc : suspend venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0 for success
- *------------------------------------------------------------------*/
-int venus_i2c_suspend(venus_i2c* p_this)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    i2c_print("[I2C%d] suspend\n", p_this->id);
-
-#ifdef GPIO_MODE_SUSPEND
-
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-
-    while (p_this->xfer.mode!=I2C_IDEL)
-        msleep(1);
-
-    venus_gpio_set_dir(sda, 0);
-    venus_gpio_set_dir(scl, 0);
-
-    venus_gpio_set_irq_enable(sda, 0);
-    venus_gpio_set_irq_enable(scl, 0);
-
-    venus_i2c_gpio_selection(p_this, GPIO_MODE);
-#endif
-
-    return 0;
-}
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_resume
- *
- * Desc : resume venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0 for success
- *------------------------------------------------------------------*/
-int venus_i2c_resume(venus_i2c* p_this)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    i2c_print("[I2C%d] resume\n", p_this->id);
-
-#ifdef GPIO_MODE_SUSPEND
-    venus_i2c_gpio_selection(p_this, I2C_MODE);
-#endif
-
-    venus_i2c_phy_init(p_this);
-
-    return 0;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_reset_state
- *
- * Desc : reset internal state machine of i2c controller.
- *
- *        This is a hack that used to reset the internal state machine
- *        of venus i2c. In mars, there is no way to reset the internal
- *        state of venus I2C controller. However, we found out that we
- *        can use GPIO to generate a pseudo stop to reset it.
- *
- *        First, we need to set the i2c bus to CPIO mode and pull low
- *        SDA and pull high SCL, then changed the i2c bus to I2C mode.
- *        Because SDA has a pull high resistor, so the i2c controller
- *        will see SDA falling and rising when SCL is highw. It will be
- *        looked like start & stop and the state of i2c controller will
- *        be reset.
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_i2c_reset_state(venus_i2c* p_this)
-{
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    int d = p_this->tick / 2;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-
-    if (!p_this->gpio_map.valid)
-        return;
-
-     // Disable GPIO Interrupt
-    venus_gpio_set_irq_enable(sda, 0);
-    venus_gpio_set_irq_enable(scl, 0);
-
-    // pull high SCL & pull low SDA
-    venus_gpio_output(sda, 0);
-    venus_gpio_output(scl, 1);
-
-    // mode : SCL : out, SDA : out
-    venus_gpio_set_dir(sda, 1);
-    venus_gpio_set_dir(scl, 1);
-
-    venus_i2c_gpio_selection(p_this, GPIO_MODE);
-
-    udelay(d);
-
-    venus_i2c_gpio_selection(p_this, I2C_MODE);
-    venus_gpio_set_dir(sda, 0);
-    venus_gpio_set_dir(scl, 0);
-}
-
-
-#ifdef CONFIG_I2C_RTK_BUS_JAM_RECOVER
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_bus_jam_recover
- *
- * Desc : recover i2c bus jam status
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_i2c_bus_jam_recover(venus_i2c* p_this)
-{
-#if 0
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    int i;
-    int d = p_this->tick / 2;
-
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (!p_this->gpio_map.valid)
-        return;
-
-    // Disable GPIO Interrupt
-    venus_gpio_set_irq_enable(sda, 0);
-    venus_gpio_set_irq_enable(scl, 0);
-
-    // pull low SCL & SDA
-    venus_gpio_output(sda, 0);
-    venus_gpio_output(scl, 0);
-
-    // mode : SCL : out, SDA : out
-    venus_gpio_set_dir(sda, 1);
-    venus_gpio_set_dir(scl, 1);
-
-    venus_i2c_gpio_selection(p_this, GPIO_MODE);
-
-    //Add Stop Condition
-	udelay(10);
-	venus_gpio_output(scl, 1);            // pull high SCL
-	udelay(10);
-	venus_gpio_output(sda, 1);            // pull high SDA
-	udelay(10);
-
-    venus_gpio_set_dir(sda, 0);          // mode SDA : in
-
-    // Output Clock Modify Clock Output from 10 to 9
-    for (i=0; i<9; i++)
-    {
-        venus_gpio_output(scl, 0);        // pull low SCL
-        udelay(d);
-        venus_gpio_output(scl, 1);        // pull high SCL
-        udelay(d);
-    }
-
-    venus_gpio_set_dir(scl, 0);          // mode SCL : in
-
-    venus_i2c_gpio_selection(p_this, I2C_MODE);
-#else
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    int i;
-    int d = p_this->tick / 2;
-
-    JAM_DEBUG("[%s] %s  %d start\n", __FILE__,__FUNCTION__,__LINE__);
-
-    if (!p_this->gpio_map.valid)
-        return;
-
-    // Disable GPIO Interrupt
-    phoenix_i2c_gpio_set_irq_enable(sda, 0);
-    phoenix_i2c_gpio_set_irq_enable(scl, 0);
-
-    // pull low SCL & SDA
-    phoenix_i2c_gpio_output(sda, 0);
-    phoenix_i2c_gpio_output(scl, 0);
-
-    // mode : SCL : out, SDA : out
-    phoenix_i2c_gpio_set_dir(sda, 1);
-    phoenix_i2c_gpio_set_dir(scl, 1);
-
-    venus_i2c_gpio_selection(p_this, GPIO_MODE);
-
-    //Add Stop Condition
-	udelay(10);
-	phoenix_i2c_gpio_output(scl, 1);            // pull high SCL
-	udelay(10);
-	phoenix_i2c_gpio_output(sda, 1);            // pull high SDA
-	udelay(10);
-
-    phoenix_i2c_gpio_set_dir(sda, 0);          // mode SDA : in
-
-    // Output Clock Modify Clock Output from 10 to 9
-    for (i=0; i<9; i++)
-    {
-        phoenix_i2c_gpio_output(scl, 0);        // pull low SCL
-        udelay(d);
-        phoenix_i2c_gpio_output(scl, 1);        // pull high SCL
-        udelay(d);
-    }
-
-    phoenix_i2c_gpio_set_dir(scl, 0);          // mode SCL : in
-
-    venus_i2c_gpio_selection(p_this, I2C_MODE);
-    JAM_DEBUG(KERN_EMERG"[%s] %s  %d end\n", __FILE__,__FUNCTION__,__LINE__);
-
-
-
-
-#endif
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_bus_jam_detect
- *
- * Desc : check if bus jam occurs
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0 : bus not jammed, 1 : bus jammed
- *------------------------------------------------------------------*/
-int venus_i2c_bus_jam_detect(venus_i2c* p_this)
-{
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    int ret = 1;
-    int i;
-    JAM_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (!p_this->gpio_map.valid)
-        return 0;
-
-    // GPIO Interrupt Disable
-    phoenix_i2c_gpio_set_irq_enable(sda, 0);
-    phoenix_i2c_gpio_set_irq_enable(scl, 0);
-
-    // GPIO Dir=Input
-    phoenix_i2c_gpio_set_dir(sda, 0);
-    phoenix_i2c_gpio_set_dir(scl, 0);
-
-    venus_i2c_gpio_selection(p_this, GPIO_MODE);
-
-    for(i=0; i<30; i++)
-    {
-        if (phoenix_i2c_gpio_input(sda) &&  phoenix_i2c_gpio_input(scl))      // SDA && SCL == High
-        {
-            ret = 0;
-            break;
-        }
-        phoenix_i2c_mdelay(1);
-    }
-
-    if (ret)
-    {
-        JAM_DEBUG("I2C %d Jamed, 0xFE01B124 =0x%x\n",
-                p_this->id, (*(volatile unsigned char *)0xFE01B124 ));
-        JAM_DEBUG("I2C %d Jamed, BUS Status: SDA=%d, SCL=%d\n",
-                p_this->id, phoenix_i2c_gpio_input(sda), phoenix_i2c_gpio_input(scl));
-    }
-
-    venus_i2c_gpio_selection(p_this, I2C_MODE);
-
-    return ret;
-}
-
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_bus_jam_recover
- *
- * Desc : recover i2c bus jam status
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_i2c_bus_jam_recover_proc(venus_i2c* p_this)
-{
-    int i = 0;
-
-    JAM_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (!p_this->gpio_map.valid)
-        return;
-
-    do
-    {
-        JAM_DEBUG("Do I2C%d Bus Recover %d\n",p_this->id, i);
-
-        venus_i2c_bus_jam_recover(p_this);
-
-        phoenix_i2c_mdelay(200);
-
-        if (venus_i2c_bus_jam_detect(p_this)==0)
-        {
-            JAM_DEBUG("I2C%d Bus Recover successed\n",p_this->id);
-
-            return ;
-        }
-
-    }while(i++ < 3);
-
-    JAM_DEBUG("I2C%d Bus Recover failed\n",p_this->id);
-}
-#endif
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_start_xfer
- *
- * Desc : start xfer message
- *
- * Parm : p_this : handle of venus i2c
- *
+/*
+ * Func : rtk_i2c_read
+ * Desc : read data from sar
+ * Parm : handler : handle of rtk i2c
  * Retn : 0 for success, others is failed
- *------------------------------------------------------------------*/
-int venus_i2c_start_xfer(venus_i2c* p_this)
+ */
+int rtk_i2c_read(struct rtk_i2c_handler *handler,
+	unsigned char *tx_buf, unsigned short tx_buf_len,
+	unsigned char *rx_buf, unsigned short rx_buf_len)
 {
-    unsigned long flags;
-    int ret;
-    int mode = p_this->xfer.mode;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    LOG_EVENT(EVENT_START_XFER);
+	int retry = 2;
+	unsigned int ret = 0;
 
-    LOCK_VENUS_I2C(&p_this->lock, flags);
+	RTK_DEBUG("%s\n", __func__);
 
-    if ((GET_IC_CON(p_this) & IC_SLAVE_DISABLE)==0)
-    {
-        SET_IC_ENABLE(p_this, 0);
-        SET_IC_CON(p_this, GET_IC_CON(p_this) | IC_SLAVE_DISABLE);
-    }
+	while (retry > 0) {
+		rtk_i2c_load_message(handler,
+			tx_buf_len ? I2C_MASTER_RANDOM_READ : I2C_MASTER_READ,
+			tx_buf, tx_buf_len,
+			rx_buf, rx_buf_len, 0);
 
-    switch (p_this->xfer.mode)
-    {
-    case I2C_MASTER_WRITE:
-        SET_IC_INTR_MASK(p_this, TX_EMPTY_BIT | TX_ABRT_BIT | STOP_DET_BIT);
-        break;
+		ret = rtk_i2c_start_xfer(handler);
+		if (ret != -ETIMEOUT)
+			break;
 
-    case I2C_MASTER_READ:
-    	//printk(KERN_ERR "#############>>>> I2C_MASTER_READ\n");
-    case I2C_MASTER_RANDOM_READ:
-    	//printk(KERN_ERR "#############>>>> I2C_MASTER_RANDOM_READ\n");
-    	//printk(KERN_ERR "p_this->reg_map.IC_RXFLR = %x\n", p_this->reg_map.IC_RXFLR);
-    	//printk(KERN_ERR "readl(p_this->reg_map.IC_RXFLR) = %x\n", readl(p_this->reg_map.IC_RXFLR));
+		/*JAM_DEBUG("[I2C] read timeout detected, do retry\n");*/
+		retry--;
+	}
 
-    	if (GET_IC_RXFLR(p_this))
-        {
-            printk("WARNING, RX FIFO NOT EMPRY\n");
-
-            while(GET_IC_RXFLR(p_this))
-                 GET_IC_DATA_CMD(p_this);
-        }
-
-        SET_IC_INTR_MASK(p_this, RX_FULL_BIT | TX_EMPTY_BIT | TX_ABRT_BIT | STOP_DET_BIT);
-        break;
-
-    default:
-        UNLOCK_VENUS_I2C(&p_this->lock, flags);
-        LOG_EVENT(EVENT_STOP_XFER);
-        return -EILLEGALMSG;
-    }
-
-    if (p_this->reg_map.I2C_ISR_EN)
-    {
-        wr_reg(p_this->reg_map.I2C_ISR_EN, rd_reg(p_this->reg_map.I2C_ISR_EN) | p_this->reg_map.I2C_ISR_EN_MASK);
-        //printk("Enable Interrupt Mask : reg(%08x)=%08x\n", p_this->reg_map.I2C_ISR_EN, rd_reg(p_this->reg_map.I2C_ISR_EN));
-    }
-
-#ifdef MINIMUM_DELAY_EN
-
-    UNLOCK_VENUS_I2C(&p_this->lock, flags);
-
-    if (jiffies <= p_this->time_stamp)
-        //udelay(p_this->tick/2);   // wait 1/2 ticks...
-        udelay(p_this->guard_interval);   // cfyeh found that delay 1/2 tick will cause long system booting time, so we revert the delay setting
-                        // temporarily until we findout the root cause....
-
-    LOCK_VENUS_I2C(&p_this->lock, flags);
-
-#endif
-
-    SET_IC_ENABLE(p_this, 1);                   // Start Xfer
-
-    UNLOCK_VENUS_I2C(&p_this->lock, flags);
-
-    if (p_this->xfer.except_time < 1000)            // less than 1 ms
-        udelay(p_this->xfer.except_time + 20);      // extra 20 us for extra guard interval
-
-    //printk(KERN_ERR "#############>>>> venus_i2c_start_xfer test 1\n");
-
-    if (p_this->xfer.mode!=I2C_IDEL)
-        wait_event_timeout(p_this->wq, p_this->xfer.mode == I2C_IDEL, 1 * HZ);
-
-    //printk(KERN_ERR "#############>>>> venus_i2c_start_xfer test 2\n");
-    LOCK_VENUS_I2C(&p_this->lock, flags);
-
-    SET_IC_INTR_MASK(p_this, 0);
-    SET_IC_ENABLE(p_this, 0);
-
-
-    //printk(KERN_ERR "#############>>>> venus_i2c_start_xfer test 3\n");
-    if (p_this->xfer.mode != I2C_IDEL)
-    {
-        p_this->xfer.ret  = -ETIMEOUT;
-
-#ifdef CONFIG_I2C_RTK_BUS_JAM_RECOVER
-
-        JAM_DEBUG("[I2C] WARNING, I2C ETIMEOUT\n");
-        UNLOCK_VENUS_I2C(&p_this->lock, flags);
-
-        // Bus Jammed Recovery Procedure
-        if (venus_i2c_bus_jam_detect(p_this))
-        {
-            JAM_DEBUG("[I2C] WARNING, I2C Bus Jammed, Do Recorver\n");
-            venus_i2c_bus_jam_recover_proc(p_this);
-            msleep(50);
-        }
-
-        JAM_DEBUG("[I2C] Info, Reset I2C State\n");
-        venus_i2c_reset_state(p_this);
-
-        LOCK_VENUS_I2C(&p_this->lock, flags);
-#endif
-    }
-    else if (p_this->xfer.ret==-ECMDSPLIT)
-    {
-        switch(mode)
-        {
-        case I2C_MASTER_WRITE:
-            printk(KERN_ERR "WARNING, Write Cmd Split, tx : %d/%d\n",
-                    p_this->xfer.tx_len, p_this->xfer.tx_buff_len);
-            break;
-
-        case I2C_MASTER_READ:
-            printk(KERN_ERR "WARNING, Read Cmd Split, tx : %d/%d rx : %d/%d\n",
-                    p_this->xfer.tx_len, p_this->xfer.tx_buff_len,
-                    p_this->xfer.rx_len, p_this->xfer.rx_buff_len);
-            break;
-
-        case I2C_MASTER_RANDOM_READ:
-            printk(KERN_ERR "WARNING, Read Cmd Split, tx : %d/%d rx : %d/%d\n",
-                    p_this->xfer.tx_len, p_this->xfer.tx_buff_len + p_this->xfer.rx_buff_len,
-                    p_this->xfer.rx_len, p_this->xfer.rx_buff_len);
-            break;
-        }
-    }
-
-#ifdef MINIMUM_DELAY_EN
-    p_this->time_stamp = (unsigned long) jiffies;
-#endif
-
-    ret = p_this->xfer.ret;
-
-    UNLOCK_VENUS_I2C(&p_this->lock, flags);
-
-#ifndef MINIMUM_DELAY_EN
-    udelay(p_this->guard_interval);
-#endif
-
-/*    if (ret==-ECMDSPLIT)
-    {
-        if (venus_i2c_probe(p_this)<0)
-            printk("WARNING, I2C %d no longer exists\n", p_this->id);
-    }*/ //Fix me
-
-    LOG_EVENT(EVENT_STOP_XFER);
-
-    if (p_this->flags & VENUS_I2C_SLAVE_ENABLE)
-        p_this->slave_mode_enable(p_this, 1);
-
-    return ret;
+	return ret;
 }
 
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_do_start
- *
- * Desc : gpio i2c xfer - start phase
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_g2c_do_start(venus_i2c* p_this)
+/*
+ * Func : rtk_i2c_write
+ * Desc : write data to sar
+ * Parm : handler : handle of rtk i2c
+ *	tx_buf : data to write
+ *	tx_buf_len : number of bytes to write
+ *	wait_stop  : wait for stop of not (extension)
+ * Retn : 0 for success, others is failed
+ */
+int rtk_i2c_write(struct rtk_i2c_handler *handler, unsigned char *tx_buf,
+	unsigned short tx_buf_len, unsigned char wait_stop)
 {
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
+	int retry = 2;
+	unsigned int ret = 0;
 
-    if (!p_this->gpio_map.valid)
-        return;
+	RTK_DEBUG("%s\n", __func__);
 
-    switch(p_this->xfer.gpio_xfer_sub_state)
-    {
-    case 0:
-        venus_gpio_set_irq_enable(sda, 0);
-        venus_gpio_set_irq_enable(scl, 0);
-        venus_gpio_set_dir(sda, 0);          // SDA DIR = IN
-        venus_gpio_set_dir(scl, 0);          // SCL DIR = IN
-        venus_gpio_output(sda, 0);            // SDA = L
-        venus_gpio_output(scl, 0);            // SCL = L
-        venus_i2c_gpio_selection(p_this, GPIO_MODE);
-        p_this->xfer.gpio_xfer_sub_state++;
-        break;
+	while (retry > 0) {
+		rtk_i2c_load_message(handler, I2C_MASTER_WRITE, tx_buf,
+			tx_buf_len, NULL, 0, (wait_stop) ? 0 : I2C_NO_STOP);
 
-    case 1:
-        if (venus_gpio_input(scl) && venus_gpio_input(sda))       // Wait SDA = SCL = H
-            p_this->xfer.gpio_xfer_sub_state++;
+		ret = rtk_i2c_start_xfer(handler);
 
-        break;
+		if (ret != -ETIMEOUT)
+			break;
 
-    case 2:
-        venus_gpio_set_dir(sda, 1);             // SDA = L
-        p_this->xfer.gpio_xfer_sub_state++;
-        break;
+		retry--;
+	}
 
-    case 3:
-        venus_gpio_set_dir(scl, 1);             // SCL = L
-        p_this->xfer.gpio_xfer_state = G2C_ST_ADDR0;
-        p_this->xfer.gpio_xfer_sub_state = 0;
-        break;
-    }
+	return ret;
 }
 
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_do_address
- *
- * Desc : gpio i2c xfer - address phase
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_g2c_do_address(venus_i2c* p_this)
-{
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    unsigned char state = G2C_MINOR_STATE(p_this->xfer.gpio_xfer_state);
-    int bit_index = 0;
-    unsigned char addr;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (!p_this->gpio_map.valid)
-        return;
-
-    if (state <= 7)
-    {
-        //--------------------------------------------------
-        // ADDR Phase 0 ~ 7
-        //--------------------------------------------------
-
-        switch(p_this->xfer.gpio_xfer_sub_state)
-        {
-        case 0:
-            venus_gpio_set_dir(scl, 1);             // SCL = L
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 1:
-
-            addr = p_this->tar << 1;
-
-            if (p_this->xfer.mode == I2C_MASTER_READ)
-                addr |= 1;
-
-            bit_index = 7 - state;
-
-            if ((addr>>bit_index) & 0x1)
-                venus_gpio_set_dir(sda, 0);         // SDA = H
-            else
-                venus_gpio_set_dir(sda, 1);         // SDA = L
-
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 2:
-
-            addr = p_this->tar << 1;
-
-            if (p_this->xfer.mode == I2C_MASTER_READ)
-                addr |= 1;
-
-            bit_index = 7 - state;
-
-            if (((addr>>bit_index) & 0x1) && venus_gpio_input(sda)==0)
-            {
-                // lose of arbitraction
-                p_this->xfer.ret = -ETXABORT;
-                p_this->xfer.gpio_xfer_state = G2C_ST_DONE;
-                p_this->xfer.gpio_xfer_sub_state = 0;
-            }
-            else
-            {
-                venus_gpio_set_dir(scl, 0);             // SCL = H
-                p_this->xfer.gpio_xfer_sub_state++;
-            }
-
-            break;
-
-        case 3:
-
-            if (venus_gpio_input(scl))               // Wait SCL = H
-            {
-                p_this->xfer.gpio_xfer_state++;
-                p_this->xfer.gpio_xfer_sub_state = 0;
-            }
-            break;
-        }
-    }
-    else if (state==8)
-    {
-        //--------------------------------------------------
-        // ADDR ACK & NACK
-        //--------------------------------------------------
-        switch(p_this->xfer.gpio_xfer_sub_state)
-        {
-        case 0:
-            venus_gpio_set_dir(scl, 1);             // Pull low SCL
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 1:
-            venus_gpio_set_dir(sda, 0);             // SDA = H
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 2:
-            venus_gpio_set_dir(scl, 0);             // SCL = H
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 3:
-            if (venus_gpio_input(scl))               // Wait SCL = H
-            {
-                if (venus_gpio_input(sda))
-                {
-                    p_this->xfer.ret = -ETXABORT;
-                    p_this->xfer.gpio_xfer_state = G2C_ST_STOP;     // NACK or no data to xfer
-                }
-                else
-                {
-                    p_this->xfer.gpio_xfer_state = G2C_ST_DATA0;    // ACK and still has data to xfer
-                }
-
-                p_this->xfer.gpio_xfer_sub_state = 0;
-            }
-            break;
-        }
-    }
-}
-
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_do_read
- *
- * Desc : gpio i2c xfer - read data phase
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_g2c_do_read(venus_i2c* p_this)
-{
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    unsigned char state = G2C_MINOR_STATE(p_this->xfer.gpio_xfer_state);
-    int bit_index = 0;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (!p_this->gpio_map.valid)
-        return;
-
-    if (state < 8)
-    {
-        //--------------------------------------------------
-        // DATA Phase 0 ~ 7
-        //--------------------------------------------------
-
-        switch(p_this->xfer.gpio_xfer_sub_state)
-        {
-        case 0:
-            venus_gpio_set_dir(scl, 1);             // SCL = L
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 1:
-            venus_gpio_set_dir(sda, 0);             // SDA = In
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 2:
-            venus_gpio_set_dir(scl, 0);             // SCL = H
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 3:
-            if (venus_gpio_input(scl))               // Wait SCL = H
-            {
-                if (venus_gpio_input(sda))
-                {
-                    bit_index = 7 - state;
-                    p_this->xfer.rx_buff[p_this->xfer.rx_len] |= (1<<bit_index);
-                }
-
-                p_this->xfer.gpio_xfer_state++;     // Next State
-                p_this->xfer.gpio_xfer_sub_state = 0;
-            }
-            break;
-        }
-    }
-    else
-    {
-        //--------------------------------------------------
-        // ACK & NACK
-        //--------------------------------------------------
-
-        switch(p_this->xfer.gpio_xfer_sub_state)
-        {
-        case 0:
-            venus_gpio_set_dir(scl, 1);             // SCL = L
-            p_this->xfer.gpio_xfer_sub_state++;
-            p_this->xfer.rx_len++;
-            break;
-
-        case 1:
-            if (p_this->xfer.rx_len < p_this->xfer.rx_buff_len)
-            {
-                venus_gpio_set_dir(sda, 1);             // SDA = L  ACK
-                //printk(KERN_DEBUG "rx = %d/%d ACK\n", p_this->xfer.rx_len, p_this->xfer.rx_buff_len);
-            }
-            else
-            {
-                venus_gpio_set_dir(sda, 0);             // SDA = H  NACK
-                //printk(KERN_DEBUG "rx = %d/%d NACK\n", p_this->xfer.rx_len, p_this->xfer.rx_buff_len);
-            }
-
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 2:
-            venus_gpio_set_dir(scl, 0);             // SCL = H
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 3:
-
-            if (venus_gpio_input(scl))               // Wait SCL = H
-            {
-                if (p_this->xfer.rx_len < p_this->xfer.rx_buff_len)
-                    p_this->xfer.gpio_xfer_state = G2C_ST_DATA0;
-                else
-                    p_this->xfer.gpio_xfer_state = G2C_ST_STOP;
-
-                p_this->xfer.gpio_xfer_sub_state = 0;
-            }
-            break;
-        }
-    }
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_do_write
- *
- * Desc : gpio i2c xfer - write data phase
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_g2c_do_write(venus_i2c* p_this)
-{
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    unsigned char state = G2C_MINOR_STATE(p_this->xfer.gpio_xfer_state);
-    int bit_index = 0;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (!p_this->gpio_map.valid)
-        return;
-
-    if (state < 8)
-    {
-        //--------------------------------------------------
-        // DATA Phase 0 ~ 7
-        //--------------------------------------------------
-
-        switch(p_this->xfer.gpio_xfer_sub_state)
-        {
-        case 0:
-            venus_gpio_set_dir(scl, 1);             // SCL = L
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 1:
-            bit_index = 7 - state;
-
-            if ((p_this->xfer.tx_buff[p_this->xfer.tx_len]>>bit_index) & 0x1)
-                venus_gpio_set_dir(sda, 0);         // SDA = H
-            else
-                venus_gpio_set_dir(sda, 1);         // SDA = L
-
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 2:
-            bit_index = 7 - state;
-            if (((p_this->xfer.tx_buff[p_this->xfer.tx_len]>>bit_index) & 0x1) && venus_gpio_input(sda)==0)
-            {
-                // lose of arbitraction
-                p_this->xfer.ret = -ETXABORT;
-                p_this->xfer.gpio_xfer_state = G2C_ST_DONE;
-                p_this->xfer.gpio_xfer_sub_state = 0;
-            }
-            else
-            {
-                venus_gpio_set_dir(scl, 0);             // SCL = H
-                p_this->xfer.gpio_xfer_sub_state++;
-            }
-
-            break;
-
-        case 3:
-            if (venus_gpio_input(scl))               // Wait SCL = H
-            {
-                p_this->xfer.gpio_xfer_state++;     // Next State
-                p_this->xfer.gpio_xfer_sub_state = 0;
-            }
-            break;
-        }
-    }
-    else
-    {
-        //--------------------------------------------------
-        // ACK & NACK
-        //--------------------------------------------------
-
-        switch(p_this->xfer.gpio_xfer_sub_state)
-        {
-        case 0:
-            venus_gpio_set_dir(scl, 1);             // Pull low SCL
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 1:
-            venus_gpio_set_dir(sda, 0);             // SDA = H
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 2:
-            venus_gpio_set_dir(scl, 0);             // Release SCL
-            p_this->xfer.gpio_xfer_sub_state++;
-            break;
-
-        case 3:
-            if (venus_gpio_input(scl))               // Wait SCL = H
-            {
-                p_this->xfer.tx_len++;
-
-                if (venus_gpio_input(sda) || (p_this->xfer.tx_len >= p_this->xfer.tx_buff_len))
-                {
-                    if (venus_gpio_input(sda))
-                        p_this->xfer.ret = -ETXABORT;
-                    p_this->xfer.gpio_xfer_state = G2C_ST_STOP;     // NACK or no data to xfer
-                }
-                else
-                {
-                    p_this->xfer.gpio_xfer_state = G2C_ST_DATA0;    // ACK and still has data to xfer
-                }
-
-                p_this->xfer.gpio_xfer_sub_state = 0;
-            }
-            break;
-        }
-    }
-}
-
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_do_stop
- *
- * Desc : Do STOP or Restart
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_g2c_do_stop(venus_i2c* p_this)
-{
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (!p_this->gpio_map.valid)
-        return;
-
-    switch(p_this->xfer.gpio_xfer_sub_state)
-    {
-    case 0:
-        venus_gpio_set_dir(scl, 1);             // SCL = L
-        p_this->xfer.gpio_xfer_sub_state++;
-        break;
-
-    case 1:
-        if ((p_this->xfer.flags & I2C_NO_STOP)==0 || p_this->xfer.ret < 0)
-            venus_gpio_set_dir(sda, 1);         // SDA = L
-        else
-            venus_gpio_set_dir(sda, 0);         // SDA = H
-
-        p_this->xfer.gpio_xfer_sub_state++;
-        break;
-
-    case 2:
-        venus_gpio_set_dir(scl, 0);             // SCL = H
-        p_this->xfer.gpio_xfer_sub_state++;
-        break;
-
-    case 3:
-        if (venus_gpio_input(scl))               // wait SCL = H
-        {
-            venus_gpio_set_dir(sda, 0);         // SDA = H
-            p_this->xfer.gpio_xfer_state = G2C_ST_DONE;
-            p_this->xfer.gpio_xfer_sub_state = 0;
-        }
-    }
-}
-
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_do_complete
- *
- * Desc : complete GPIO i2c transxfer
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void venus_g2c_do_complete(venus_i2c* p_this)
-{
-    VENUS_GPIO_ID sda = p_this->gpio_map.sda;
-    VENUS_GPIO_ID scl = p_this->gpio_map.scl;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (p_this->xfer.gpio_xfer_sub_state==0)
-    {
-        venus_gpio_set_dir(sda, 0);
-        venus_gpio_set_dir(scl, 0);
-        venus_i2c_gpio_selection(p_this, I2C_MODE);
-        p_this->xfer.gpio_xfer_sub_state++;
-        p_this->xfer.mode = I2C_IDEL;
-    }
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_isr
- *
- * Desc : isr of venus gpio i2c
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-static
-irqreturn_t venus_g2c_isr(
-    int                     this_irq,
-    void*                   dev_id,
-    struct pt_regs*         regs
-    )
-{
-    venus_i2c* p_this = (venus_i2c*) dev_id;
-    unsigned long flags;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-
-#if 0
-    printk(KERN_DEBUG "ST = %d-%d:%d\n",
-        G2C_MAJOR_STATE(p_this->xfer.gpio_xfer_state),
-        G2C_MINOR_STATE(p_this->xfer.gpio_xfer_state),
-        p_this->xfer.gpio_xfer_sub_state);
-#endif
-
-    LOCK_VENUS_I2C(&p_this->lock, flags);
-
-#if 0
-    printk(KERN_DEBUG "p_this->xfer.mode=%d, jiffies = %lu,  timeout = %lu\n",
-            p_this->xfer.mode,
-            jiffies,
-            p_this->xfer.timeout);
-#endif
-
-    if (p_this->xfer.mode != I2C_IDEL && time_after(jiffies,p_this->xfer.timeout))
-    {
-        p_this->xfer.ret = -ETIMEOUT;
-        p_this->xfer.gpio_xfer_state = G2C_ST_DONE;
-        p_this->xfer.gpio_xfer_sub_state = 0;
-    }
-
-    switch(G2C_MAJOR_STATE(p_this->xfer.gpio_xfer_state))
-    {
-    case G2C_STATE_START: venus_g2c_do_start(p_this);      break;
-    case G2C_STATE_ADDR:  venus_g2c_do_address(p_this);    break;
-    case G2C_STATE_STOP:  venus_g2c_do_stop(p_this);       break;
-    case G2C_STATE_DONE:  venus_g2c_do_complete(p_this);   break;
-    case G2C_STATE_DATA:
-        if (p_this->xfer.mode==I2C_MASTER_WRITE)
-            venus_g2c_do_write(p_this);
-        else
-            venus_g2c_do_read(p_this);
-        break;
-    }
-
-    UNLOCK_VENUS_I2C(&p_this->lock, flags);
-
-    return IRQ_HANDLED;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_start_xfer
- *
- * Desc : venus_g2c_start_xfer
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : N/A
- *
- * Note : this file using GPIO4/5 to out I2C protocol. where GP4 is SCLK
- *        GP5 is SDA
- *------------------------------------------------------------------*/
-int venus_g2c_start_xfer(
-    venus_i2c*              p_this
-    )
-{
-    int d = p_this->tick>>2;
-    p_this->xfer.timeout = jiffies + (2 * HZ);
-    p_this->xfer.gpio_wait_time = (G2C_WAIT_TIMEOUT * 1000);
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    while(1)
-    {
-        venus_g2c_isr(7, (void*) p_this, 0);
-
-        if (p_this->xfer.mode == I2C_IDEL)
-            break;
-
-        if (p_this->xfer.gpio_wait_time <= d)
-        {
-            // maximum run time = 3 msec
-            p_this->xfer.gpio_wait_time = G2C_WAIT_TIMEOUT * 1000;
-            msleep(1);
-        }
-        else
-        {
-            p_this->xfer.gpio_wait_time -= d;
-            udelay(d);
-        }
-    }
-
-#ifdef CONFIG_I2C_RTK_BUS_JAM_RECOVER
-
-    if (p_this->xfer.ret == -ETIMEOUT)
-    {
-        JAM_DEBUG("[I2C] WARNING, I2C ETIMEOUT\n");
-        if (venus_i2c_bus_jam_detect(p_this))
-        {
-            JAM_DEBUG("[I2C] WARNING, I2C Bus Jammed, Do Recorver\n");
-            venus_i2c_bus_jam_recover_proc(p_this);
-            msleep(50);
-        }
-
-        JAM_DEBUG("[I2C] Info, Reset I2C State\n");
-        venus_i2c_reset_state(p_this);
-    }
-
-#endif
-
-    return p_this->xfer.ret;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_get_tx_abort_reason
- *
- * Desc : get reason of tx abort, this register will be clear when new message is loaded
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : tx about source
- *------------------------------------------------------------------*/
-unsigned int venus_i2c_get_tx_abort_reason(venus_i2c* p_this)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    return p_this->xfer.tx_abort_source;
-}
-
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_load_message
- *
+/*
+ * Func : rtk_i2c_load_message
  * Desc : load a i2c message (just add this message to the queue)
- *
- * Parm : p_this : handle of venus i2c
- *
- *
+ * Parm : handler : handle of rtk i2c
  * Retn : 0 for success, others is failed
- *------------------------------------------------------------------*/
-int venus_i2c_load_message(
-    venus_i2c*              p_this,
-    unsigned char           mode,
-    unsigned char*          tx_buf,
-    unsigned short          tx_buf_len,
-    unsigned char*          rx_buf,
-    unsigned short          rx_buf_len,
-    unsigned char           xfer_flags
-    )
+ */
+int rtk_i2c_load_message(struct rtk_i2c_handler *handler,
+		unsigned char mode, unsigned char *tx_buf,
+		unsigned short tx_buf_len, unsigned char *rx_buf,
+		unsigned short rx_buf_len, unsigned char xfer_flags)
 {
-    unsigned long flags;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    LOCK_VENUS_I2C(&p_this->lock, flags);
+	unsigned long flags;
 
-    memset(&p_this->xfer, 0, sizeof(p_this->xfer));
+	RTK_DEBUG("%s\n", __func__);
 
-    p_this->xfer.mode           = mode;
-    p_this->xfer.flags          = xfer_flags;
-    p_this->xfer.tx_buff        = tx_buf;
-    p_this->xfer.tx_buff_len    = tx_buf_len;
-    p_this->xfer.tx_len         = 0;
-    p_this->xfer.rx_buff        = rx_buf;
-    p_this->xfer.rx_buff_len    = rx_buf_len;
-    p_this->xfer.rx_len         = 0;
-    p_this->xfer.except_time    = ((tx_buf_len + rx_buf_len + 2) * 9 * p_this->tick);
+	LOCK_RTK_I2C(&handler->lock, flags);
 
-    if (rx_buf && rx_buf_len)
-        memset(rx_buf, 0, rx_buf_len);
+	memset(&handler->xfer, 0, sizeof(handler->xfer));
 
-    p_this->xfer.gpio_xfer_state   = G2C_ST_START;
-    p_this->xfer.gpio_xfer_sub_state = 0;
+	handler->xfer.mode = mode;
+	handler->xfer.flags = xfer_flags;
+	handler->xfer.tx_buff = tx_buf;
+	handler->xfer.tx_buff_len = tx_buf_len;
+	handler->xfer.tx_len = 0;
+	handler->xfer.rx_buff = rx_buf;
+	handler->xfer.rx_buff_len = rx_buf_len;
+	handler->xfer.rx_len = 0;
+	handler->xfer.except_time =
+		((tx_buf_len + rx_buf_len + 2) * 9 * handler->tick);
 
-    UNLOCK_VENUS_I2C(&p_this->lock, flags);
+	if (rx_buf && rx_buf_len)
+		memset(rx_buf, 0, rx_buf_len);
 
+	//handler->xfer.gpio_xfer_state = G2C_ST_START;
+	//handler->xfer.gpio_xfer_sub_state = 0;
+
+	UNLOCK_RTK_I2C(&handler->lock, flags);
 
 #ifdef DEV_DEBUG
 	{
 		int i;
-		RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-	    	RTK_DEBUG("[%s] %s  %d  xfer.mode = %x\n", __FILE__,__FUNCTION__,__LINE__,p_this->xfer.mode);
-	    	RTK_DEBUG("[%s] %s  %d  xfer.flags= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,p_this->xfer.flags);
 
-		if(p_this->xfer.tx_buff_len)
-		{
-			for(i=0;i<p_this->xfer.tx_buff_len;i++)
-				RTK_DEBUG("[%s] %s  %d  xfer.tx_buff= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,*p_this->xfer.tx_buff);
-				RTK_DEBUG("[%s] %s  %d  xfer.tx_buff= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,p_this->xfer.tx_buff[i]);
+		pr_info("%s xfer.mode = %x\n",
+			__func__, handler->xfer.mode);
+		pr_info("%s xfer.flags= 0x%x\n",
+			__func__, handler->xfer.flags);
+
+		if (handler->xfer.tx_buff_len) {
+			for (i = 0; i < handler->xfer.tx_buff_len; i++) {
+				pr_info("%s xfer.tx_buff= 0x%x\n",
+					__func__, *handler->xfer.tx_buff);
+				pr_info("%s xfer.tx_buff= 0x%x\n",
+					__func__, handler->xfer.tx_buff[i]);
+			}
 		}
 
-	    	RTK_DEBUG("[%s] %s  %d  xfer.tx_buff_len= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,p_this->xfer.tx_buff_len);
-	    	RTK_DEBUG("[%s] %s  %d  xfer.tx_len= 0x%x\n", __FILE__,__FUNCTION__,__LINE__, p_this->xfer.tx_len);
+		pr_info("%s xfer.tx_buff_len= 0x%x\n",
+			__func__, handler->xfer.tx_buff_len);
+		pr_info("%s xfer.tx_len= 0x%x\n",
+			__func__, handler->xfer.tx_len);
 
-		if(p_this->xfer.rx_buff_len)
-		{
-			for(i=0;i<p_this->xfer.rx_buff_len;i++)
-				RTK_DEBUG("[%s] %s  %d  xfer.rx_buff= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,*p_this->xfer.rx_buff);
-				RTK_DEBUG("[%s] %s  %d  xfer.rx_buff= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,p_this->xfer.rx_buff[i]);
+		if (handler->xfer.rx_buff_len) {
+			for (i = 0; i < handler->xfer.rx_buff_len; i++) {
+				pr_info("%s xfer.rx_buff= 0x%x\n",
+					__func__, *handler->xfer.rx_buff);
+				pr_info("%s xfer.rx_buff= 0x%x\n",
+					__func__, handler->xfer.rx_buff[i]);
+			}
 		}
 
-	    	RTK_DEBUG("[%s] %s  %d  xfer.rx_buff_len= 0x%x\n", __FILE__,__FUNCTION__,__LINE__, p_this->xfer.rx_buff_len);
-	    	RTK_DEBUG("[%s] %s  %d  xfer.rx_len= 0x%x\n", __FILE__,__FUNCTION__,__LINE__, p_this->xfer.rx_len);
-	    	RTK_DEBUG("[%s] %s  %d  xfer.except_time= 0x%lx\n", __FILE__,__FUNCTION__,__LINE__, p_this->xfer.except_time);
+		pr_info("%s xfer.rx_buff_len= 0x%x\n",
+			__func__, handler->xfer.rx_buff_len);
+		pr_info("%s xfer.rx_len= 0x%x\n",
+			__func__, handler->xfer.rx_len);
+		pr_info("%s xfer.except_time= 0x%lx\n",
+			__func__, handler->xfer.except_time);
 	}
 #endif
 
-
-
-
-    return 0;
+	return 0;
 }
 
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_read
- *
- * Desc : read data from sar
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0 for success, others is failed
- *------------------------------------------------------------------*/
-int venus_i2c_read(
-    venus_i2c*              p_this,
-    unsigned char*          tx_buf,
-    unsigned short          tx_buf_len,
-    unsigned char*          rx_buf,
-    unsigned short          rx_buf_len
-    )
-{
-    int retry = 2;
-    int ret = 0;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    while(retry > 0)
-    {
-    	//printk(KERN_ERR "venus_i2c_load_message\n");
-    	venus_i2c_load_message(p_this,
-            (tx_buf_len) ? I2C_MASTER_RANDOM_READ : I2C_MASTER_READ,
-            tx_buf, tx_buf_len, rx_buf, rx_buf_len, 0);
-    	//printk(KERN_ERR "venus_i2c_start_xfer\n");
-        ret = venus_i2c_start_xfer(p_this);
-        if (ret!=-ETIMEOUT)
-            break;
-
-        JAM_DEBUG("[I2C] read timeout detected, do retry\n");
-        retry--;
-    }
-
-    return ret;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_write
- *
- * Desc : write data to sar
- *
- * Parm : p_this : handle of venus i2c
- *        tx_buf : data to write
- *        tx_buf_len : number of bytes to write
- *        wait_stop  : wait for stop of not (extension)
- *
- * Retn : 0 for success, others is failed
- *------------------------------------------------------------------*/
-int venus_i2c_write(
-    venus_i2c*              p_this,
-    unsigned char*          tx_buf,
-    unsigned short          tx_buf_len,
-    unsigned char           wait_stop
-    )
-{
-    int retry = 2;
-    int ret = 0;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    while(retry > 0)
-    {
-        venus_i2c_load_message(p_this, I2C_MASTER_WRITE,
-            tx_buf, tx_buf_len, NULL, 0, (wait_stop) ? 0 : I2C_NO_STOP);
-
-#ifdef CONFIG_I2C_VENUS_NON_STOP_WRITE_XFER
-
-        ret = (!wait_stop && p_this->gpio_map.valid) ? venus_g2c_start_xfer(p_this)   // normal i2c can not support this mode, so we use GPIO mode to instead
-                           : venus_i2c_start_xfer(p_this);
-#else
-        ret = venus_i2c_start_xfer(p_this);
-#endif
-
-        if (ret!=-ETIMEOUT)
-            break;
-
-        JAM_DEBUG("[I2C] write timeout detected, do retry\n");
-        retry--;
-    }
-
-    return ret;
-}
-
-
-
-int venus_g2c_read(
-    venus_i2c*              p_this,
-    unsigned char*          tx_buf,
-    unsigned short          tx_buf_len,
-    unsigned char*          rx_buf,
-    unsigned short          rx_buf_len
-    );
-
-int venus_g2c_write(
-    venus_i2c*              p_this,
-    unsigned char*          tx_buf,
-    unsigned short          tx_buf_len,
-    unsigned char           wait_stop
-    );
-
-static unsigned char venus_i2c_flags = 0;
-static venus_i2c* venus_i2c_phy_handle[I2C_PHY_CNT] = {NULL};
-
-
-/*------------------------------------------------------------------
- * Func : get_venus_i2c_phy_count
- *
- * Desc : get number of venus i2c phy
- *
- * Parm : N/A
- *
- * Retn : number of venus i2c
- *
- *------------------------------------------------------------------*/
-unsigned char get_venus_i2c_phy_count(void)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    return I2C_PHY_CNT;
-}
-
-#ifdef EDID_4BLOCK_SUPPORT
 /*
- * Block 0~1: Seg 0
- * Block 2: Seg 1, Offset 0
- * Block 3: Seg 1, Offset 128
+ * Func : rtk_i2c_start_xfer
+ * Desc : start xfer message
+ * Parm : handler : handle of rtk i2c
+ * Retn : 0 for success, others is failed
  */
-int venus_i2c_read_edid_seg (
-        venus_i2c* p_this,
-        unsigned char seg,/* Segment Pointer */
-        unsigned char offset,/*Word Offset*/
-        unsigned char *rx_buff,unsigned short rx_buf_len
-        )
+int rtk_i2c_start_xfer(struct rtk_i2c_handler *handler)
 {
-    int rx_len=0,tx_len=0,cnt;
-    unsigned char rx_fifo_depth;
-#define RxComplete()		(rx_len >= rx_buf_len)
-#define TxComplete()		(tx_len >= rx_buf_len)
-    RTK_DEBUG("[%s] %s	%d	seg=0x%x offset=0x%02x len(%u)\n", __FILE__,__FUNCTION__,__LINE__,seg,offset,rx_buf_len);
+	unsigned long flags;
+	unsigned int ret;
+	int mode = handler->xfer.mode;
 
-    venus_i2c_set_tar(p_this,0x30,ADDR_MODE_7BITS);
-    CLR_IC_INTR(p_this);
-    SET_IC_ENABLE(p_this, 1);
-    cnt=0;
-    while(GET_IC_STATUS(p_this)&ST_ACTIVITY_BIT==0)
-    {
-        if(cnt++<5)
-            udelay(50);
-        else
-            return -ETIMEOUT;
-        RTK_DEBUG("[%s] %s	%d	IC_STATUS= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,GET_IC_STATUS(p_this));
-    }
-    SET_IC_DATA_CMD(p_this, seg);//Segment Pointer
-    udelay(50);
-    CLR_IC_INTR(p_this);
-    SET_IC_ENABLE(p_this, 0);
+	RTK_DEBUG("%s\n", __func__);
 
-    venus_i2c_set_tar(p_this,0x50,ADDR_MODE_7BITS);
-    CLR_IC_INTR(p_this);
-    SET_IC_ENABLE(p_this, 1);
-    cnt=0;
-    while(GET_IC_STATUS(p_this)&ST_ACTIVITY_BIT==0)
-    {
-        if(cnt++<5)
-            udelay(50);
-        else
-            return -ETIMEOUT;
-    }
-    SET_IC_DATA_CMD(p_this, offset|(0x1<<10));//Restart, Word Offset
-    udelay(100);
-    RTK_DEBUG("[%s] %s	%d	IC_STATUS= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,GET_IC_STATUS(p_this));
+	LOG_EVENT(EVENT_START_XFER);
 
-    while(!TxComplete() && NOT_TXFULL(p_this))
-    {
-        if(tx_len==rx_buf_len-1)
-        {
-            SET_IC_DATA_CMD(p_this, (0x1<<8)|(0x1<<9));//Read,Stop
-            //RTK_DEBUG("[%s] %s	%d	IC_STATUS= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,GET_IC_STATUS(p_this));
-        }
-        else
-        {
-            SET_IC_DATA_CMD(p_this, (0x1<<8));//Read
-            //RTK_DEBUG("[%s] %s	%d	IC_STATUS= 0x%x\n", __FILE__,__FUNCTION__,__LINE__,GET_IC_STATUS(p_this));
-        }
-        tx_len++;
-        udelay(100);
-        while(NOT_RXEMPTY(p_this))
-        {
-            rx_buff[rx_len] = (unsigned char)(GET_IC_DATA_CMD(p_this) & 0xFF);
-            //RTK_DEBUG("+Data[%u]=0x%02x\n",rx_len,rx_buff[rx_len]);
-            udelay(50);
-            rx_len++;
-        }
-    }
+	LOCK_RTK_I2C(&handler->lock, flags);
 
-    while(!RxComplete() && NOT_RXEMPTY(p_this))
-    {
-        rx_buff[rx_len] = (unsigned char)(GET_IC_DATA_CMD(p_this) & 0xFF);
-        //RTK_DEBUG("++Data[%u]=0x%02x\n",rx_len,rx_buff[rx_len]);
-        rx_len++;
-        udelay(50);
-    }
-    CLR_IC_INTR(p_this);
-    SET_IC_ENABLE(p_this, 0);
+	if ((GET_IC_CON(handler) & IC_SLAVE_DISABLE) == 0) {
+		SET_IC_ENABLE(handler, 0);
+		SET_IC_CON(handler, GET_IC_CON(handler) | IC_SLAVE_DISABLE);
+	}
 
-    return 0;
-}
+	switch (handler->xfer.mode) {
+	case I2C_MASTER_WRITE:
+		SET_IC_INTR_MASK(handler,
+			TX_EMPTY_BIT | TX_ABRT_BIT | STOP_DET_BIT);
+		break;
+	case I2C_MASTER_READ:
+	case I2C_MASTER_RANDOM_READ:
+		if (GET_IC_RXFLR(handler)) {
+			pr_info("WARNING, RX FIFO NOT EMPRY\n");
 
+			while (GET_IC_RXFLR(handler))
+				GET_IC_DATA_CMD(handler);
+		}
+		SET_IC_INTR_MASK(handler,
+			RX_FULL_BIT | TX_EMPTY_BIT | TX_ABRT_BIT |
+			STOP_DET_BIT);
+		break;
+	default:
+		UNLOCK_RTK_I2C(&handler->lock, flags);
+		LOG_EVENT(EVENT_STOP_XFER);
+		return -EILLEGALMSG;
+	}
+
+	if (handler->reg_map.I2C_ISR_EN)
+		wr_reg(handler->reg_map.I2C_ISR_EN,
+			rd_reg(handler->reg_map.I2C_ISR_EN) |
+			handler->reg_map.I2C_ISR_EN_MASK);
+
+#ifdef MINIMUM_DELAY_EN
+	UNLOCK_RTK_I2C(&handler->lock, flags);
+
+	/* cfyeh found that delay 1/2 tick will cause long
+	 * system booting time, so we revert the delay setting
+	 * temporarily until we findout the root cause
+	 */
+	if (time_after(jiffies, handler->time_stamp)) {
+		// udelay(handler->tick/2); /* wait 1/2 ticks */
+		udelay(handler->guard_interval);
+	}
+
+	LOCK_RTK_I2C(&handler->lock, flags);
 #endif
 
+	SET_IC_ENABLE(handler, 1); /* Start Xfer */
+	UNLOCK_RTK_I2C(&handler->lock, flags);
 
-/*------------------------------------------------------------------
- * Func : create_venus_i2c_handle
- *
- * Desc : create handle of venus i2c
- *
- * Parm : N/A
- *
- * Retn : handle of venus i2c
- *
- *------------------------------------------------------------------*/
-venus_i2c*
-create_venus_i2c_handle(
-    unsigned char       id,
-    unsigned short      sar,
-    ADDR_MODE           sar_mode,
-    unsigned int        spd,
-    unsigned int        irq
-    )
+	/* less than 1 ms */
+	if (handler->xfer.except_time < 1000) {
+		/* extra 20 us for extra guard interval */
+		udelay(handler->xfer.except_time + 20);
+	}
+
+	if (handler->xfer.mode != I2C_IDLE)
+		wait_event_timeout(handler->wq,
+			handler->xfer.mode == I2C_IDLE, 1 * HZ);
+
+	LOCK_RTK_I2C(&handler->lock, flags);
+
+	SET_IC_INTR_MASK(handler, 0);
+	SET_IC_ENABLE(handler, 0);
+
+	if (handler->xfer.mode != I2C_IDLE) {
+		handler->xfer.ret  = -ETIMEOUT;
+
+	} else if (handler->xfer.ret == -ECMDSPLIT) {
+		pr_warn("WARNING,");
+		switch (mode) {
+		case I2C_MASTER_WRITE:
+			pr_warn("Write Cmd Split, tx : %d/%d\n",
+				handler->xfer.tx_len,
+				handler->xfer.tx_buff_len);
+			break;
+		case I2C_MASTER_READ:
+			pr_warn("Read Cmd Split, tx : %d/%d rx : %d/%d\n",
+				handler->xfer.tx_len,
+				handler->xfer.tx_buff_len,
+				handler->xfer.rx_len,
+				handler->xfer.rx_buff_len);
+			break;
+		case I2C_MASTER_RANDOM_READ:
+			ret = handler->xfer.tx_buff_len +
+				handler->xfer.rx_buff_len;
+			pr_warn("Read Cmd Split, tx : %d/%d rx : %d/%d\n",
+				handler->xfer.tx_len,
+				ret,
+				handler->xfer.rx_len,
+				handler->xfer.rx_buff_len);
+			break;
+		default:
+			break;
+		}
+	}
+
+#ifdef MINIMUM_DELAY_EN
+	handler->time_stamp = (unsigned long) jiffies;
+#endif
+
+	ret = handler->xfer.ret;
+
+	UNLOCK_RTK_I2C(&handler->lock, flags);
+
+#ifndef MINIMUM_DELAY_EN
+	udelay(handler->guard_interval);
+#endif
+
+	LOG_EVENT(EVENT_STOP_XFER);
+
+	if (handler->flags & RTK_I2C_SLAVE_ENABLE)
+		handler->slave_mode_enable(handler, 1);
+
+	return ret;
+}
+
+/*
+ * Func : rtk_i2c_get_tx_abort_reason
+ * Desc : get reason of tx abort, this register will be clear when new
+ *	message is loaded
+ * Parm : handler : handle of rtk i2c
+ * Retn : tx about source
+ */
+unsigned int rtk_i2c_get_tx_abort_reason(struct rtk_i2c_handler *handler)
 {
-    venus_i2c* hHandle;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (id >= I2C_PHY_CNT)
-        return NULL;
+	RTK_DEBUG("%s\n", __func__);
+	return handler->xfer.tx_abort_source;
+}
 
-    if (((venus_i2c_flags>>id) & 0x01))
-    {
-//        atomic_inc(&venus_i2c_phy_handle[id]->ref_cnt);  // reference count++
-        return venus_i2c_phy_handle[id];
-    }
 
-    hHandle = kmalloc(sizeof(venus_i2c),GFP_KERNEL);
+/*
+ * Func : rtk_i2c_master_write
+ * Desc : master write handler for rtk i2c
+ * Parm : handler : handle of rtk i2c
+ *		event  : INT event of rtk i2c
+ * Retn : N/A
+ */
+void rtk_i2c_master_write(struct rtk_i2c_handler *handler, unsigned int event,
+	unsigned int tx_abort_source)
+{
+#define TxComplete() (handler->xfer.tx_len >= handler->xfer.tx_buff_len)
 
-    if (hHandle!= NULL)
-    {
-        memset(hHandle, 0, sizeof(venus_i2c));
-        hHandle->flags        = 0;
-        hHandle->id           = id;
-        hHandle->irq          = irq;
-        hHandle->sar          = sar;
-        hHandle->sar_mode     = sar_mode;
-        hHandle->spd          = spd;
-        hHandle->guard_interval = 1000;
-        //hHandle->init         = venus_i2c_init;
-        hHandle->uninit       = venus_i2c_uninit;
-        hHandle->set_spd      = venus_i2c_set_spd;
-        hHandle->set_guard_interval = venus_i2c_set_guard_interval;
-        hHandle->set_tar      = venus_i2c_set_tar;
-        //hHandle->set_port     = venus_i2c_set_port;
-        hHandle->read         = venus_i2c_read;
-        hHandle->write        = venus_i2c_write;
-        hHandle->gpio_read    = venus_g2c_read;
-        hHandle->gpio_write   = venus_g2c_write;
-        hHandle->dump         = venus_i2c_dump;
-        hHandle->suspend      = venus_i2c_suspend;
-        hHandle->resume       = venus_i2c_resume;
-        hHandle->get_tx_abort_reason = venus_i2c_get_tx_abort_reason;
+	RTK_DEBUG("%s\n", __func__);
 
-        hHandle->set_sar      = venus_i2c_set_sar;
-        hHandle->slave_mode_enable = venus_i2c_slave_mode_enable;
-        hHandle->register_slave_ops = venus_i2c_register_slave_ops;
+	while (!TxComplete() && NOT_TXFULL(handler)) {
+		if (handler->xfer.tx_len == handler->xfer.tx_buff_len - 1) {
+			SET_IC_DATA_CMD(handler,
+				handler->xfer.tx_buff[handler->xfer.tx_len++] |
+				(0x1 << 9));
+		} else {
+			SET_IC_DATA_CMD(handler,
+				handler->xfer.tx_buff[handler->xfer.tx_len++]);
+		}
+	}
+
+	if (TxComplete())
+		SET_IC_INTR_MASK(handler,
+			GET_IC_INTR_MASK(handler) & ~TX_EMPTY_BIT);
+
+	if (event & TX_ABRT_BIT) {
+		handler->tx_abort_flag = 1;
+		handler->xfer.tx_abort_source = tx_abort_source;
+	} else if (event & STOP_DET_BIT) {
+		if (handler->tx_abort_flag != 1) {
+			handler->xfer.ret =
+				TxComplete() ? handler->xfer.tx_len : -ECMDSPLIT;
+		} else {
+			handler->tx_abort_flag = 0;
+			handler->xfer.ret = -ETXABORT;
+		}
+	}
+
+	if (handler->xfer.ret) {
+		SET_IC_INTR_MASK(handler, 0);
+#if defined(CONFIG_I2C_RTK_SECURE_ACCESS)
+#else
+		SET_IC_ENABLE(handler, 0);
+#endif
+		handler->xfer.mode = I2C_IDLE; /* change to idle state */
+		wake_up(&handler->wq);
+	}
+
+#undef TxComplete
+}
+
+/*
+ * Func : rtk_i2c_master_read
+ * Desc : master read handler for rtk i2c
+ * Parm : handler : handle of rtk i2c
+ * Retn : N/A
+ */
+void rtk_i2c_master_read(struct rtk_i2c_handler *handler, unsigned int event,
+	unsigned int tx_abort_source)
+{
+#define TxComplete() (handler->xfer.tx_len >= handler->xfer.rx_buff_len)
+#define RxComplete() (handler->xfer.rx_len >= handler->xfer.rx_buff_len)
+
+	RTK_DEBUG("%s\n", __func__);
+
+	/* TX Thread */
+	while (!TxComplete() && NOT_TXFULL(handler)) {
+		if (handler->xfer.tx_len ==
+			((handler->xfer.rx_buff_len +
+			handler->xfer.tx_buff_len) - 1)) {
+			/* send stop command to rx fifo */
+			SET_IC_DATA_CMD(handler, (READ_CMD | (0x1 << 9)));
+		} else {
+			/* send read command to rx fifo*/
+			SET_IC_DATA_CMD(handler, READ_CMD);
+		}
+
+		handler->xfer.tx_len++;
+		while (!RxComplete() && NOT_RXEMPTY(handler))
+			handler->xfer.rx_buff[handler->xfer.rx_len++] =
+				(unsigned char)(GET_IC_DATA_CMD(handler) &
+				0xFF);
+	}
+
+	/* RX Thread */
+	while (!RxComplete() && NOT_RXEMPTY(handler))
+		handler->xfer.rx_buff[handler->xfer.rx_len++] =
+			(unsigned char)(GET_IC_DATA_CMD(handler) & 0xFF);
+
+	if (TxComplete())
+		SET_IC_INTR_MASK(handler,
+			GET_IC_INTR_MASK(handler) & ~TX_EMPTY_BIT);
+
+	if (event & TX_ABRT_BIT) {
+		handler->tx_abort_flag =1;
+		handler->xfer.tx_abort_source = tx_abort_source;
+	} else if ((event & STOP_DET_BIT) || RxComplete()) {
+		SET_IC_INTR_MASK(handler,
+			GET_IC_INTR_MASK(handler) & ~RX_FULL_BIT);
+		if (handler->tx_abort_flag != 1) {
+			handler->xfer.ret =
+				RxComplete() ? handler->xfer.rx_len : -ECMDSPLIT;
+		} else {
+			handler->tx_abort_flag = 0;
+			handler->xfer.ret = -ETXABORT;
+		}
+	}
+
+	if (handler->xfer.ret  && (handler->xfer.ret!=-ETXABORT)) {
+		SET_IC_INTR_MASK(handler, 0);
+#if defined(CONFIG_I2C_RTK_SECURE_ACCESS)
+#else
+		SET_IC_ENABLE(handler, 0);
+#endif
+		handler->xfer.mode = I2C_IDLE; /* change to idle state */
+		wake_up(&handler->wq);
+	}
+
+#undef TxComplete
+#undef RxComplete
+}
+
+/*
+ * Func : rtk_i2c_master_random_read
+ * Desc : master random read handler for rtk i2c
+ * Parm : handler : handle of rtk i2c
+ * Retn : N/A
+ */
+void rtk_i2c_master_random_read(struct rtk_i2c_handler *handler,
+	unsigned int event, unsigned int tx_abort_source)
+{
+/* it should add the same number of read command to tx fifo */
+#define TxComplete() \
+(handler->xfer.tx_len >= \
+(handler->xfer.rx_buff_len + handler->xfer.tx_buff_len))
+#define RxComplete() (handler->xfer.rx_len >=  handler->xfer.rx_buff_len)
+
+	RTK_DEBUG("%s\n", __func__);
+
+	/* TX Thread  */
+	while (!TxComplete() && NOT_TXFULL(handler)) {
+		if (handler->xfer.tx_len < handler->xfer.tx_buff_len) {
+			SET_IC_DATA_CMD(handler,
+				handler->xfer.tx_buff[handler->xfer.tx_len]);
+		} else {
+			if ((handler->xfer.tx_len == handler->xfer.tx_buff_len)
+				&& (handler->xfer.tx_len ==
+				((handler->xfer.rx_buff_len +
+				handler->xfer.tx_buff_len) - 1))) {
+				/* send Restart command and STOP to rx fifo :
+				 * first also last read cmd
+				 */
+				SET_IC_DATA_CMD(handler,
+					(READ_CMD | (0x3 << 9)));
+			} else if ((handler->xfer.tx_len ==
+					(handler->xfer.tx_buff_len)) &&
+					(!(handler->xfer.tx_len ==
+					((handler->xfer.rx_buff_len +
+					handler->xfer.tx_buff_len) - 1)))) {
+				/* send restart command to rx fifo :
+				 * first but not last read cmd
+				 */
+				SET_IC_DATA_CMD(handler,
+					(READ_CMD | (0x1 << 10)));
+			} else if ((!(handler->xfer.tx_len ==
+					(handler->xfer.tx_buff_len))) &&
+					(handler->xfer.tx_len ==
+					((handler->xfer.rx_buff_len +
+					handler->xfer.tx_buff_len) - 1))) {
+				/* send stop command to rx fifo :
+				 * not first but last read cmd
+				 */
+				SET_IC_DATA_CMD(handler,
+					(READ_CMD | (0x1 << 9)));
+			} else {
+				/* send read command to rx fifo :
+				 * not first also not last read cmd
+				 */
+				SET_IC_DATA_CMD(handler, READ_CMD);
+			}
+		}
+
+		handler->xfer.tx_len++;
+
+		/* RX Thread,
+		 * incase rxfifo overflow and the datas are droped
+		 */
+		while (!RxComplete() && NOT_RXEMPTY(handler)) {
+			RTK_DEBUG("%s handler->xfer.rx_len =%d\n",
+				__func__, handler->xfer.rx_len);
+			handler->xfer.rx_buff[handler->xfer.rx_len++] =
+				(unsigned char)(GET_IC_DATA_CMD(handler) &
+				0xFF);
+		}
+	}
+
+	/* RX Thread */
+	while (!RxComplete() && NOT_RXEMPTY(handler))
+		handler->xfer.rx_buff[handler->xfer.rx_len++] =
+			(unsigned char)(GET_IC_DATA_CMD(handler) & 0xFF);
+
+	if (TxComplete())
+		SET_IC_INTR_MASK(handler,
+			GET_IC_INTR_MASK(handler) & ~TX_EMPTY_BIT);
+
+	if (event & TX_ABRT_BIT) {
+		handler->tx_abort_flag =1;
+		handler->xfer.tx_abort_source = tx_abort_source;
+	} else if ((event & STOP_DET_BIT) || RxComplete()) {
+		SET_IC_INTR_MASK(handler,
+			GET_IC_INTR_MASK(handler) & ~RX_FULL_BIT);
+		if (handler->tx_abort_flag != 1) {
+			handler->xfer.ret =
+				RxComplete() ? handler->xfer.rx_len : -ECMDSPLIT;
+		} else {
+			handler->tx_abort_flag = 0;
+			handler->xfer.ret = -ETXABORT;
+		}
+	}
+
+	if (handler->xfer.ret) {
+		SET_IC_INTR_MASK(handler, 0);
+#if defined(CONFIG_I2C_RTK_SECURE_ACCESS)
+#else
+		SET_IC_ENABLE(handler, 0);
+#endif
+		handler->xfer.mode = I2C_IDLE; /* change to idle state */
+		wake_up(&handler->wq);
+	}
+
+#undef TxComplete
+#undef RxComplete
+}
 
 #ifdef EDID_4BLOCK_SUPPORT
-		hHandle->read_edid_seg = venus_i2c_read_edid_seg;
+
+/*
+ * Func : rtk_i2c_read_edid_seg
+ * Desc : read edid seg
+ * Parm : Block 0~1: Seg 0
+ *	Block 2: Seg 1, Offset 0
+ *	Block 3: Seg 1, Offset 128
+ * Retn : 0 for success, others is failed
+ */
+int rtk_i2c_read_edid_seg(struct rtk_i2c_handler *handler,
+	unsigned char seg, /* Segment Pointer */
+	unsigned char offset, /* Word Offset */
+	unsigned char *rx_buff, unsigned short rx_buf_len)
+{
+#define RxComplete() (rx_len >= rx_buf_len)
+#define TxComplete() (tx_len >= rx_buf_len)
+
+	int rx_len = 0;
+	int tx_len = 0;
+	int cnt = 0;
+
+	RTK_DEBUG("%s seg=0x%x offset=0x%02x len(%u)\n",
+		__func__, seg, offset, rx_buf_len);
+
+	rtk_i2c_set_tar(handler, 0x30, ADDR_MODE_7BITS);
+	CLR_IC_INTR(handler);
+	SET_IC_ENABLE(handler, 1);
+
+	while (GET_IC_STATUS(handler) & (ST_ACTIVITY_BIT == 0)) {
+		if (cnt++ < 5)
+			udelay(50);
+		else
+			return -ETIMEOUT;
+
+		RTK_DEBUG("%s IC_STATUS = 0x%x\n",
+			__func__, GET_IC_STATUS(handler));
+	}
+
+	SET_IC_DATA_CMD(handler, seg); /* Segment Pointer */
+	udelay(50);
+	CLR_IC_INTR(handler);
+	SET_IC_ENABLE(handler, 0);
+
+	rtk_i2c_set_tar(handler, 0x50, ADDR_MODE_7BITS);
+	CLR_IC_INTR(handler);
+	SET_IC_ENABLE(handler, 1);
+	cnt = 0;
+
+	while (GET_IC_STATUS(handler) & (ST_ACTIVITY_BIT == 0)) {
+		if (cnt++ < 5)
+			udelay(50);
+		else
+			return -ETIMEOUT;
+	}
+
+	SET_IC_DATA_CMD(handler, offset|(0x1<<10)); /* Restart, Word Offset */
+	udelay(100);
+
+	RTK_DEBUG("%s IC_STATUS= 0x%x\n", __func__, GET_IC_STATUS(handler));
+
+	while (!TxComplete() && NOT_TXFULL(handler)) {
+
+		if (tx_len == rx_buf_len - 1)
+			/* Read, Stop */
+			SET_IC_DATA_CMD(handler, (0x1 << 8) | (0x1 << 9));
+		else
+			/* Read */
+			SET_IC_DATA_CMD(handler, (0x1 << 8));
+
+		tx_len++;
+		udelay(100);
+		while (NOT_RXEMPTY(handler)) {
+			rx_buff[rx_len] =
+				(unsigned char)(GET_IC_DATA_CMD(handler) &
+				0xFF);
+			udelay(50);
+			rx_len++;
+		}
+	}
+
+	while (!RxComplete() && NOT_RXEMPTY(handler)) {
+		rx_buff[rx_len] =
+			(unsigned char)(GET_IC_DATA_CMD(handler) & 0xFF);
+		rx_len++;
+		udelay(50);
+	}
+
+	CLR_IC_INTR(handler);
+	SET_IC_ENABLE(handler, 0);
+
+	return 0;
+}
 #endif
 
-        atomic_set(&hHandle->ref_cnt, 1);
-        memset(&hHandle->xfer, 0, sizeof(venus_i2c_xfer));
-        venus_i2c_phy_handle[id] = hHandle;
-        venus_i2c_flags |= (0x01 << id);
-    }
-
-    return hHandle;
-}
-EXPORT_SYMBOL(create_venus_i2c_handle);
-
-
-
-
-/*------------------------------------------------------------------
- * Func : destroy_venus_i2c_handle
- *
- * Desc : destroy handle of venus i2c
- *
- * Parm : N/A
- *
- * Retn : N/A
- *------------------------------------------------------------------*/
-void destroy_venus_i2c_handle(venus_i2c* hHandle)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (hHandle==NULL)
-        return;
-
-    if (atomic_dec_return(&hHandle->ref_cnt)>0) {
-        printk("[I2C] destroy I2C%d successed, reference cnt=%d\n", hHandle->id, atomic_read(&hHandle->ref_cnt));
-        return;
-    }
-
-    printk("[I2C] destroy venus i2c%d handle\n", hHandle->id);
-    hHandle->uninit(hHandle);
-    venus_i2c_flags &= ~(0x01<<hHandle->id);
-    venus_i2c_phy_handle[hHandle->id] = NULL;
-    kfree(hHandle);
-}
-EXPORT_SYMBOL(destroy_venus_i2c_handle);
-
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_null_function
- *
- * Desc : null function for gpio
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0 for success, others is failed
- *------------------------------------------------------------------*/
-int venus_g2c_null_function(venus_i2c* p_this)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    return 0;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_null_function
- *
- * Desc : null function for gpio
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0 for success, others is failed
- *------------------------------------------------------------------*/
-int venus_g2c_dump(venus_i2c* p_this)
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    i2c_print("=========================\n");
-    i2c_print("= VER  : %s              \n", VERSION);
-    i2c_print("=========================\n");
-    i2c_print("= PHY  : %d              \n", p_this->id);
-    i2c_print("= MODEL: G2C             \n");
-    i2c_print("= SPD  : %d              \n", p_this->spd);
-    i2c_print("= SDA  : %d              \n", gpio_idx(p_this->gpio_map.sda));
-    i2c_print("= SCL  : %d              \n", gpio_idx(p_this->gpio_map.scl));
-    i2c_print("= TX FIFO DEPTH : %d     \n", p_this->tx_fifo_depth);
-    i2c_print("= RX FIFO DEPTH : %d     \n", p_this->rx_fifo_depth);
-    i2c_print("=========================\n");
-    return 0;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_set_spd
- *
- * Desc : set speed of venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *        KHz    : operation speed of i2c
- *
+/*
+ * Func : rtk_i2c_isr
+ * Desc : isr of rtk i2c
+ * Parm : handler : handle of rtk i2c
  * Retn : 0
- *------------------------------------------------------------------*/
-int venus_g2c_set_spd(venus_i2c* p_this, int KHz)
+ */
+irqreturn_t rtk_i2c_isr(int this_irq, void *dev_id)
 {
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (KHz < 10 || KHz > 800)
-    {
-        i2c_print("[I2C%d] warning, speed %d out of range, speed should between 10 ~ 150KHz\n", p_this->id, KHz);
-        return -1;
-    }
+	struct rtk_i2c_handler *handler = (struct rtk_i2c_handler *) dev_id;
+	unsigned long flags;
+	unsigned int event = 0;
+	unsigned int tx_abrt_source = 0;
+	unsigned int tmp;
 
-    p_this->spd  = KHz;
-    p_this->tick = 1000 / KHz;
+	RTK_DEBUG("%s\n", __func__);
 
-    i2c_print("[I2C%d] i2c speed changed to %d KHz\n", p_this->id, p_this->spd);
-    return 0;
+#if defined(CONFIG_I2C_RTK_SECURE_ACCESS)
+#else
+	LOCK_RTK_I2C(&handler->lock, flags);
+#endif
+
+	/* interrupt belongs to I2C */
+	if (!(GET_I2C_ISR(handler) & handler->reg_map.I2C_INT)) {
+#if defined(CONFIG_I2C_RTK_SECURE_ACCESS)
+#else
+		UNLOCK_RTK_I2C(&handler->lock, flags);
+#endif
+		return IRQ_NONE;
+	}
+
+	LOG_EVENT(EVENT_ENTER_ISR);
+
+	event = GET_IC_INTR_STAT(handler);
+	tx_abrt_source = GET_IC_TX_ABRT_SOURCE(handler);
+
+	CLR_IC_INTR(handler); /* clear interrupts of i2c_x */
+
+	if ((GET_IC_CON(handler) & IC_SLAVE_DISABLE) == 0) {
+		while (NOT_RXEMPTY(handler) &&
+			(handler->slave_rx_len <
+			sizeof(handler->slave_rx_buffer))) {
+			handler->slave_rx_buffer[handler->slave_rx_len++] =
+				(unsigned char)(GET_IC_DATA_CMD(handler) &
+				0xFF);
+		}
+
+		if ((event & STOP_DET_BIT) && handler->slave_rx_len) {
+			if (handler->slave_ops.handle_command)
+				handler->slave_ops.handle_command(
+						handler->slave_id,
+						handler->slave_rx_buffer,
+						handler->slave_rx_len);
+
+			handler->slave_rx_len = 0; /* flush buffer */
+		}
+
+		if (event & RD_REQ_BIT) {
+			if (handler->slave_ops.read_data) {
+				tmp = handler->slave_id;
+				SET_IC_DATA_CMD(handler,
+					handler->slave_ops.read_data(tmp));
+			} else
+				SET_IC_DATA_CMD(handler, 0xFF);
+		}
+	} else {
+		switch (handler->xfer.mode) {
+		case I2C_MASTER_WRITE:
+			rtk_i2c_master_write(handler, event, tx_abrt_source);
+			break;
+
+		case I2C_MASTER_READ:
+			rtk_i2c_master_read(handler, event, tx_abrt_source);
+			break;
+
+		case I2C_MASTER_RANDOM_READ:
+			rtk_i2c_master_random_read(handler, event,
+						tx_abrt_source);
+			break;
+
+		default:
+			pr_info("Unexcepted Interrupt\n");
+#if defined(CONFIG_I2C_RTK_SECURE_ACCESS)
+#else
+			SET_IC_ENABLE(handler, 0);
+#endif
+		}
+	}
+
+	/* clear I2C Interrupt Flag */
+	SET_I2C_ISR(handler, handler->reg_map.I2C_INT);
+#if defined(CONFIG_I2C_RTK_SECURE_ACCESS)
+#else
+	UNLOCK_RTK_I2C(&handler->lock, flags);
+#endif
+	return IRQ_HANDLED;
 }
 
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_i2c_set_tar
- *
- * Desc : set tar of venus i2c
- *
- * Parm : p_this : handle of venus i2c
- *        addr   : address of sar
- *        mode
-  : mode of sar
- *
+/*
+ * Func : rtk_i2c_set_sar
+ * Desc : set sar of rtk i2c
+ * Parm : handler : handle of rtk i2c
+ *	addr : address of sar
+ *	mode : mode of sar
  * Retn : 0
- *------------------------------------------------------------------*/
-int
-venus_g2c_set_tar(
-    venus_i2c*          p_this,
-    unsigned short      addr,
-    ADDR_MODE           mode
-    )
+ */
+int rtk_i2c_set_sar(struct rtk_i2c_handler *handler,
+	unsigned short addr, enum ADDR_MODE mode)
 {
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    p_this->tar      = addr;
-    p_this->tar_mode = mode;
-    return 0;
+	RTK_DEBUG("%s\n", __func__);
+
+	if (mode == ADDR_MODE_10BITS) {
+		SET_IC_ENABLE(handler, 0);
+		SET_IC_SAR(handler, handler->sar & ADDR_10BITS_MASK);
+		SET_IC_CON(handler, GET_IC_CON(handler) | IC_10BITADDR_SLAVE);
+	} else {
+		SET_IC_ENABLE(handler, 0);
+		SET_IC_SAR(handler, handler->sar & ADDR_7BITS_MASK);
+		SET_IC_CON(handler, GET_IC_CON(handler) &
+			(~IC_10BITADDR_SLAVE));
+	}
+
+	handler->sar = addr;
+	handler->sar_mode = mode;
+
+	return 0;
 }
 
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_set_sar
- *
- * Desc : set sar of gpio i2c
- *
- * Parm : p_this : handle of venus i2c
- *        addr   : address of sar
- *        mode
-  : mode of sar
- *
- * Retn : 0
- *------------------------------------------------------------------*/
-int
-venus_g2c_set_sar(
-    venus_i2c*          p_this,
-    unsigned short      addr,
-    ADDR_MODE           mode
-    )
-{
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    p_this->sar      = addr;
-    p_this->sar_mode = mode;
-    return 0;
-}
-
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_slave_mode_enable
- *
+/*
+ * Func : rtk_i2c_slave_mode_enable
  * Desc : enable/disable i2c slave mode
- *
- * Parm : p_this : handle of venus i2c
- *        on     : enable /disable
- *
+ * Parm : handler : handle of rtk i2c
+ *	on : enable /disable
  * Retn : 0
- *------------------------------------------------------------------*/
-int venus_g2c_slave_mode_enable(
-    venus_i2c*              p_this,
-    unsigned char           on
-    )
+ */
+int rtk_i2c_slave_mode_enable(struct rtk_i2c_handler *handler,
+	unsigned char on)
 {
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    return -1;
+	unsigned long flags;
+
+	RTK_DEBUG("%s\n", __func__);
+
+	LOCK_RTK_I2C(&handler->lock, flags);
+
+	if (on) {
+		pr_info("[I2C%d] i2c slave enabled, sar=%x\n",
+				handler->id, GET_IC_SAR(handler));
+		SET_IC_ENABLE(handler, 0);
+		handler->set_sar(handler, handler->sar, handler->sar_mode);
+		SET_IC_CON(handler, GET_IC_CON(handler) & ~(IC_SLAVE_DISABLE));
+		SET_IC_INTR_MASK(handler, START_DET_BIT |
+				STOP_DET_BIT | RD_REQ_BIT | RX_FULL_BIT);
+		if (handler->reg_map.I2C_ISR_EN)
+			wr_reg(handler->reg_map.I2C_ISR_EN,
+				rd_reg(handler->reg_map.I2C_ISR_EN) |
+				handler->reg_map.I2C_ISR_EN_MASK);
+		SET_IC_ENABLE(handler, 1);
+		handler->flags |= RTK_I2C_SLAVE_ENABLE;
+	} else {
+		pr_info("[I2C%d] i2c slave disabled\n", handler->id);
+		SET_IC_ENABLE(handler, 0);
+		SET_IC_CON(handler, GET_IC_CON(handler) | IC_SLAVE_DISABLE);
+		SET_IC_INTR_MASK(handler, 0);
+		handler->flags &= ~RTK_I2C_SLAVE_ENABLE;
+	}
+
+	UNLOCK_RTK_I2C(&handler->lock, flags);
+
+	return 0;
 }
 
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_set_port
- *
- * Desc : set port of venus g2c
- *
- * Parm : p_this : handle of venus i2c
- *        port   : output port selection
- *
+/*
+ * Func : rtk_i2c_register_slave_ops
+ * Desc : register slave mode ops
+ * Parm : handler : handle of rtk i2c
+ *		ops : slave mode ops
  * Retn : 0
- *------------------------------------------------------------------*/
-int
-venus_g2c_set_port(
-    venus_i2c*          p_this,
-    unsigned char       port
-    )
+ */
+int rtk_i2c_register_slave_ops(struct rtk_i2c_handler *handler,
+	struct rtk_i2c_slave_ops *ops, unsigned long id)
 {
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    return -EFAULT;
+	unsigned long flags;
+
+	RTK_DEBUG("%s\n", __func__);
+
+	LOCK_RTK_I2C(&handler->lock, flags);
+
+	if (ops == NULL) {
+		handler->slave_ops.handle_command = NULL;
+		handler->slave_ops.read_data = NULL;
+		handler->slave_id = 0;
+		rtk_i2c_slave_mode_enable(handler, 0);
+	} else {
+		handler->slave_ops.handle_command = ops->handle_command;
+		handler->slave_ops.read_data = ops->read_data;
+		handler->slave_id = id;
+	}
+
+	UNLOCK_RTK_I2C(&handler->lock, flags);
+	return 0;
 }
 
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_write
- *
- * Desc : write data to sar - GPIO mode
- *
- * Parm : p_this : handle of venus i2c
- *        tx_buf : data to write
- *        tx_buf_len : number of bytes to write
- *        wait_stop  : wait for stop of not (extension)
- *
- * Retn : 0 for success, others is failed
- *------------------------------------------------------------------*/
-int venus_g2c_write(
-    venus_i2c*              p_this,
-    unsigned char*          tx_buf,
-    unsigned short          tx_buf_len,
-    unsigned char           wait_stop
-    )
+/*
+ * Func : rtk_i2c_dump
+ * Desc : dump staus of rtk i2c
+ * Parm : handler : handle of rtk i2c
+ * Retn : 0 for success
+ */
+int rtk_i2c_dump(struct rtk_i2c_handler *handler)
 {
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (!p_this->gpio_map.valid && p_this->write == venus_i2c_write)
-        return venus_i2c_write(p_this, tx_buf, tx_buf_len, wait_stop);
-
-    venus_i2c_load_message(p_this, I2C_MASTER_WRITE,
-                           tx_buf, tx_buf_len, NULL, 0, (wait_stop) ? 0 : I2C_NO_STOP);
-
-    return venus_g2c_start_xfer(p_this);
+	RTK_DEBUG("%s\n", __func__);
+	pr_info("=========================\n");
+	pr_info("= VER : %s\n", VERSION);
+	pr_info("=========================\n");
+	pr_info("= PHY : %d\n", handler->id);
+	//pr_info("= PORT: %ld\n", current_port_id(handler));
+	pr_info("= MODEL: %s\n", handler->model_name);
+	pr_info("= SPD : %d\n", handler->spd);
+	pr_info("= SAR : 0x%03x (%d bits)\n",
+			handler->sar, handler->sar_mode);
+	pr_info("= TX FIFO DEPTH : %d\n", handler->tx_fifo_depth);
+	pr_info("= RX FIFO DEPTH : %d\n", handler->rx_fifo_depth);
+	pr_info("= FIFO THRESHOLD: %d\n", FIFO_THRESHOLD);
+	pr_info("=========================\n");
+	return 0;
 }
 
-
-
-/*------------------------------------------------------------------
- * Func : venus_g2c_read
- *
- * Desc : read data from sar - GPIO mode
- *
- * Parm : p_this : handle of venus i2c
- *
- * Retn : 0 for success, others is failed
- *------------------------------------------------------------------*/
-int venus_g2c_read(
-    venus_i2c*              p_this,
-    unsigned char*          tx_buf,
-    unsigned short          tx_buf_len,
-    unsigned char*          rx_buf,
-    unsigned short          rx_buf_len
-    )
+/*
+ * Func : rtk_i2c_setup_reg_base
+ * Desc : setup register of rtk i2c
+ * Parm : N/A
+ * Retn : reg_map of rtk i2c
+ */
+struct rtk_i2c_reg_map rtk_i2c_setup_reg_base(unsigned int id,
+	unsigned long base)
 {
-    int ret = 0;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (!p_this->gpio_map.valid && p_this->read == venus_i2c_read)
-        return venus_i2c_read(p_this, tx_buf, tx_buf_len, rx_buf, rx_buf_len);
+	struct rtk_i2c_reg_map reg_map;
 
-    if (tx_buf && tx_buf_len)
-    {
-        if ((ret = venus_g2c_write(p_this,  tx_buf, tx_buf_len, 0))<0)
-            return ret;
-    }
+	switch (id) {
+	case 0:
+		reg_map.I2C_ISR = (base & ~0xFFF);
+		reg_map.I2C_INT = ISO_ISR_I2C0;
+		reg_map.IC_SDA_DEL = (base & ~0xFFF) | ISO_I2C0_SDA_DEL;
+		break;
+	case 1:
+#ifdef CONFIG_ARCH_RTD119X
+		reg_map.I2C_ISR = (base & ~0xFFF) | 0x000C;
+		reg_map.I2C_INT = MISC_ISR_I2C1;
+		reg_map.IC_SDA_DEL = (base & ~0xFFF) | MISC_I2C1_SDA_DEL;
+#else
+		reg_map.I2C_ISR = (base & ~0xFFF);
+		reg_map.I2C_INT = ISO_ISR_I2C1;
+		reg_map.IC_SDA_DEL = (base & ~0xFFF) | ISO_I2C1_SDA_DEL;
+#endif
+		break;
+	case 2:
+		reg_map.I2C_ISR = (base & ~0xFFF) | 0x000C;
+		reg_map.I2C_INT = MIS_ISR_I2C2;
+		reg_map.IC_SDA_DEL = (base & ~0xFFF) | MIS_I2C2_SDA_DEL;
+		break;
+	case 3:
+		reg_map.I2C_ISR = (base & ~0xFFF) | 0x000C;
+		reg_map.I2C_INT = MIS_ISR_I2C3;
+		reg_map.IC_SDA_DEL = (base & ~0xFFF) | MIS_I2C3_SDA_DEL;
+		break;
+	case 4:
+		reg_map.I2C_ISR = (base & ~0xFFF) | 0x000C;
+		reg_map.I2C_INT = MIS_ISR_I2C4;
+		reg_map.IC_SDA_DEL = (base & ~0xFFF) | MIS_I2C4_SDA_DEL;
+		break;
+	case 5:
+		reg_map.I2C_ISR = (base & ~0xFFF) | 0x000C;
+		reg_map.I2C_INT = MIS_ISR_I2C5;
+		reg_map.IC_SDA_DEL = (base & ~0xFFF) | MIS_I2C5_SDA_DEL;
+		break;
+	case 6:
+		reg_map.I2C_ISR = (base & ~0xFFF);
+		reg_map.I2C_INT = ISO_ISR_I2C6;
+		reg_map.IC_SDA_DEL = (base & ~0xFFF) | ISO_I2C6_SDA_DEL;
+		break;
+	default:
+		break;
+	}
 
-    venus_i2c_load_message(p_this, I2C_MASTER_READ,
-            NULL, 0, rx_buf, rx_buf_len, 0);
+	reg_map.I2C_ISR_EN = 0;
+	reg_map.I2C_ISR_EN_MASK = 0;
+	reg_map.IC_CON = base | I2C_CON;
+	reg_map.IC_TAR = base | I2C_TAR;
+	reg_map.IC_SAR = base | I2C_SAR;
+	reg_map.IC_HS_MADDR = base | I2C_HS_MADDR;
+	reg_map.IC_DATA_CMD = base | I2C_DATA_CMD;
 
-    return venus_g2c_start_xfer(p_this);
+	reg_map.IC_FS_SCL_HCNT = base | I2C_FS_SCL_HCNT;
+	reg_map.IC_FS_SCL_LCNT = base | I2C_FS_SCL_LCNT;
+	reg_map.IC_SS_SCL_HCNT = base | I2C_SS_SCL_HCNT;
+	reg_map.IC_SS_SCL_LCNT = base | I2C_SS_SCL_LCNT;
+#ifdef CONFIG_ARCH_RTD16xx || CONFIG_ARCH_RTD13xx
+	if (id == 0) {
+		reg_map.IC_HS_SCL_HCNT = base | I2C_HS_SCL_HCNT;
+		reg_map.IC_HS_SCL_LCNT = base | I2C_HS_SCL_LCNT;
+	}
+#endif
+	reg_map.IC_INTR_STAT = base | I2C_INTR_STAT;
+	reg_map.IC_INTR_MASK = base | I2C_INTR_MASK;
+	reg_map.IC_RAW_INTR_STAT = base | I2C_RAW_INTR_STAT;
+	reg_map.IC_RX_TL = base | I2C_RX_TL;
+	reg_map.IC_TX_TL = base | I2C_TX_TL;
+
+	reg_map.IC_CLR_INTR = base | I2C_CLR_INTR;
+	reg_map.IC_CLR_RX_UNDER = base | I2C_CLR_RX_UNDER;
+	reg_map.IC_CLR_RX_OVER = base | I2C_CLR_RX_OVER;
+	reg_map.IC_CLR_TX_OVER = base | I2C_CLR_TX_OVER;
+	reg_map.IC_CLR_RD_REQ = base | I2C_CLR_RD_REQ;
+	reg_map.IC_CLR_TX_ABRT = base | I2C_CLR_TX_ABRT;
+	reg_map.IC_CLR_RX_DONE = base | I2C_CLR_RX_DONE;
+	reg_map.IC_CLR_ACTIVITY = base | I2C_CLR_ACTIVITY;
+	reg_map.IC_CLR_STOP_DET = base | I2C_CLR_STOP_DET;
+	reg_map.IC_CLR_START_DET = base | I2C_CLR_START_DET;
+	reg_map.IC_CLR_GEN_CALL = base | I2C_CLR_GEN_CALL;
+
+	reg_map.IC_ENABLE = base | I2C_ENABLE;
+	reg_map.IC_STATUS = base | I2C_STATUS;
+	reg_map.IC_TXFLR = base | I2C_TXFLR;
+	reg_map.IC_RXFLR = base | I2C_RXFLR;
+	reg_map.IC_SDA_HOLD = base | I2C_SDA_HOLD;
+	reg_map.IC_TX_ABRT_SOURCE = base | I2C_TX_ABRT_SOURCE;
+	reg_map.IC_SLV_DATA_NACK_ONLY = base | I2C_SLV_DATA_NACK_ONLY;
+	reg_map.IC_DMA_CR = base | I2C_DMA_CR;
+	reg_map.IC_DMA_TDLR = base | I2C_DMA_TDLR;
+	reg_map.IC_DMA_RDLR = base | I2C_DMA_RDLR;
+	reg_map.IC_SDA_SETUP = base | I2C_SDA_SETUP;
+	reg_map.IC_ACK_GENERAL_CALL = base | I2C_ACK_GENERAL_CALL;
+	reg_map.IC_ENABLE_STATUS = base | I2C_ENABLE_STATUS;
+	reg_map.IC_COMP_PARAM_1 = base | I2C_COMP_PARAM_1;
+	reg_map.IC_COMP_VERSION = base | I2C_COMP_VERSION;
+	reg_map.IC_COMP_TYPE = base | I2C_COMP_TYPE;
+	return reg_map;
 }
 
+static unsigned char rtk_i2c_flags;
+static struct rtk_i2c_handler *rtk_i2c_phy_handle[I2C_PHY_CNT] = {NULL};
 
-
-#define venus_g2c_init                  venus_g2c_dump
-#define venus_g2c_uninit                venus_g2c_null_function               // no nothing
-#define venus_g2c_get_tx_abort_reason   venus_i2c_get_tx_abort_reason         // share the same function with venus i2c
-#define venus_g2c_suspend               venus_g2c_null_function               // no nothing
-#define venus_g2c_resume                venus_g2c_null_function               // no nothing
-
-
-
-/*------------------------------------------------------------------
- * Func : create_venus_g2c_handle
- *
- * Desc : create handle of venus g2c
- *
- * Parm : gpio_sda : gpio for sda
- *        gpio_sda : gpio for scl
- *
- * Retn : handle of venus i2c
- *------------------------------------------------------------------*/
-venus_i2c* create_venus_g2c_handle(
-    unsigned char       id,
-    unsigned char       gpio_sda,
-    unsigned char       gpio_scl
-    )
+/*
+ * Func : create_rtk_i2c_handle
+ * Desc : create handle of rtk i2c
+ * Parm : N/A
+ * Retn : handle of rtk i2c
+ */
+struct rtk_i2c_handler *create_rtk_i2c_handle(
+	unsigned int id,
+	unsigned short sar,
+	enum ADDR_MODE sar_mode,
+	unsigned int spd,
+	unsigned int irq,
+	unsigned long base)
 {
-    venus_i2c* hHandle;
-    RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
-    if (id >= 8 || (venus_i2c_flags>>id) & 0x01)
-        return NULL;
+	struct rtk_i2c_handler *hHandle;
 
-    hHandle = kmalloc(sizeof(venus_i2c),GFP_KERNEL);
+	RTK_DEBUG("%s\n", __func__);
 
-    if (hHandle!= NULL)
-    {
-        memset(hHandle, 0, sizeof(venus_i2c));
+	if (!(BIT(id) & I2C_ID_MASK))
+		return NULL;
 
-        hHandle->flags         = 0;
-        hHandle->id            = id;
-        hHandle->irq           = 0;
-        hHandle->sar           = 0;
-        hHandle->sar_mode      = ADDR_MODE_7BITS;
-        hHandle->tar           = 0;
-        hHandle->tar_mode      = ADDR_MODE_7BITS;
-        hHandle->spd           = 100;
-        hHandle->tick          = 1000/hHandle->spd;
-        hHandle->guard_interval = 1000;
-        hHandle->rx_fifo_depth = 16;
-        hHandle->tx_fifo_depth = 16;
-        hHandle->time_stamp    = 0;
-        memset(&hHandle->xfer, 0, sizeof(venus_i2c_xfer));
-        spin_lock_init(&hHandle->lock);
+	if (((rtk_i2c_flags>>id) & 0x01))
+		return rtk_i2c_phy_handle[id];
 
-        // init gpio register map
-        hHandle->gpio_map.valid       = 1;
-        hHandle->gpio_map.scl         = venus_gpio_id(MIS_GPIO, gpio_scl);
-        hHandle->gpio_map.sda         = venus_gpio_id(MIS_GPIO, gpio_sda);
-        hHandle->gpio_map.muxpad      = 0;    // no muxpad supported
-        hHandle->gpio_map.muxpad_mask = 0;
-        hHandle->gpio_map.muxpad_gpio = 0;
-        hHandle->gpio_map.muxpad_i2c  = 0;
+	hHandle = kmalloc(sizeof(struct rtk_i2c_handler), GFP_KERNEL);
 
-        // init operations
-        hHandle->init         = venus_g2c_init;
-        hHandle->uninit       = venus_g2c_uninit;
-        hHandle->set_spd      = venus_g2c_set_spd;
-        hHandle->set_guard_interval = venus_i2c_set_guard_interval;
-        hHandle->set_tar      = venus_g2c_set_tar;
-        hHandle->set_port     = venus_g2c_set_port;
-        hHandle->read         = venus_g2c_read;
-        hHandle->write        = venus_g2c_write;
-        hHandle->gpio_read    = venus_g2c_read;
-        hHandle->gpio_write   = venus_g2c_write;
-        hHandle->dump         = venus_g2c_dump;
-        hHandle->suspend      = venus_g2c_suspend;
-        hHandle->resume       = venus_g2c_resume;
-        hHandle->get_tx_abort_reason = venus_g2c_get_tx_abort_reason;
+	if (hHandle != NULL) {
+		memset(hHandle, 0, sizeof(struct rtk_i2c_handler));
+		hHandle->flags = 0;
+		hHandle->id = id;
+		hHandle->irq = irq;
+		hHandle->sar = sar;
+		hHandle->sar_mode = sar_mode;
+		hHandle->spd = spd;
+		hHandle->guard_interval = 1000;
+		hHandle->tx_abort_flag = 0;
+		hHandle->init = rtk_i2c_handler_init;
+		hHandle->uninit = rtk_i2c_handler_uninit;
+		hHandle->set_spd = rtk_i2c_set_spd;
+		hHandle->set_guard_interval = rtk_i2c_set_guard_interval;
+		hHandle->set_tar = rtk_i2c_set_tar;
+		hHandle->reg_map = rtk_i2c_setup_reg_base(id, base);
+		hHandle->read = rtk_i2c_read;
+		hHandle->write = rtk_i2c_write;
+		hHandle->get_tx_abort_reason = rtk_i2c_get_tx_abort_reason;
+		hHandle->dump = rtk_i2c_dump;
+		hHandle->set_sar = rtk_i2c_set_sar;
+		hHandle->slave_mode_enable = rtk_i2c_slave_mode_enable;
+		hHandle->register_slave_ops = rtk_i2c_register_slave_ops;
+		/* GPIO */
+		//hHandle->set_port = rtk_i2c_set_port;
+		//hHandle->gpio_read = rtk_g2c_read;
+		//hHandle->gpio_write = rtk_g2c_write;
+#ifdef EDID_4BLOCK_SUPPORT
+		hHandle->read_edid_seg = rtk_i2c_read_edid_seg;
+#endif
+		atomic_set(&hHandle->ref_cnt, 1);
+		memset(&hHandle->xfer, 0, sizeof(struct rtk_i2c_xfer));
+		rtk_i2c_phy_handle[id] = hHandle;
+		rtk_i2c_flags |= (0x01 << id);
+	}
 
-        hHandle->set_sar      = venus_g2c_set_sar;
-        hHandle->slave_mode_enable = venus_g2c_slave_mode_enable;
-        hHandle->register_slave_ops = venus_i2c_register_slave_ops;
-
-        venus_i2c_flags |= (0x01 << id);
-    }
-
-    return hHandle;
+	return hHandle;
 }
+EXPORT_SYMBOL(create_rtk_i2c_handle);
 
+/*
+ * Func : destroy_rtk_i2c_handle
+ * Desc : destroy handle of rtk i2c
+ * Parm : N/A
+ * Retn : N/A
+ */
+void destroy_rtk_i2c_handle(struct rtk_i2c_handler *hHandle)
+{
+	RTK_DEBUG("%s\n", __func__);
+
+	if (hHandle == NULL)
+		return;
+
+	if (atomic_dec_return(&hHandle->ref_cnt) > 0) {
+		pr_info("[I2C] destroy I2C%d successed, reference cnt=%d\n",
+			hHandle->id, atomic_read(&hHandle->ref_cnt));
+		return;
+	}
+
+	pr_info("[I2C] destroy rtk i2c%d handle\n", hHandle->id);
+	hHandle->uninit(hHandle);
+	rtk_i2c_flags &= ~(0x01 << hHandle->id);
+	rtk_i2c_phy_handle[hHandle->id] = NULL;
+	kfree(hHandle);
+}
+EXPORT_SYMBOL(destroy_rtk_i2c_handle);

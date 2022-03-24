@@ -1,10 +1,10 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2008  
+* Copyright c                  Realtek Semiconductor Corporation, 2008
 * All rights reserved.
-* 
+*
 * Program : Vlan driver
-* Abstract : 
-* Author : hyking (hyking_liu@realsil.com.cn)  
+* Abstract :
+* Author : hyking (hyking_liu@realsil.com.cn)
 *
 * This program is free software; you can redistribute it and/or modify
 * it under the terms of the GNU General Public License as published by
@@ -57,7 +57,7 @@ int32 rtl865x_addVlanPortMember(uint16 vid, uint32 portMask);
 int32 rtl865x_delVlanPortMember(uint16 vid,uint32 portMask);
 
 #if defined (CONFIG_RTL_HARDWARE_MULTICAST) || defined (CONFIG_RTL_HW_QOS_SUPPORT)
-uint32 rtl865x_getVlanPortMask(uint32 vid); 
+uint32 rtl865x_getVlanPortMask(uint32 vid);
 #endif
 
 int32 rtl865x_setVlanPortTag(uint16 vid,uint32 portMask,uint8 tag);
@@ -76,4 +76,4 @@ int32 rtl865x_modVlanPortMember(uint16 vid, uint32 portMask, uint32 untagset);
 #endif
 
 #endif
-	
+

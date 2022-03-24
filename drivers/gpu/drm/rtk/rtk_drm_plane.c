@@ -18,7 +18,7 @@ struct rtk_drm_plane_state * rtk_drm_create_plane_state(struct drm_plane *plane)
     if (!state)
         return NULL;
     state->base.plane       = plane;
-    state->base.rotation    = BIT(DRM_ROTATE_0);
+    state->base.rotation    = DRM_ROTATE_0;
     state->base.crtc_x      = 0;
     state->base.crtc_y      = 0;
     state->base.crtc_h      = 1080;
@@ -74,16 +74,14 @@ static const struct drm_plane_funcs rtk_plane_funcs = {
 };
 
 int rtk_prepare_plane_fb(struct drm_plane *plane,
-        struct drm_framebuffer *fb,
-        const struct drm_plane_state *new_state)
+        struct drm_plane_state *new_state)
 {
     DRM_DEBUG_KMS("[%s:%d]\n", __FUNCTION__, __LINE__);
     return 0;
 }
 
 void rtk_cleanup_plane_fb(struct drm_plane *plane,
-        struct drm_framebuffer *fb,
-        const struct drm_plane_state *old_state)
+        struct drm_plane_state *old_state)
 {
     DRM_DEBUG_KMS("[%s:%d]\n", __FUNCTION__, __LINE__);
 }
@@ -128,7 +126,7 @@ struct rtk_drm_plane * rtk_drm_primary_create(struct drm_device *dev) {
     drm_universal_plane_init(dev, &plane->base, 0,
             &rtk_plane_funcs,
             rtk_primary_formats, 2,
-            DRM_PLANE_TYPE_PRIMARY);
+            DRM_PLANE_TYPE_PRIMARY, NULL);
 
     drm_plane_helper_add(&plane->base, &rtk_plane_helper_funcs);
 

@@ -211,6 +211,7 @@ void migrate_to_reboot_cpu(void)
  *	Shutdown everything and perform a clean reboot.
  *	This is not safe to call in interrupt context.
  */
+
 void kernel_restart(char *cmd)
 {
 	kernel_restart_prepare(cmd);
@@ -347,7 +348,7 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		kernel_restart(buffer);
 		break;
 
-#ifdef CONFIG_KEXEC
+#ifdef CONFIG_KEXEC_CORE
 	case LINUX_REBOOT_CMD_KEXEC:
 		ret = kernel_kexec();
 		break;
@@ -387,8 +388,13 @@ void ctrl_alt_del(void)
 		kill_cad_pid(SIGINT, 1);
 }
 
+#if defined(CONFIG_RTK_XEN_SUPPORT) && defined(CONFIG_ANDROID)
+char poweroff_cmd[POWEROFF_CMD_PATH_LEN] = "/system/bin/reboot -p";
+static const char reboot_cmd[] = "/system/bin/reboot";
+#else
 char poweroff_cmd[POWEROFF_CMD_PATH_LEN] = "/sbin/poweroff";
 static const char reboot_cmd[] = "/sbin/reboot";
+#endif
 
 static int run_cmd(const char *cmd)
 {

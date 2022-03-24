@@ -28,6 +28,8 @@
 #define UHID_NAME	"uhid"
 #define UHID_BUFSIZE	32
 
+static DEFINE_MUTEX(uhid_open_mutex);
+
 struct uhid_device {
 	struct mutex devlock;
 	bool running;
@@ -142,15 +144,26 @@ static void uhid_hid_stop(struct hid_device *hid)
 static int uhid_hid_open(struct hid_device *hid)
 {
 	struct uhid_device *uhid = hid->driver_data;
+	int retval = 0;
 
-	return uhid_queue_event(uhid, UHID_OPEN);
+	mutex_lock(&uhid_open_mutex);
+	if (!hid->open++) {
+		retval = uhid_queue_event(uhid, UHID_OPEN);
+		if (retval)
+			hid->open--;
+	}
+	mutex_unlock(&uhid_open_mutex);
+	return retval;
 }
 
 static void uhid_hid_close(struct hid_device *hid)
 {
 	struct uhid_device *uhid = hid->driver_data;
 
-	uhid_queue_event(uhid, UHID_CLOSE);
+	mutex_lock(&uhid_open_mutex);
+	if (!--hid->open)
+		uhid_queue_event(uhid, UHID_CLOSE);
+	mutex_unlock(&uhid_open_mutex);
 }
 
 static int uhid_hid_parse(struct hid_device *hid)
@@ -400,7 +413,7 @@ struct uhid_create_req_compat {
 static int uhid_event_from_user(const char __user *buffer, size_t len,
 				struct uhid_event *event)
 {
-	if (is_compat_task()) {
+	if (in_compat_syscall()) {
 		u32 type;
 
 		if (get_user(type, buffer))
@@ -779,19 +792,8 @@ static struct miscdevice uhid_misc = {
 	.minor		= UHID_MINOR,
 	.name		= UHID_NAME,
 };
+module_misc_device(uhid_misc);
 
-static int __init uhid_init(void)
-{
-	return misc_register(&uhid_misc);
-}
-
-static void __exit uhid_exit(void)
-{
-	misc_deregister(&uhid_misc);
-}
-
-module_init(uhid_init);
-module_exit(uhid_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("David Herrmann <dh.herrmann@gmail.com>");
 MODULE_DESCRIPTION("User-space I/O driver support for HID subsystem");

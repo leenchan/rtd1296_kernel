@@ -16,7 +16,8 @@
 
 #include "uapi/ion.h"
 #include "ion/ion.h"
-#include "uapi/rtk_phoenix_ion.h"
+#include "uapi/ion_rtk.h"
+//#include "uapi/rtk_phoenix_ion.h"
 
 typedef enum
 {
@@ -71,30 +72,35 @@ enum VO_DPTX_MODE {
 typedef enum VO_DPTX_MODE VO_DPTX_MODE;
  
 enum VO_DPTX_AUDIO_SAMPLE_FREQ {
-     VO_DPTX_AUDIO_NULL = 0,
-     VO_DPTX_AUDIO_32K = 1,
-     VO_DPTX_AUDIO_44_1K = 2,
-     VO_DPTX_AUDIO_48K = 3,
-     VO_DPTX_AUDIO_88_2K = 4,
-     VO_DPTX_AUDIO_96K = 5,
-     VO_DPTX_AUDIO_176_4K = 6,
-     VO_DPTX_AUDIO_192K = 7,
+	VO_DPTX_AUDIO_NULL = 0,
+	VO_DPTX_AUDIO_32K = 1,
+	VO_DPTX_AUDIO_44_1K = 2,
+	VO_DPTX_AUDIO_48K = 3,
+	VO_DPTX_AUDIO_88_2K = 4,
+	VO_DPTX_AUDIO_96K = 5,
+	VO_DPTX_AUDIO_176_4K = 6,
+	VO_DPTX_AUDIO_192K = 7,
 };
 typedef enum VO_DPTX_AUDIO_SAMPLE_FREQ VO_DPTX_AUDIO_SAMPLE_FREQ;
 
 enum VO_INTERFACE_TYPE {
-     VO_ANALOG_AND_DIGITAL = 0,
-     VO_ANALOG_ONLY = 1,
-     VO_DIGITAL_ONLY = 2,
-	 VO_DISPLAY_PORT_ONLY = 3,
+	VO_ANALOG_AND_DIGITAL = 0,
+	VO_ANALOG_ONLY = 1,
+	VO_DIGITAL_ONLY = 2,
+	VO_DISPLAY_PORT_ONLY = 3,
+	VO_HDMI_AND_DISPLAY_PORT_SAME_SOURCE = 4,
+	VO_HDMI_AND_DISPLAY_PORT_DIFF_SOURCE = 5,
+	VO_DISPLAY_PORT_AND_CVBS_SAME_SOURCE = 6,
+	VO_HDMI_AND_DP_DIFF_SOURCE_WITH_CVBS = 7,
+	VO_FORCE_DP_OFF = 8,
  };
 typedef enum VO_INTERFACE_TYPE VO_INTERFACE_TYPE;
 
 enum VO_PEDESTAL_TYPE {
-     VO_PEDESTAL_TYPE_300_700_ON = 0,
-     VO_PEDESTAL_TYPE_300_700_OFF = 1,
-     VO_PEDESTAL_TYPE_286_714_ON = 2,
-     VO_PEDESTAL_TYPE_286_714_OFF = 3,
+	VO_PEDESTAL_TYPE_300_700_ON = 0,
+	VO_PEDESTAL_TYPE_300_700_OFF = 1,
+	VO_PEDESTAL_TYPE_286_714_ON = 2,
+	VO_PEDESTAL_TYPE_286_714_OFF = 3,
 };
 typedef enum VO_PEDESTAL_TYPE VO_PEDESTAL_TYPE;
 
@@ -194,30 +200,30 @@ enum VO_HDMI_OFF_MODE {
 typedef enum VO_HDMI_OFF_MODE VO_HDMI_OFF_MODE;
 
 struct VIDEO_RPC_VOUT_CONFIG_DPTX_INFO_FRAME {
-     enum VO_DPTX_MODE dptxMode;
-     enum VO_DPTX_AUDIO_SAMPLE_FREQ audioSampleFreq;
-     u_char audioChannelCount;
-     u_char dataByte1;
-     u_char dataByte2;
-     u_char dataByte3;
-     u_char dataByte4;
-     u_char dataByte5;
-     u_int dataInt0;
-     u_int hdmi2p0_feature;//[Bit0]HDMI 2.0 [Bit1]Scramble
-     enum VO_HDMI_OFF_MODE hdmi_off_mode;
-     u_int reserved3;
-     u_int reserved4;
+	enum VO_DPTX_MODE dptxMode;
+	enum VO_DPTX_AUDIO_SAMPLE_FREQ audioSampleFreq;
+	u_char audioChannelCount;
+	u_char dataByte1;
+	u_char dataByte2;
+	u_char dataByte3;
+	u_char dataByte4;
+	u_char dataByte5;
+	u_int dataInt0;
+	u_int hdmi2p0_feature;//[Bit0]HDMI 2.0 [Bit1]Scramble
+	enum VO_HDMI_OFF_MODE hdmi_off_mode;
+	u_int reserved3;
+	u_int reserved4;
 };
 typedef struct VIDEO_RPC_VOUT_CONFIG_DPTX_INFO_FRAME VIDEO_RPC_VOUT_CONFIG_DPTX_INFO_FRAME;
 
 struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD {
-     enum VO_STANDARD standard;
-     u_char enProg;
-     u_char enDIF;
-     u_char enCompRGB;
-     enum VO_PEDESTAL_TYPE pedType;
-     u_int dataInt0;
-     u_int dataInt1;
+	enum VO_STANDARD standard;
+	u_char enProg;
+	u_char enDIF;
+	u_char enCompRGB;
+	enum VO_PEDESTAL_TYPE pedType;
+	u_int dataInt0;
+	u_int dataInt1;
 };
 typedef struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD;
 

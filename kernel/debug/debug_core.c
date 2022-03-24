@@ -90,10 +90,6 @@ static int kgdb_use_con;
 bool dbg_is_early = true;
 /* Next cpu to become the master debug core */
 int dbg_switch_cpu;
-/* Flag for entering kdb when a panic occurs */
-static bool break_on_panic = true;
-/* Flag for entering kdb when an exception occurs */
-static bool break_on_exception = true;
 
 /* Use kdb or gdbserver mode */
 int dbg_kdb_mode = 1;
@@ -108,8 +104,6 @@ early_param("kgdbcon", opt_kgdb_con);
 
 module_param(kgdb_use_con, int, 0644);
 module_param(kgdbreboot, int, 0644);
-module_param(break_on_panic, bool, 0644);
-module_param(break_on_exception, bool, 0644);
 
 /*
  * Holds information about breakpoints in a kernel. These breakpoints are
@@ -604,11 +598,11 @@ return_normal:
 	/*
 	 * Wait for the other CPUs to be notified and be waiting for us:
 	 */
-	time_left = loops_per_jiffy * HZ;
+	time_left = MSEC_PER_SEC;
 	while (kgdb_do_roundup && --time_left &&
 	       (atomic_read(&masters_in_kgdb) + atomic_read(&slaves_in_kgdb)) !=
 		   online_cpus)
-		cpu_relax();
+		udelay(1000);
 	if (!time_left)
 		pr_crit("Timed out waiting for secondary CPUs.\n");
 
@@ -709,9 +703,6 @@ kgdb_handle_exception(int evector, int signo, int ecode, struct pt_regs *regs)
 	 * on such systems, especially if its "just" an oops.
 	 */
 	if (signo != SIGTRAP && panic_timeout)
-		return 1;
-
-	if (unlikely(signo != SIGTRAP && !break_on_exception))
 		return 1;
 
 	memset(ks, 0, sizeof(struct kgdb_state));
@@ -852,9 +843,6 @@ static int kgdb_panic_event(struct notifier_block *self,
 	 * reboot on panic.
 	 */
 	if (panic_timeout)
-		return NOTIFY_DONE;
-
-	if (!break_on_panic)
 		return NOTIFY_DONE;
 
 	if (dbg_kdb_mode)

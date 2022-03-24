@@ -108,33 +108,37 @@
 	.endm
 #endif
 
-	.macro asm_trace_hardirqs_off
+	.macro asm_trace_hardirqs_off, save=1
 #if defined(CONFIG_TRACE_IRQFLAGS)
+	.if \save
 	stmdb   sp!, {r0-r3, ip, lr}
+	.endif
 	bl	trace_hardirqs_off
+	.if \save
 	ldmia	sp!, {r0-r3, ip, lr}
+	.endif
 #endif
 	.endm
 
-	.macro asm_trace_hardirqs_on_cond, cond
+	.macro asm_trace_hardirqs_on, cond=al, save=1
 #if defined(CONFIG_TRACE_IRQFLAGS)
 	/*
 	 * actually the registers should be pushed and pop'd conditionally, but
 	 * after bl the flags are certainly clobbered
 	 */
+	.if \save
 	stmdb   sp!, {r0-r3, ip, lr}
+	.endif
 	bl\cond	trace_hardirqs_on
+	.if \save
 	ldmia	sp!, {r0-r3, ip, lr}
+	.endif
 #endif
 	.endm
 
-	.macro asm_trace_hardirqs_on
-	asm_trace_hardirqs_on_cond al
-	.endm
-
-	.macro disable_irq
+	.macro disable_irq, save=1
 	disable_irq_notrace
-	asm_trace_hardirqs_off
+	asm_trace_hardirqs_off \save
 	.endm
 
 	.macro enable_irq
@@ -155,7 +159,11 @@
 	.endm
 
 	.macro	save_and_disable_irqs_notrace, oldcpsr
+#ifdef CONFIG_CPU_V7M
+	mrs	\oldcpsr, primask
+#else
 	mrs	\oldcpsr, cpsr
+#endif
 	disable_irq_notrace
 	.endm
 
@@ -173,9 +181,24 @@
 
 	.macro restore_irqs, oldcpsr
 	tst	\oldcpsr, #PSR_I_BIT
-	asm_trace_hardirqs_on_cond eq
+	asm_trace_hardirqs_on cond=eq
 	restore_irqs_notrace \oldcpsr
 	.endm
+
+/*
+ * Assembly version of "adr rd, BSYM(sym)".  This should only be used to
+ * reference local symbols in the same assembly file which are to be
+ * resolved by the assembler.  Other usage is undefined.
+ */
+	.irp	c,,eq,ne,cs,cc,mi,pl,vs,vc,hi,ls,ge,lt,gt,le,hs,lo
+	.macro	badr\c, rd, sym
+#ifdef CONFIG_THUMB2_KERNEL
+	adr\c	\rd, \sym + 1
+#else
+	adr\c	\rd, \sym
+#endif
+	.endm
+	.endr
 
 /*
  * Get current thread_info.
@@ -326,7 +349,7 @@
 THUMB(	orr	\reg , \reg , #PSR_T_BIT	)
 	bne	1f
 	orr	\reg, \reg, #PSR_A_BIT
-	adr	lr, BSYM(2f)
+	badr	lr, 2f
 	msr	spsr_cxsf, \reg
 	__MSR_ELR_HYP(14)
 	__ERET
@@ -461,13 +484,13 @@ THUMB(	orr	\reg , \reg , #PSR_T_BIT	)
 	.macro	uaccess_save, tmp
 #ifdef CONFIG_CPU_SW_DOMAIN_PAN
 	mrc	p15, 0, \tmp, c3, c0, 0
-	str	\tmp, [sp, #S_FRAME_SIZE]
+	str	\tmp, [sp, #SVC_DACR]
 #endif
 	.endm
 
 	.macro	uaccess_restore
 #ifdef CONFIG_CPU_SW_DOMAIN_PAN
-	ldr	r0, [sp, #S_FRAME_SIZE]
+	ldr	r0, [sp, #SVC_DACR]
 	mcr	p15, 0, r0, c3, c0, 0
 #endif
 	.endm
@@ -492,5 +515,33 @@ THUMB(	orr	\reg , \reg , #PSR_T_BIT	)
 	nop
 #endif
 	.endm
+
+	.macro	bug, msg, line
+#ifdef CONFIG_THUMB2_KERNEL
+1:	.inst	0xde02
+#else
+1:	.inst	0xe7f001f2
+#endif
+#ifdef CONFIG_DEBUG_BUGVERBOSE
+	.pushsection .rodata.str, "aMS", %progbits, 1
+2:	.asciz	"\msg"
+	.popsection
+	.pushsection __bug_table, "aw"
+	.align	2
+	.word	1b, 2b
+	.hword	\line
+	.popsection
+#endif
+	.endm
+
+#ifdef CONFIG_KPROBES
+#define _ASM_NOKPROBE(entry)				\
+	.pushsection "_kprobe_blacklist", "aw" ;	\
+	.balign 4 ;					\
+	.long entry;					\
+	.popsection
+#else
+#define _ASM_NOKPROBE(entry)
+#endif
 
 #endif /* __ASM_ASSEMBLER_H__ */

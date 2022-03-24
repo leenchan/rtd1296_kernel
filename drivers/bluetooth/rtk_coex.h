@@ -1,9 +1,9 @@
 #include <net/bluetooth/hci_core.h>
 #include <linux/list.h>
 
-/***********************************
-** Realtek - For coexistence **
-***********************************/
+/*
+ * Realtek - For coexistence
+ */
 #define BTRTL_HCIUSB    0
 #define BTRTL_HCIUART   1
 
@@ -23,7 +23,7 @@
 #define leave_ack           "LEAVE_ACK"
 #define bt_leave            "BT_LEAVE"
 
-#define HCI_OP_PERIODIC_INQ								0x0403
+#define HCI_OP_PERIODIC_INQ		0x0403
 #define HCI_EV_LE_META			                        0x3e
 #define HCI_EV_LE_CONN_COMPLETE		                    0x01
 #define HCI_EV_LE_CONN_UPDATE_COMPLETE	                0x03
@@ -68,10 +68,14 @@
 #define HCI_OP_HCI_BT_REGISTER_VALUE_NOTIFY (0x010a | HCI_GRP_VENDOR_SPECIFIC)
 
 //bt info reason to wifi
-#define HOST_RESPONSE                   0	//Host response when receive the BT Info Control Event
-#define POLLING_RESPONSE                1	//The BT Info response for polling by BT firmware.
-#define AUTO_REPORT                     2	//BT auto report by BT firmware.
-#define STACK_REPORT_WHILE_DEVICE_D2    3	//Stack report when BT firmware is under power save state(ex:D2)
+/*Host response when receive the BT Info Control Event*/
+#define HOST_RESPONSE                   0
+/*The BT Info response for polling by BT firmware.*/
+#define POLLING_RESPONSE                1
+/*BT auto report by BT firmware.*/
+#define AUTO_REPORT                     2
+/*Stack report when BT firmware is under power save state(ex:D2)*/
+#define STACK_REPORT_WHILE_DEVICE_D2    3
 
 // vendor event from wifi
 #define RTK_HS_EXTENSION_EVENT_WIFI_SCAN            0x01
@@ -105,8 +109,10 @@
 #define HCI_CMD_PREAMBLE_SIZE           3
 #define PAN_PACKET_COUNT                5
 
-#define STREAM_TO_UINT16(u16, p) {u16 = ((uint16_t)(*(p)) + (((uint16_t)(*((p) + 1))) << 8)); (p) += 2;}
-#define UINT16_TO_STREAM(p, u16) {*(p)++ = (uint8_t)(u16); *(p)++ = (uint8_t)((u16) >> 8);}
+#define STREAM_TO_UINT16(u16, p)\
+	{u16 = ((uint16_t)(*(p)) + (((uint16_t)(*((p) + 1))) << 8)); (p) += 2; }
+#define UINT16_TO_STREAM(p, u16)\
+	{*(p)++ = (uint8_t)(u16); *(p)++ = (uint8_t)((u16) >> 8); }
 
 #define PSM_SDP     0x0001
 #define PSM_RFCOMM  0x0003
@@ -157,14 +163,15 @@ struct rtl_btinfo {
 };
 #define RTL_BTINFO_LEN	(sizeof(struct rtl_btinfo))
 /* typedef struct {
- * 	uint8_t cmd_index;
- * 	uint8_t cmd_length;
- * 	uint8_t link_status;
- * 	uint8_t retry_cnt;
- * 	uint8_t rssi;
- * 	uint8_t mailbox_info;
- * 	uint16_t acl_throughput;
- * } hci_linkstatus_report; */
+ *	uint8_t cmd_index;
+ *	uint8_t cmd_length;
+ *	uint8_t link_status;
+ *	uint8_t retry_cnt;
+ *	uint8_t rssi;
+ *	uint8_t mailbox_info;
+ *	uint16_t acl_throughput;
+ * } hci_linkstatus_report;
+ */
 
 typedef struct {
 	uint8_t type;
@@ -295,32 +302,33 @@ struct rtp_header {
 
 /* #elif __BYTE_ORDER == __BIG_ENDIAN
  * struct sbc_frame_hdr {
- * 	uint8_t syncword;
- * 	uint8_t sampling_frequency:2;
- * 	uint8_t blocks:2;
- * 	uint8_t channel_mode:2;
- * 	uint8_t allocation_method:1;
- * 	uint8_t subbands:1;
- * 	uint8_t bitpool:8;
- * 	uint8_t crc_check:8;
+ *	uint8_t syncword;
+ *	uint8_t sampling_frequency:2;
+ *	uint8_t blocks:2;
+ *	uint8_t channel_mode:2;
+ *	uint8_t allocation_method:1;
+ *	uint8_t subbands:1;
+ *	uint8_t bitpool:8;
+ *	uint8_t crc_check:8;
  * } __attribute__ ((packed));
- * 
+ *
  * struct rtp_header {
- * 	unsigned v:2;
- * 	unsigned p:1;
- * 	unsigned x:1;
- * 	unsigned cc:4;
- * 
- * 	unsigned m:1;
- * 	unsigned pt:7;
- * 
- * 	uint16_t sequence_number;
- * 	uint32_t timestamp;
- * 	uint32_t ssrc;
- * 	uint32_t csrc[0];
+ *	unsigned v:2;
+ *	unsigned p:1;
+ *	unsigned x:1;
+ *	unsigned cc:4;
+ *
+ *	unsigned m:1;
+ *	unsigned pt:7;
+ *
+ *	uint16_t sequence_number;
+ *	uint32_t timestamp;
+ *	uint32_t ssrc;
+ *	uint32_t csrc[0];
  * } __attribute__ ((packed));
- * 
- * #endif */
+ *
+ * #endif
+ */
 
 void rtk_btcoex_parse_event(uint8_t *buffer, int count);
 void rtk_btcoex_parse_cmd(uint8_t *buffer, int count);

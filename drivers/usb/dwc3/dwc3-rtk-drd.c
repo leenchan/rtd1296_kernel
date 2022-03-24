@@ -37,7 +37,9 @@ extern int dwc3_gadget_restart(struct dwc3 *dwc);
 extern int dwc3_gadget_stop_on_switch(struct dwc3 *dwc);
 
 
-struct usb_gadget_driver *rtk_dwc3_set_and_get_usb_gadget_driver(struct usb_gadget_driver* driver) {
+struct usb_gadget_driver *rtk_dwc3_set_and_get_usb_gadget_driver(
+	    struct usb_gadget_driver *driver)
+{
 	static struct usb_gadget_driver *gadget_driver = NULL;
 	struct usb_gadget_driver *local_driver = gadget_driver;
 
@@ -50,7 +52,8 @@ EXPORT_SYMBOL_GPL(rtk_dwc3_set_and_get_usb_gadget_driver);
 int dwc3_drd_to_host(struct dwc3 *dwc)
 {
 	int ret;
-	unsigned long timeout, flags = 0;
+	unsigned long timeout;
+	//unsigned long flags = 0;
 	u32 reg;
 
 	dev_info(dwc->dev, "%s START....", __func__);
@@ -159,6 +162,7 @@ int dwc3_drd_to_device(struct dwc3 *dwc)
 	ret = rtk_dwc3_drd_event_buffers_setup(dwc);
 	if (ret) {
 		dev_err(dwc->dev, "failed to setup event buffers\n");
+		spin_unlock_irqrestore(&dwc->lock, flags);
 		goto err0;
 	}
 
@@ -170,9 +174,9 @@ int dwc3_drd_to_device(struct dwc3 *dwc)
 	if (ret) {
 		dev_err(dwc->dev, "failed to init gadget\n");
 		goto err0;
-	}
-	{
-		struct gadget_driver *driver = rtk_dwc3_set_and_get_usb_gadget_driver(NULL);
+	} else {
+		struct usb_gadget_driver *driver =
+			    rtk_dwc3_set_and_get_usb_gadget_driver(NULL);
 		if (driver)
 			ret = usb_gadget_probe_driver(driver);
 	}
@@ -188,8 +192,8 @@ err0:
 int dwc3_drd_to_stop_all(struct dwc3 *dwc)
 {
 	int ret = 0;
-	unsigned long flags = 0;
 
+	dev_info(dwc->dev, "%s START....", __func__);
 	if (dwc->has_xhci)
 		dwc3_host_exit(dwc);
 	if (dwc->has_gadget) {
@@ -200,5 +204,6 @@ int dwc3_drd_to_stop_all(struct dwc3 *dwc)
 		dwc3_gadget_exit(dwc);
 	}
 	wmb();
+	dev_info(dwc->dev, "%s END....", __func__);
 	return ret;
 }

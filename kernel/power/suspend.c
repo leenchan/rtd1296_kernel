@@ -31,22 +31,30 @@
 #include <linux/compiler.h>
 #include <linux/moduleparam.h>
 #include <linux/wakeup_reason.h>
-#include <linux/syscalls.h>
 
 #include "power.h"
-#include <soc/realtek/rtd129x_cpu.h>
 
+#ifdef CONFIG_RTK_PLATFORM
+int RTK_PM_STATE;
+EXPORT_SYMBOL(RTK_PM_STATE);
+#endif/* CONFIG_RTK_PLATFORM */
 
 #ifdef CONFIG_AHCI_RTK
 extern struct task_struct *rtk_sata_dev_task;
-extern int RTK_SATA_DEV_FLAG;
-#endif /* CONFIG_AHCI_RTK */
+#endif
 
-int RTK_PM_STATE;	//For RTD129x idle mode support.
-EXPORT_SYMBOL(RTK_PM_STATE);
+#ifdef CONFIG_RTK_XEN_SUPPORT
+extern int xen_suspend_to_ram(void);
+#else
+/* should never reach here */
+static inline int xen_suspend_to_ram(void) { BUG(); };
+#endif
 
 const char *pm_labels[] = { "mem", "standby", "freeze", NULL };
 const char *pm_states[PM_SUSPEND_MAX];
+
+unsigned int pm_suspend_global_flags;
+EXPORT_SYMBOL_GPL(pm_suspend_global_flags);
 
 static const struct platform_suspend_ops *suspend_ops;
 static const struct platform_freeze_ops *freeze_ops;
@@ -128,10 +136,18 @@ static bool valid_state(suspend_state_t state)
  */
 static bool relative_states;
 
+void __init pm_states_init(void)
+{
+	/*
+	 * freeze state should be supported even without any suspend_ops,
+	 * initialize pm_states accordingly here
+	 */
+	pm_states[PM_SUSPEND_FREEZE] = pm_labels[relative_states ? 0 : 2];
+}
+
 static int __init sleep_states_setup(char *str)
 {
 	relative_states = !strncmp(str, "1", 1);
-	pm_states[PM_SUSPEND_FREEZE] = pm_labels[relative_states ? 0 : 2];
 	return 1;
 }
 
@@ -221,7 +237,7 @@ static int platform_suspend_begin(suspend_state_t state)
 {
 	if (state == PM_SUSPEND_FREEZE && freeze_ops && freeze_ops->begin)
 		return freeze_ops->begin();
-	else if (suspend_ops->begin)
+	else if (suspend_ops && suspend_ops->begin)
 		return suspend_ops->begin(state);
 	else
 		return 0;
@@ -231,7 +247,7 @@ static void platform_resume_end(suspend_state_t state)
 {
 	if (state == PM_SUSPEND_FREEZE && freeze_ops && freeze_ops->end)
 		freeze_ops->end();
-	else if (suspend_ops->end)
+	else if (suspend_ops && suspend_ops->end)
 		suspend_ops->end();
 }
 
@@ -258,7 +274,7 @@ static int suspend_test(int level)
 {
 #ifdef CONFIG_PM_DEBUG
 	if (pm_test_level == level) {
-		printk(KERN_INFO "suspend debug: Waiting for %d second(s).\n",
+		pr_info("suspend debug: Waiting for %d second(s).\n",
 				pm_test_delay);
 		mdelay(pm_test_delay * 1000);
 		return 1;
@@ -276,16 +292,18 @@ static int suspend_test(int level)
  */
 static int suspend_prepare(suspend_state_t state)
 {
-	int error;
+	int error, nr_calls = 0;
 
 	if (!sleep_state_supported(state))
 		return -EPERM;
 
 	pm_prepare_console();
 
-	error = pm_notifier_call_chain(PM_SUSPEND_PREPARE);
-	if (error)
+	error = __pm_notifier_call_chain(PM_SUSPEND_PREPARE, -1, &nr_calls);
+	if (error) {
+		nr_calls--;
 		goto Finish;
+	}
 
 	trace_suspend_resume(TPS("freeze_processes"), 0, true);
 	error = suspend_freeze_processes();
@@ -296,7 +314,7 @@ static int suspend_prepare(suspend_state_t state)
 	suspend_stats.failed_freeze++;
 	dpm_save_failed_step(SUSPEND_FREEZE);
  Finish:
-	pm_notifier_call_chain(PM_POST_SUSPEND);
+	__pm_notifier_call_chain(PM_POST_SUSPEND, nr_calls, NULL);
 	pm_restore_console();
 	return error;
 }
@@ -333,7 +351,7 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	if (error) {
 		last_dev = suspend_stats.last_failed_dev + REC_FAILED_NUM - 1;
 		last_dev %= REC_FAILED_NUM;
-		printk(KERN_ERR "PM: late suspend of devices failed\n");
+		pr_err("PM: late suspend of devices failed\n");
 		log_suspend_abort_reason("%s device failed to power down",
 			suspend_stats.failed_devs[last_dev]);
 		goto Platform_finish;
@@ -346,7 +364,7 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	if (error) {
 		last_dev = suspend_stats.last_failed_dev + REC_FAILED_NUM - 1;
 		last_dev %= REC_FAILED_NUM;
-		printk(KERN_ERR "PM: noirq suspend of devices failed\n");
+		pr_err("PM: noirq suspend of devices failed\n");
 		log_suspend_abort_reason("noirq suspend of %s device failed",
 			suspend_stats.failed_devs[last_dev]);
 		goto Platform_early_resume;
@@ -438,9 +456,9 @@ int suspend_devices_and_enter(suspend_state_t state)
 
 	suspend_console();
 	suspend_test_start();
-
-	RTK_PM_STATE = state;	//For RTD129x idle mode support.
-
+#ifdef CONFIG_RTK_PLATFORM
+	RTK_PM_STATE = state;
+#endif /* CONFIG_RTK_PLATFORM */
 	error = dpm_suspend_start(PMSG_SUSPEND);
 	if (error) {
 		pr_err("PM: Some devices failed to suspend, or early wake event detected\n");
@@ -485,6 +503,12 @@ static void suspend_finish(void)
 	pm_restore_console();
 }
 
+#ifdef CONFIG_RTK_PLATFORM
+extern unsigned int pm_wakelock_mode;
+extern struct device *rtk_pm_dev;
+extern unsigned int pm_state;
+#endif /* CONFIG_RTK_PLATFORM */
+
 /**
  * enter_state - Do common work needed to enter system sleep state.
  * @state: System sleep state to enter.
@@ -496,41 +520,53 @@ static void suspend_finish(void)
 static int enter_state(suspend_state_t state)
 {
 	int error;
+#ifdef CONFIG_RTK_PLATFORM
+	int count = 0;
+#endif /* CONFIG_RTK_PLATFORM */
 
-#ifdef CONFIG_ARCH_RTD129x
-	unsigned long timeout = 0;
-#endif /* CONFIG_ARCH_RTD129x */
-
+#ifdef CONFIG_AHCI_RTK
+	unsigned long timeout;
+#endif
 	trace_suspend_resume(TPS("suspend_enter"), state, true);
+	
+#ifdef CONFIG_RTK_PLATFORM
 
+	kobject_uevent(&rtk_pm_dev->kobj, KOBJ_CHANGE);
 
-#ifdef CONFIG_ARCH_RTD129x
+	if(pm_wakelock_mode == 1) {
+		while (!(pm_state == 1)) {
+			if (count == 1000){
+				pr_err("[RTD16xx PM] Android suspend pre handle timeout!\n");
+				break;
+			}
+            msleep(1);
+			//udelay(1);
+			count++;
+            if((count%100) == 0) {
+                pr_err("[RTD16xx PM] enter_state loop %d\n",count);
+            }
+		}
+	}
 
 	if (state == PM_SUSPEND_STANDBY) {
-#ifdef CONFIG_AHCI_RTK
-		RTK_SATA_DEV_FLAG = 3;
-#endif
 	}
+
 	if (state == PM_SUSPEND_MEM){
 		sys_sync();
-
 #ifdef CONFIG_AHCI_RTK
-		if(rtk_sata_dev_task != NULL){
-			RTK_SATA_DEV_FLAG = 2;
+		if (rtk_sata_dev_task != NULL) {
 			wake_up_process(rtk_sata_dev_task);
 			timeout = jiffies + msecs_to_jiffies(1000);
 			while(time_before(jiffies, timeout));
 		}
-#endif /*CONFIG_AHCI_RTK*/
-
+#endif
 	}
-#endif /* CONFIG_ARCH_RTD129x */
-
+#endif /* CONFIG_RTK_PLATFORM */
+	
 	if (state == PM_SUSPEND_FREEZE) {
 #ifdef CONFIG_PM_DEBUG
 		if (pm_test_level != TEST_NONE && pm_test_level <= TEST_CPUS) {
-			pr_warning("PM: Unsupported test mode for freeze state,"
-				   "please choose none/freezer/devices/platform.\n");
+			pr_warn("PM: Unsupported test mode for suspend to idle, please choose none/freezer/devices/platform.\n");
 			return -EAGAIN;
 		}
 #endif
@@ -543,13 +579,16 @@ static int enter_state(suspend_state_t state)
 	if (state == PM_SUSPEND_FREEZE)
 		freeze_begin();
 
+#ifndef CONFIG_SUSPEND_SKIP_SYNC
 	trace_suspend_resume(TPS("sync_filesystems"), 0, true);
-	printk(KERN_INFO "PM: Syncing filesystems ... ");
+	pr_info("PM: Syncing filesystems ... ");
 	sys_sync();
-	printk("done.\n");
+	pr_cont("done.\n");
 	trace_suspend_resume(TPS("sync_filesystems"), 0, false);
+#endif
 
-	pr_debug("PM: Preparing system for %s sleep\n", pm_states[state]);
+	pr_debug("PM: Preparing system for sleep (%s)\n", pm_states[state]);
+	pm_suspend_clear_flags();
 	error = suspend_prepare(state);
 	if (error)
 		goto Unlock;
@@ -558,7 +597,7 @@ static int enter_state(suspend_state_t state)
 		goto Finish;
 
 	trace_suspend_resume(TPS("suspend_enter"), state, false);
-	pr_debug("PM: Entering %s sleep\n", pm_states[state]);
+	pr_debug("PM: Suspending system (%s)\n", pm_states[state]);
 	pm_restrict_gfp_mask();
 	error = suspend_devices_and_enter(state);
 	pm_restore_gfp_mask();
@@ -598,7 +637,12 @@ int pm_suspend(suspend_state_t state)
 		return -EINVAL;
 
 	pm_suspend_marker("entry");
-	error = enter_state(state);
+	if (xen_domain() && !xen_initial_domain()) {
+		pr_info("Enter xen suspend\n");
+		error = xen_suspend_to_ram();
+	} else {
+		error = enter_state(state);
+	}
 	if (error) {
 		suspend_stats.fail++;
 		dpm_save_failed_errno(error);

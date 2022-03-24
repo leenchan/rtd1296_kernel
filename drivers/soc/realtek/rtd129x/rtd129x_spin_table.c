@@ -3,44 +3,38 @@
  *
  * Copyright (c) 2017 Realtek Semiconductor Corp.
  *
+ * Author: Chih-Feng Tai <james.tai@realtek.com>
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
  * only version 2 as published by the Free Software Foundation.
  */
 
+#include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/init.h>
-#include <linux/of.h>
 #include <linux/smp.h>
 #include <linux/types.h>
 #include <linux/ioport.h>
-
-#include <linux/kernel.h>
-#include <linux/init.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/io.h>
 #include <linux/memblock.h>
-#include <linux/delay.h>
 #include <linux/printk.h>
-#include <asm/io.h>
-
 #include <asm/cacheflush.h>
 #include <asm/cpu_ops.h>
 #include <asm/cputype.h>
-#include <asm/io.h>
 #include <asm/smp_plat.h>
 
 #include "rtd129x_cpu_hotplug.h"
-#include <soc/realtek/rtd129x_cpu.h>
-
+#include <soc/realtek/rtk_cpu.h>
 
 #ifdef CONFIG_SMP
 
 static u32 uboot_secondary_entry;
 
-extern int RTK_CHIP_VERSION;
-
+extern void rtk_cpu_power_up(int cpu);
 extern void _rtk_cpu_power_up(int cpu);
 extern void secondary_holding_pen(void);
 
@@ -48,6 +42,7 @@ volatile unsigned long rtk_secondary_holding_pen_release = INVALID_HWID;
 
 static phys_addr_t cpu_release_addr[NR_CPUS];
 static int cpu_hotplug[NR_CPUS] = {0};
+
 /*
  * Write rtk_secondary_holding_pen_release in a way that is guaranteed to be
  * visible to all observers, irrespective of whether they're taking part
@@ -69,13 +64,13 @@ static int smp_spin_table_cpu_init(unsigned int cpu)
 	struct device_node *dn;
 	struct device_node *uboot;
 
+	uboot_secondary_entry = 0x00020000;
+
 	if (flag == 0) {
-		uboot_secondary_entry = 0x00021000;
-
 		uboot = of_find_compatible_node(NULL, NULL, "Realtek,rtk_boot");
-
-		if(of_property_read_u32(uboot, "resume-entry-addr", &uboot_secondary_entry)){
+		if (of_property_read_u32(uboot, "resume-entry-addr", &uboot_secondary_entry)) {
 			pr_err("missing or invalid resume-entry-addr property\n");
+			return -1;
 		}
 		flag = 1;
 	}
@@ -87,8 +82,7 @@ static int smp_spin_table_cpu_init(unsigned int cpu)
 	/*
 	 * Determine the address from which the CPU is polling.
 	 */
-
-	if(of_property_read_u64(dn, "cpu-release-addr", &cpu_release_addr[cpu])){
+	if (of_property_read_u64(dn, "cpu-release-addr", &cpu_release_addr[cpu])) {
 		pr_err("CPU %d: missing or invalid cpu-release-addr property\n", cpu);
 		return -1;
 	}
@@ -135,13 +129,18 @@ static int smp_spin_table_cpu_prepare(unsigned int cpu)
 
 static int smp_spin_table_cpu_boot(unsigned int cpu)
 {
-	if(cpu_hotplug[cpu] == 1){
+	if (cpu_hotplug[cpu] == 1) {
 		__le64 __iomem *release_addr;
+
 		release_addr = ioremap(cpu_release_addr[cpu], sizeof(*release_addr));
 
-		//From B00, start to support TEE suspend/resume
-		//B00 romcode: core123 resume jump address is fixed to FSBL
-		if(RTK_CHIP_VERSION < RTD129x_CHIP_REVISION_B00) {
+		rtk_cpu_power_up(cpu);
+
+		/*
+		 * From B00, start to support TEE suspend/resume
+		 * B00 romcode: core123 resume jump address is fixed to FSBL
+		 */
+		if (get_rtd129x_cpu_revision() < RTD129x_CHIP_REVISION_B00) {
 			writel_relaxed(uboot_secondary_entry, release_addr);
 
 			mdelay(1);
@@ -183,9 +182,11 @@ static int smp_spin_table_cpu_disable(unsigned int cpu)
 
 static void smp_spin_table_cpu_die(unsigned int cpu)
 {
-	if(RTK_CHIP_VERSION >= RTD129x_CHIP_REVISION_B00) {
-		//From B00, start to support TEE suspend/resume
-		//Set the fake core0 resume address to BL31 to let Bl31 know slave cpu will resume
+	/*
+	 * From B00, start to support TEE suspend/resume
+	 * Set the fake core0 resume address to BL31 to let Bl31 know slave cpu will resume
+	 */
+	if (get_rtd129x_cpu_revision() >= RTD129x_CHIP_REVISION_B00) {
 		asm volatile("isb" : : : "cc");
 		asm volatile("ldr x1, =0x20000" : : : "cc");
 		asm volatile("ldr x0, =0x8400ff04" : : : "cc"); //RTK_SET_KERNEL_REUMSE_ENTRY

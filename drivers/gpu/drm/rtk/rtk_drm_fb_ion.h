@@ -20,7 +20,7 @@ void drm_fbdev_ion_restore_mode(struct drm_fbdev_ion *fbdev_ion);
 void drm_fbdev_ion_hotplug_event(struct drm_fbdev_ion *fbdev_ion);
 
 struct drm_framebuffer *drm_fb_ion_create(struct drm_device *dev,
-	struct drm_file *file_priv, struct drm_mode_fb_cmd2 *mode_cmd);
+	struct drm_file *file_priv, const struct drm_mode_fb_cmd2 *mode_cmd);
 
 struct rtk_gem_ion_object *drm_fb_ion_get_gem_obj(struct drm_framebuffer *fb,
 	unsigned int plane);

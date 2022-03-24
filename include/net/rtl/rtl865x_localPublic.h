@@ -15,7 +15,7 @@
 #endif
 
 #define FROM_LOCAL_PUBLIC	1
-#define TO_LOCAL_PUBLIC		2	
+#define TO_LOCAL_PUBLIC		2
 #define RX_LAN_PACKET	1
 #define RX_WAN_PACKET	2
 #define TX_LAN_PACKET	3
@@ -27,7 +27,7 @@
 
 #define LOCAL_PUBLIC_VLAN_START 	3198
 #define LOCAL_PUBLIC_VLAN_END		4094
-#define MCAST_NETIF_VLAN_ID		3197	
+#define MCAST_NETIF_VLAN_ID		3197
 
 struct rtl865x_localPublic
 {
@@ -36,22 +36,22 @@ struct rtl865x_localPublic
 	unsigned int defGateway;
 	unsigned int hw;
 	unsigned int inAsic;
-	
+
 	unsigned char port;
 	unsigned char mac[6];
 	unsigned char dev[16];
-	
+
 	unsigned char lpNetif[16];
 	unsigned int lpVid;
 	unsigned char defGwMac[6];
-	
+
 	//must at the tail...
-	struct 
-	{								
-		struct rtl865x_localPublic *tqe_next;	
+	struct
+	{
+		struct rtl865x_localPublic *tqe_next;
 		struct rtl865x_localPublic**tqe_prev;
 	}next;
-	
+
 };
 
 #if defined(CONFIG_RTL_PUBLIC_SSID)
@@ -62,7 +62,7 @@ struct rtl865x_public_ssid_entry
 	unsigned int flags;
 };
 #endif
-	
+
 struct rtl865x_pktInfo
 {
 	/*input parameter*/
@@ -70,7 +70,7 @@ struct rtl865x_pktInfo
 	unsigned char port;
 	unsigned char action;
 	unsigned char dev[16];
-	
+
 	/*output parameter*/
 	unsigned char *arpHdr;
 	unsigned char *ipHdr;

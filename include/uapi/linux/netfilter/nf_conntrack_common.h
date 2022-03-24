@@ -20,9 +20,15 @@ enum ip_conntrack_info {
 
 	IP_CT_ESTABLISHED_REPLY = IP_CT_ESTABLISHED + IP_CT_IS_REPLY,
 	IP_CT_RELATED_REPLY = IP_CT_RELATED + IP_CT_IS_REPLY,
-	IP_CT_NEW_REPLY = IP_CT_NEW + IP_CT_IS_REPLY,	
-	/* Number of distinct IP_CT types (no NEW in reply dirn). */
-	IP_CT_NUMBER = IP_CT_IS_REPLY * 2 - 1
+	/* No NEW in reply direction. */
+
+	/* Number of distinct IP_CT types. */
+	IP_CT_NUMBER,
+
+	/* only for userspace compatibility */
+#ifndef __KERNEL__
+	IP_CT_NEW_REPLY = IP_CT_NUMBER,
+#endif
 };
 
 #define NF_CT_STATE_INVALID_BIT			(1 << 0)
@@ -107,10 +113,6 @@ enum ip_conntrack_events {
 	IPCT_NATSEQADJ = IPCT_SEQADJ,
 	IPCT_SECMARK,		/* new security mark has been set */
 	IPCT_LABEL,		/* new connlabel has been set */
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-	IPCT_REFRESH_BIT,
-	IPCT_REFRESH = (1 << IPCT_REFRESH_BIT),
-#endif
 };
 
 enum ip_conntrack_expect_events {

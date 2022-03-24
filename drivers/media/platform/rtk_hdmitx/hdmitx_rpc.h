@@ -14,13 +14,10 @@
 
 #define S_OK        0x10000000
 
-typedef u_int HRESULT;
-
 typedef struct RPCRES_LONG {
-	HRESULT result;
+	u_int result;
 	u_int data;
 } RPCRES_LONG;
-
 
 typedef struct {
 	u_int  info;
@@ -28,32 +25,24 @@ typedef struct {
 	u_int ret;
 } RPC_DEFAULT_INPUT_T;
 
-
 struct AUDIO_HDMI_SET {
 	u_int HDMI_Frequency;
 };
-typedef struct AUDIO_HDMI_SET AUDIO_HDMI_SET;
-
 
 struct AUDIO_HDMI_MUTE_INFO {
 	u_int instanceID;
 	char hdmi_mute;
 };
-typedef struct AUDIO_HDMI_MUTE_INFO AUDIO_HDMI_MUTE_INFO;
-
 
 struct AUDIO_HDMI_OUT_VSDB_DATA {
 	u_int HDMI_VSDB_delay;
 };
-typedef struct AUDIO_HDMI_OUT_VSDB_DATA AUDIO_HDMI_OUT_VSDB_DATA;
-
 
 struct HDMI_INFO {
 	u_int video_type;
 };
-typedef struct HDMI_INFO HDMI_INFO;
 
-/*From FW amw_kernel_rpc.h */
+/* From FW amw_kernel_rpc.h */
 typedef enum {
 	ENUM_KERNEL_RPC_CREATE_AGENT,
 	ENUM_KERNEL_RPC_INIT_RINGBUF,
@@ -75,8 +64,8 @@ typedef enum {
 	ENUM_KERNEL_RPC_ASK_DBG_MEM_ADDR,
 	ENUM_KERNEL_RPC_DESTROY,
 	ENUM_KERNEL_RPC_STOP,
-	ENUM_KERNEL_RPC_CHECK_READY, /* check if Audio get memory pool from AP */
-	ENUM_KERNEL_RPC_GET_MUTE_N_VOLUME, /* get mute and volume level */
+	ENUM_KERNEL_RPC_CHECK_READY,   // check if Audio get memory pool from AP
+	ENUM_KERNEL_RPC_GET_MUTE_N_VOLUME,	 // get mute and volume level
 	ENUM_KERNEL_RPC_EOS,
 	ENUM_KERNEL_RPC_ADC0_CONFIG,
 	ENUM_KERNEL_RPC_ADC1_CONFIG,
@@ -85,7 +74,7 @@ typedef enum {
 	ENUM_KERNEL_RPC_BBADC_CONFIG,
 	ENUM_KERNEL_RPC_I2SI_CONFIG,
 	ENUM_KERNEL_RPC_SPDIFI_CONFIG,
-#endif
+#endif // AUDIO_TV_PLATFORM
 	ENUM_KERNEL_RPC_HDMI_OUT_VSDB,
 	ENUM_VIDEO_KERNEL_RPC_CONFIG_TV_SYSTEM,
 	ENUM_VIDEO_KERNEL_RPC_CONFIG_HDMI_INFO_FRAME,
@@ -107,13 +96,11 @@ enum VO_HDMI_MODE {
 	VO_MHL_ON = 3,
 	VO_MHL_OFF = 4,
 };
-typedef enum VO_HDMI_MODE VO_HDMI_MODE;
 
 enum VO_HDMI_OFF_MODE {
 	VO_HDMI_OFF_CLOCK_OFF = 0,
 	VO_HDMI_OFF_CLOCK_ON = 1,
 };
-typedef enum VO_HDMI_OFF_MODE VO_HDMI_OFF_MODE;
 
 enum VO_HDMI_AUDIO_SAMPLE_FREQ {
 	VO_HDMI_AUDIO_NULL = 0,
@@ -125,12 +112,11 @@ enum VO_HDMI_AUDIO_SAMPLE_FREQ {
 	VO_HDMI_AUDIO_176_4K = 6,
 	VO_HDMI_AUDIO_192K = 7,
 };
-typedef enum VO_HDMI_AUDIO_SAMPLE_FREQ VO_HDMI_AUDIO_SAMPLE_FREQ;
 
 enum VO_HDR_CTRL_MODE {
-	VO_HDR_CTRL_AUTO = 0,/* Control by AudioFW */
+	VO_HDR_CTRL_AUTO = 0,
 	VO_HDR_CTRL_DV_ON = 1,
-	VO_HDR_CTRL_SDR = 2,/* HDR OFF*/
+	VO_HDR_CTRL_SDR = 2,
 	VO_HDR_CTRL_HDR_GAMMA = 3,
 	VO_HDR_CTRL_PQHDR = 4,
 	VO_HDR_CTRL_FUTURE = 5,
@@ -141,6 +127,7 @@ enum VO_HDR_CTRL_MODE {
 	VO_HDR_CTRL_DV_LOW_LATENCY_12b_YUV444 = 10,
 	VO_HDR_CTRL_DV_LOW_LATENCY_12b_RGB444 = 11,
 	VO_HDR_CTRL_DV_ON_INPUT = 12,
+	VO_HDR_CTRL_DV_ON_LOW_LATENCY_12b422_INPUT = 13,
 };
 
 struct VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME {
@@ -158,15 +145,35 @@ struct VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME {
 	enum VO_HDR_CTRL_MODE hdr_ctrl_mode;
 	u_int reserved4;
 };
-typedef struct VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME;
 
-
+/**
+ * VO_INTERFACE_TYPE
+ * --------------------
+ *     | CVBS  HDMI  DP
+ * --------------------
+ * 0  |    O       O       X
+ * 1  |    O       X       X
+ * 2  |    X       O       X
+ * 3  |    X       X       O
+ * 4  |    X       O       O
+ * 5  |    U       O       O
+ * 6  |    O       X       O
+ * 7  |    O       O       O
+ * 8  |    U       O       X
+ * --------------------
+ * O: Enable, X: Disable, U: Enable or Disable
+ */
 enum VO_INTERFACE_TYPE {
 	VO_ANALOG_AND_DIGITAL = 0,
 	VO_ANALOG_ONLY = 1,
 	VO_DIGITAL_ONLY = 2,
+	VO_DISPLAY_PORT_ONLY = 3,
+	VO_HDMI_AND_DISPLAY_PORT_SAME_SOURCE = 4,
+	VO_HDMI_AND_DISPLAY_PORT_DIFF_SOURCE = 5,
+	VO_DISPLAY_PORT_AND_CVBS_SAME_SOURCE = 6,
+	VO_HDMI_AND_DP_DIFF_SOURCE_WITH_CVBS = 7,
+	VO_FORCE_DP_OFF = 8,
 };
-typedef enum VO_INTERFACE_TYPE VO_INTERFACE_TYPE;
 
 
 enum VO_PEDESTAL_TYPE {
@@ -175,7 +182,6 @@ enum VO_PEDESTAL_TYPE {
 	VO_PEDESTAL_TYPE_286_714_ON = 2,
 	VO_PEDESTAL_TYPE_286_714_OFF = 3,
 };
-typedef enum VO_PEDESTAL_TYPE VO_PEDESTAL_TYPE;
 
 
 enum VO_STANDARD {
@@ -261,7 +267,6 @@ enum VO_STANDARD {
 	VO_STANDARD_HDTV_2160P_60_422_12bit = 79,
 	VO_STANDARD_ERROR = 80,
 };
-typedef enum VO_STANDARD VO_STANDARD;
 
 
 struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD {
@@ -273,7 +278,6 @@ struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD {
 	u_int dataInt0;
 	u_int dataInt1;
 };
-typedef struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD;
 
 
 struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM {
@@ -281,7 +285,6 @@ struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM {
 	struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD videoInfo;
 	struct VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME hdmiInfo;
 };
-typedef struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM;
 
 
 struct AUDIO_HDMI_OUT_EDID_DATA2 {
@@ -289,7 +292,6 @@ struct AUDIO_HDMI_OUT_EDID_DATA2 {
 	u_int HDMI_output_enable;
 	u_int EDID_DATA_addr;
 };
-typedef struct AUDIO_HDMI_OUT_EDID_DATA2 AUDIO_HDMI_OUT_EDID_DATA2;
 
 
 enum VO_VIDEO_PLANE {
@@ -308,7 +310,6 @@ enum VO_VIDEO_PLANE {
 	VO_VIDEO_PLANE_WIN8 = 12,
 	VO_VIDEO_PLANE_NONE = 255,
 };
-typedef enum VO_VIDEO_PLANE VO_VIDEO_PLANE;
 
 
 enum VO_OSD_COLOR_FORMAT {
@@ -348,7 +349,6 @@ enum VO_OSD_COLOR_FORMAT {
 	VO_OSD_COLOR_FORMAT_RGB655_LITTLE = 53,
 	VO_OSD_COLOR_FORMAT_RGB888_LITTLE = 54,
 };
-typedef enum VO_OSD_COLOR_FORMAT VO_OSD_COLOR_FORMAT;
 
 
 enum VO_OSD_RGB_ORDER {
@@ -359,7 +359,6 @@ enum VO_OSD_RGB_ORDER {
 	VO_OSD_COLOR_RBG = 4,
 	VO_OSD_COLOR_BRG = 5,
 };
-typedef enum VO_OSD_RGB_ORDER VO_OSD_RGB_ORDER;
 
 
 enum VO_3D_MODE_TYPE {
@@ -368,7 +367,6 @@ enum VO_3D_MODE_TYPE {
 	VO_3D_TOP_AND_BOTTOM = 2,
 	VO_3D_FRAME_PACKING = 3,
 };
-typedef enum VO_3D_MODE_TYPE VO_3D_MODE_TYPE;
 
 
 struct VIDEO_RPC_VOUT_QUERY_DISP_WIN_IN {
@@ -382,14 +380,12 @@ struct VO_RECTANGLE {
 	u_short width;
 	u_short height;
 };
-typedef struct VO_RECTANGLE VO_RECTANGLE;
 
 
 struct VO_SIZE {
 	u_short w;
 	u_short h;
 };
-typedef struct VO_SIZE VO_SIZE;
 
 
 struct VIDEO_RPC_VOUT_QUERY_DISP_WIN_OUT {
@@ -440,10 +436,12 @@ struct VIDEO_RPC_VOUT_EDID_DATA {
 	u_char dolby_len;
 	/* Dolby Vision VSVDB additional payload */
 	u_char dolby_data[22];
-	u_char reserved[7];
+	/* HDR10+ support */
+	u_char hdr10_plus;
+	/* Reserved */
+	u_char reserved[6];
 };
-typedef struct VIDEO_RPC_VOUT_EDID_DATA VIDEO_RPC_VOUT_EDID_DATA;
 
 
-#endif/* _HDMITX_RPC_H_ */
+#endif//_HDMITX_RPC_H_
 

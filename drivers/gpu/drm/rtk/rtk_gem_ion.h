@@ -6,7 +6,7 @@
 
 #include "rtk_drm.h"
 #include "../../../staging/android/ion/ion.h"
-#include "../../../staging/android/uapi/rtk_phoenix_ion.h"
+#include "../../../staging/android/uapi/ion_rtk.h"
 
 enum {
     eRTK_BOT_BUFFER_NONCACHED,

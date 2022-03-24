@@ -39,6 +39,7 @@
 #define PMD_SECT_S		(_AT(pmdval_t, 1) << 16)	/* v6 */
 #define PMD_SECT_nG		(_AT(pmdval_t, 1) << 17)	/* v6 */
 #define PMD_SECT_SUPER		(_AT(pmdval_t, 1) << 18)	/* v6 */
+#define PMD_SECT_NS		(_AT(pmdval_t, 1) << 19)	/* v6 */
 #define PMD_SECT_AF		(_AT(pmdval_t, 0))
 
 #define PMD_SECT_UNCACHED	(_AT(pmdval_t, 0))
@@ -47,6 +48,7 @@
 #define PMD_SECT_WB		(PMD_SECT_CACHEABLE | PMD_SECT_BUFFERABLE)
 #define PMD_SECT_MINICACHE	(PMD_SECT_TEX(1) | PMD_SECT_CACHEABLE)
 #define PMD_SECT_WBWA		(PMD_SECT_TEX(1) | PMD_SECT_CACHEABLE | PMD_SECT_BUFFERABLE)
+#define PMD_SECT_CACHE_MASK	(PMD_SECT_TEX(1) | PMD_SECT_CACHEABLE | PMD_SECT_BUFFERABLE)
 #define PMD_SECT_NONSHARED_DEV	(PMD_SECT_TEX(2))
 
 /*

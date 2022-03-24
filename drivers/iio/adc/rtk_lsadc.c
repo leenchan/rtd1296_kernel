@@ -1,5 +1,5 @@
 /*
- * RTD1295 Low Speed ADC driver
+ * Realtek Low Speed ADC driver
  *
  * Copyright (C) 2017 Realtek Semiconductor Corporation.
  *
@@ -22,7 +22,13 @@
 #include <linux/of_address.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
-#include <soc/realtek/rtd129x_cpu.h>
+#if defined(CONFIG_ARCH_RTD129x)
+#include <soc/realtek/rtk_cpu.h>
+#endif /* CONFIG_ARCH_RTD129x */
+
+#include <linux/clk.h>
+#include <linux/clk-provider.h>
+#include <linux/reset.h>
 
 #include "rtk_lsadc.h"
 
@@ -36,14 +42,11 @@
 #define rtd_outl(offset,val)	(*(volatile unsigned long *)(offset) = val)
 */
 #define LSADC_IRQ_DEFINED 	(1)
-#define SA_SHIRQ        IRQF_SHARED
-#define LSADC_READL(reg)        readl((void __iomem *)(reg - LSADC0_PAD0_ADDR + (uintptr_t)(pc->lsadc_addr)))
-#define LSADC_WRITEL(val, reg)  writel(val, (void __iomem *)(reg - LSADC0_PAD0_ADDR + (uintptr_t)(pc->lsadc_addr)))
+#define SA_SHIRQ		IRQF_SHARED
+#define LSADC_READL(reg)        readl((void __iomem *)(reg + (uintptr_t)(pc->lsadc_addr)))
+#define LSADC_WRITEL(val, reg)  writel(val, (void __iomem *)(reg + (uintptr_t)(pc->lsadc_addr)))
 
-#define MISC_READL(reg)         readl((void __iomem *)(reg - MIS_SYS_BASE_ADDR + (uintptr_t)(pc->misc_addr)))
-#define MISC_WRITEL(val, reg)   writel(val, (void __iomem *)(reg - MIS_SYS_BASE_ADDR + (uintptr_t)(pc->misc_addr)))
-
-struct rtd1295_lsadc_pad_info {
+struct rtk_lsadc_pad_info {
 	uint			activate;
 	uint			ctrl_mode;
 	uint			pad_sw;
@@ -51,34 +54,34 @@ struct rtd1295_lsadc_pad_info {
 	uint			vref_sel;
 };
 
-struct rtd1295_lsadc_info {
-	struct rtd1295_lsadc_pad_info	padInfoSet[2];
+struct rtk_lsadc_info {
+	struct rtk_lsadc_pad_info	padInfoSet[2];
 	uint				pad0_adc_val;
 	uint				pad1_adc_val;
 	uint				irq;
 	uint				clk_gating_en;
 };
 
-struct rtd1295_lsadc_device {
+struct rtk_lsadc_device {
 	struct device			*dev;
-	struct rtd1295_lsadc_info	lsadc[2];
-	uint					crt_lsadc_pg_val;
+	struct rtk_lsadc_info		lsadc[2];
+	uint				crt_lsadc_pg_val;
 	void __iomem			*crt_lsadc_pg_addr;
-	void __iomem			*misc_addr;
+	void __iomem			*isr_addr;
 	void __iomem			*lsadc_addr;
 };
 
 #ifdef LSADC_IRQ_DEFINED
 static irqreturn_t lsadc0_interrupt_pad(int irq, void *dev)
 {
-	struct rtd1295_lsadc_device *pc = dev;
+	struct rtk_lsadc_device *pc = dev;
 	uint status_reg;
 	uint pad0_reg, pad1_reg;
 	uint pad0_int, pad1_int;
 	uint new_adc_val=0;
 	int interrupt_flag=0;
 
-	interrupt_flag = MIS_ISR_MASK_LSADC0_INT & MISC_READL(MIS_ISR_REG_ADDR);
+	interrupt_flag = ISR_MASK_LSADC0_INT & readl(pc->isr_addr);
 
 	{
 		status_reg = LSADC_READL(LSADC0_STATUS_ADDR);
@@ -125,14 +128,14 @@ static irqreturn_t lsadc0_interrupt_pad(int irq, void *dev)
 
 static irqreturn_t lsadc1_interrupt_pad(int irq, void *dev)
 {
-	struct rtd1295_lsadc_device *pc = dev;
+	struct rtk_lsadc_device *pc = dev;
 	uint status_reg;
 	uint pad0_reg, pad1_reg;
 	uint pad0_int, pad1_int;
 	uint new_adc_val=0;
 	int interrupt_flag=0;
 
-	interrupt_flag = MIS_ISR_MASK_LSADC1_INT & MISC_READL(MIS_ISR_REG_ADDR);
+	interrupt_flag = ISR_MASK_LSADC1_INT & readl(pc->isr_addr);
 
 	{
 		status_reg = LSADC_READL(LSADC1_STATUS_ADDR);
@@ -178,11 +181,11 @@ static irqreturn_t lsadc1_interrupt_pad(int irq, void *dev)
 }
 #endif
 
-static ssize_t rtd1295_lsadc0_show_info(struct device *dev, struct device_attribute
+static ssize_t rtk_lsadc0_show_info(struct device *dev, struct device_attribute
 			      *devattr, char *buf)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	uint ctrl_reg;
 	uint analog_ctrl_reg;
@@ -193,7 +196,7 @@ static ssize_t rtd1295_lsadc0_show_info(struct device *dev, struct device_attrib
 	int isr_value=0;
 	int i=0;
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC0_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC0_STATUS_ADDR);
 	analog_ctrl_reg = LSADC_READL(LSADC0_ANALOG_CTRL_ADDR);
@@ -201,7 +204,7 @@ static ssize_t rtd1295_lsadc0_show_info(struct device *dev, struct device_attrib
 	if( (ctrl_reg & LSADC_CTRL_MASK_ENABLE) == 0 ) {
 		ctrl_reg = ctrl_reg | LSADC_CTRL_MASK_ENABLE ;
 		LSADC_WRITEL(ctrl_reg, LSADC0_CTRL_ADDR);
-		pr_info("--- rtd1295_lsadc0_show_info  :    write ctrl_enable	ctrl_reg=0x%x  ---  \n",ctrl_reg);
+		pr_info("--- rtk_lsadc0_show_info  :    write ctrl_enable	ctrl_reg=0x%x  ---  \n",ctrl_reg);
 	}
 
 	pad0_reg = LSADC_READL(LSADC0_PAD0_ADDR);
@@ -218,15 +221,15 @@ static ssize_t rtd1295_lsadc0_show_info(struct device *dev, struct device_attrib
 		strcat(padBuffer, tmpBuf);
 	}
 
-	return sprintf(buf, "rtd1295_lsadc0_show_info--\n isr_value=0x%x \n ctrl_reg=0x%x \n lsadc_status_reg=0x%x\n analog_ctrl_reg=0x%x\n pad0_reg=0x%x\n pad1_reg=0x%x \n pad0_adc=0x%x\n pad1_adc=0x%x  \n %s" ,
+	return sprintf(buf, "rtk_lsadc0_show_info--\n isr_value=0x%x \n ctrl_reg=0x%x \n lsadc_status_reg=0x%x\n analog_ctrl_reg=0x%x\n pad0_reg=0x%x\n pad1_reg=0x%x \n pad0_adc=0x%x\n pad1_adc=0x%x  \n %s" ,
 		isr_value, ctrl_reg ,lsadc_status_reg,analog_ctrl_reg ,pad0_reg,pad1_reg,pc->lsadc[0].pad0_adc_val ,pc->lsadc[0].pad1_adc_val ,padBuffer);
 }
 
-static ssize_t rtd1295_lsadc1_show_info(struct device *dev, struct device_attribute
+static ssize_t rtk_lsadc1_show_info(struct device *dev, struct device_attribute
 			      *devattr, char *buf)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	uint ctrl_reg;
 	uint analog_ctrl_reg;
@@ -237,7 +240,7 @@ static ssize_t rtd1295_lsadc1_show_info(struct device *dev, struct device_attrib
 	int isr_value=0;
 	int i=0;
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC1_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC1_STATUS_ADDR);
 	analog_ctrl_reg = LSADC_READL(LSADC1_ANALOG_CTRL_ADDR);
@@ -245,7 +248,7 @@ static ssize_t rtd1295_lsadc1_show_info(struct device *dev, struct device_attrib
 	if( (ctrl_reg & LSADC_CTRL_MASK_ENABLE) == 0 ) {
 		ctrl_reg = ctrl_reg | LSADC_CTRL_MASK_ENABLE ;
 		LSADC_WRITEL(ctrl_reg, LSADC1_CTRL_ADDR);
-		pr_info("--- rtd1295_lsadc1_show_info  :    write ctrl_enable	ctrl_reg=0x%x  ---  \n",ctrl_reg);
+		pr_info("--- rtk_lsadc1_show_info  :    write ctrl_enable	ctrl_reg=0x%x  ---  \n",ctrl_reg);
 	}
 
 	pad0_reg = LSADC_READL(LSADC1_PAD0_ADDR);
@@ -262,37 +265,37 @@ static ssize_t rtd1295_lsadc1_show_info(struct device *dev, struct device_attrib
 		strcat(padBuffer, tmpBuf);
 	}
 
-	return sprintf(buf, "rtd1295_lsadc1_show_info--\n isr_value=0x%x \n ctrl_reg=0x%x \n lsadc_status_reg=0x%x\n analog_ctrl_reg=0x%x\n pad0_reg=0x%x\n pad1_reg=0x%x \n pad0_adc=0x%x\n pad1_adc=0x%x  \n %s" ,
+	return sprintf(buf, "rtk_lsadc1_show_info--\n isr_value=0x%x \n ctrl_reg=0x%x \n lsadc_status_reg=0x%x\n analog_ctrl_reg=0x%x\n pad0_reg=0x%x\n pad1_reg=0x%x \n pad0_adc=0x%x\n pad1_adc=0x%x  \n %s" ,
 		isr_value, ctrl_reg ,lsadc_status_reg,analog_ctrl_reg ,pad0_reg,pad1_reg,pc->lsadc[1].pad0_adc_val ,pc->lsadc[1].pad1_adc_val ,padBuffer);
 }
 
-ssize_t rtd1295_lsadc0_show_debounce(struct device *dev, struct device_attribute *attr, char *buf)
+ssize_t rtk_lsadc0_show_debounce(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	uint ctrl_reg;
 	uint lsadc_status_reg;
 	int isr_value = 0 ;
 	int debounce_cnt = 0;
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC0_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC0_STATUS_ADDR);
 
 	debounce_cnt = (ctrl_reg & LSADC0_CTRL_DEBOUNCE_MASK) >> 20;
 
-	pr_info("--- debug : rtd1295_lsadc0_show_debounce : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    debounce_cnt=%d (0~15) ---- \n",
+	pr_info("--- debug : rtk_lsadc0_show_debounce : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    debounce_cnt=%d (0~15) ---- \n",
 		ctrl_reg, isr_value, lsadc_status_reg, debounce_cnt);
 
 	return sprintf(buf, "%d\n", debounce_cnt);
 }
 
-ssize_t rtd1295_lsadc0_store_debounce(struct device *dev, struct device_attribute *attr,
+ssize_t rtk_lsadc0_store_debounce(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	uint ctrl_reg;
 	uint lsadc_status_reg;
@@ -300,26 +303,26 @@ ssize_t rtd1295_lsadc0_store_debounce(struct device *dev, struct device_attribut
 	int debounce_cnt = 0;
 	int value=0;
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC0_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC0_STATUS_ADDR);
 
 	debounce_cnt = ( ctrl_reg & LSADC0_CTRL_DEBOUNCE_MASK ) >> 20;
 
 	if(buf ==NULL) {
-		pr_err("--- debug : rtd1295_lsadc0_store_debounce	====  buffer is null, return \n");
+		pr_err("--- debug : rtk_lsadc0_store_debounce	====  buffer is null, return \n");
 		return count;
 	}
 	sscanf(buf, "%d", &value);
 
-	pr_err("--- debug : rtd1295_lsadc0_store_debounce : get value=%d \n", value);
+	pr_err("--- debug : rtk_lsadc0_store_debounce : get value=%d \n", value);
 
 	if(debounce_cnt == value) {
-		pr_err("--- debug : rtd1295_lsadc0_store_debounce	====  the same, do nothing (value=%d) \n", value);
+		pr_err("--- debug : rtk_lsadc0_store_debounce	====  the same, do nothing (value=%d) \n", value);
 		return count;
 	}
 	if(value > 15 || value < 0) {
-		pr_err("--- debug : rtd1295_lsadc0_store_debounce	====  value (%d) out of range, (valid data => 0-15) \n", value);
+		pr_err("--- debug : rtk_lsadc0_store_debounce	====  value (%d) out of range, (valid data => 0-15) \n", value);
 		return count;
 	}
 
@@ -327,45 +330,45 @@ ssize_t rtd1295_lsadc0_store_debounce(struct device *dev, struct device_attribut
 
 	ctrl_reg =(ctrl_reg & (~LSADC0_CTRL_DEBOUNCE_MASK))|(debounce_cnt << 20);
 	LSADC_WRITEL(ctrl_reg, LSADC0_CTRL_ADDR);
-	pr_err("--- debug : rtd1295_lsadc0_store0_debounce : write ctrl_reg=0x%x debounce_cnt=%d \n", ctrl_reg, debounce_cnt);
+	pr_err("--- debug : rtk_lsadc0_store0_debounce : write ctrl_reg=0x%x debounce_cnt=%d \n", ctrl_reg, debounce_cnt);
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC0_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC0_STATUS_ADDR);
 
-	pr_info("--- debug : rtd1295_lsadc0_store_debounce : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    debounce_cnt=%d ---- \n",
+	pr_info("--- debug : rtk_lsadc0_store_debounce : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    debounce_cnt=%d ---- \n",
 		ctrl_reg, isr_value, lsadc_status_reg, debounce_cnt);
 
 	return count;
 }
 
-ssize_t rtd1295_lsadc1_show_debounce(struct device *dev, struct device_attribute *attr, char *buf)
+ssize_t rtk_lsadc1_show_debounce(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	uint ctrl_reg;
 	uint lsadc_status_reg;
 	int isr_value = 0 ;
 	int debounce_cnt = 0;
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC1_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC1_STATUS_ADDR);
 
 	debounce_cnt = (ctrl_reg & LSADC1_CTRL_DEBOUNCE_MASK) >> 16;
 
-	pr_info("--- debug : rtd1295_lsadc1_show_debounce : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    debounce_cnt=%d (0~255) ---- \n",
+	pr_info("--- debug : rtk_lsadc1_show_debounce : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    debounce_cnt=%d (0~255) ---- \n",
 		ctrl_reg, isr_value, lsadc_status_reg, debounce_cnt);
 
 	return sprintf(buf, "%d\n", debounce_cnt);
 }
 
-ssize_t rtd1295_lsadc1_store_debounce(struct device *dev, struct device_attribute *attr,
+ssize_t rtk_lsadc1_store_debounce(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	uint ctrl_reg;
 	uint lsadc_status_reg;
@@ -373,26 +376,26 @@ ssize_t rtd1295_lsadc1_store_debounce(struct device *dev, struct device_attribut
 	int debounce_cnt = 0;
 	int value=0;
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC1_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC1_STATUS_ADDR);
 
 	debounce_cnt = (ctrl_reg & LSADC1_CTRL_DEBOUNCE_MASK) >> 16;
 
 	if(buf ==NULL) {
-		pr_err("--- debug : rtd1295_lsadc1_store_debounce	====  buffer is null, return \n");
+		pr_err("--- debug : rtk_lsadc1_store_debounce	====  buffer is null, return \n");
 		return count;
 	}
 	sscanf(buf, "%d", &value);
 
-	pr_err("--- debug : rtd1295_lsadc1_store_debounce : get value=%d \n", value);
+	pr_err("--- debug : rtk_lsadc1_store_debounce : get value=%d \n", value);
 
 	if(debounce_cnt == value) {
-		pr_err("--- debug : rtd1295_lsadc1_store_debounce	====  the same, do nothing (value=%d) \n", value);
+		pr_err("--- debug : rtk_lsadc1_store_debounce	====  the same, do nothing (value=%d) \n", value);
 		return count;
 	}
 	if(value > 255 || value < 0) {
-		pr_err("--- debug : rtd1295_lsadc1_store_debounce	====  value (%d) out of range, (valid data => 0-255) \n", value);
+		pr_err("--- debug : rtk_lsadc1_store_debounce	====  value (%d) out of range, (valid data => 0-255) \n", value);
 		return count;
 	}
 
@@ -400,45 +403,155 @@ ssize_t rtd1295_lsadc1_store_debounce(struct device *dev, struct device_attribut
 
 	ctrl_reg =(ctrl_reg & (~LSADC1_CTRL_DEBOUNCE_MASK))|(debounce_cnt << 16);
 	LSADC_WRITEL(ctrl_reg, LSADC1_CTRL_ADDR);
-	pr_err("--- debug : rtd1295_lsadc1_store0_debounce : write ctrl_reg=0x%x debounce_cnt=%d \n", ctrl_reg, debounce_cnt);
+	pr_err("--- debug : rtk_lsadc1_store0_debounce : write ctrl_reg=0x%x debounce_cnt=%d \n", ctrl_reg, debounce_cnt);
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC1_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC1_STATUS_ADDR);
 
-	pr_info("--- debug : rtd1295_lsadc1_store_debounce : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    debounce_cnt=%d ---- \n",
+	pr_info("--- debug : rtk_lsadc1_store_debounce : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    debounce_cnt=%d ---- \n",
 		ctrl_reg, isr_value, lsadc_status_reg, debounce_cnt);
 
 	return count;
 }
 
-ssize_t rtd1295_lsadc1_show_vdd_gnd_sel(struct device *dev, struct device_attribute *attr, char *buf)
+ssize_t rtk_lsadc0_show_threshold0(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
+	uint pad_reg;
+	uint threshold;
+
+	pad_reg = LSADC_READL(LSADC0_PAD0_ADDR);
+	threshold = (pad_reg & LSADC_PAD_MASK_THRESHOLD) >> 16;
+
+	pr_info("--- debug : %s : pad_reg = 0x%x\n    threshold = %d (0~63) ---- \n",
+		__func__, pad_reg, threshold);
+
+	return sprintf(buf, "%d\n", threshold);
+}
+
+ssize_t rtk_lsadc0_store_threshold0(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
+	uint pad_reg;
+	uint threshold;
+	int value = 0;
+
+	pad_reg = LSADC_READL(LSADC0_PAD0_ADDR);
+
+	threshold = (pad_reg & LSADC_PAD_MASK_THRESHOLD) >> 16;
+
+	if(buf ==NULL) {
+		pr_err("--- debug : %s ====  buffer is null, return \n", __func__);
+		return count;
+	}
+	sscanf(buf, "%d", &value);
+
+	pr_err("--- debug : %s : get value = %d \n", __func__, value);
+
+	if(threshold == value) {
+		pr_err("--- debug : %s ====  the same, do nothing (value = %d) \n", __func__, value);
+		return count;
+	}
+	if(value > 63 || value < 0) {
+		pr_err("--- debug : %s ====  value (%d) out of range, (valid data => 0-63) \n", __func__, value);
+		return count;
+	}
+
+	threshold = value;
+
+	pad_reg = (pad_reg & ~LSADC_PAD_MASK_THRESHOLD) | (threshold << 16);
+	LSADC_WRITEL(pad_reg, LSADC0_PAD0_ADDR);
+	pr_err("--- debug : %s : write pad_reg = 0x%x threshold = %d \n", __func__, pad_reg, threshold);
+
+	return count;
+}
+
+ssize_t rtk_lsadc0_show_threshold1(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
+	uint pad_reg;
+	uint threshold;
+
+	pad_reg = LSADC_READL(LSADC0_PAD1_ADDR);
+	threshold = (pad_reg & LSADC_PAD_MASK_THRESHOLD) >> 16;
+
+	pr_info("--- debug : %s : pad_reg = 0x%x\n    threshold = %d (0~63) ---- \n",
+		__func__, pad_reg, threshold);
+
+	return sprintf(buf, "%d\n", threshold);
+}
+
+ssize_t rtk_lsadc0_store_threshold1(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
+	uint pad_reg;
+	uint threshold;
+	int value = 0;
+
+	pad_reg = LSADC_READL(LSADC0_PAD1_ADDR);
+
+	threshold = (pad_reg & LSADC_PAD_MASK_THRESHOLD) >> 16;
+
+	if(buf ==NULL) {
+		pr_err("--- debug : %s ====  buffer is null, return \n", __func__);
+		return count;
+	}
+	sscanf(buf, "%d", &value);
+
+	pr_err("--- debug : %s : get value = %d \n", __func__, value);
+
+	if(threshold == value) {
+		pr_err("--- debug : %s ====  the same, do nothing (value = %d) \n", __func__, value);
+		return count;
+	}
+	if(value > 63 || value < 0) {
+		pr_err("--- debug : %s ====  value (%d) out of range, (valid data => 0-63) \n", __func__, value);
+		return count;
+	}
+
+	threshold = value;
+
+	pad_reg = (pad_reg & ~LSADC_PAD_MASK_THRESHOLD) | (threshold << 16);
+	LSADC_WRITEL(pad_reg, LSADC0_PAD1_ADDR);
+	pr_err("--- debug : %s : write pad_reg = 0x%x threshold = %d \n", __func__, pad_reg, threshold);
+
+	return count;
+}
+
+ssize_t rtk_lsadc1_show_vdd_gnd_sel(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	uint ctrl_reg;
 	uint lsadc_status_reg;
 	int isr_value = 0 ;
 	int vdd_gnd_mode = 0;
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC1_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC1_STATUS_ADDR);
 
 	vdd_gnd_mode = (ctrl_reg & LSADC1_CTRL_VDD_GND_SEL_MASK) >> 4;
 
-	pr_info("--- debug : rtd1295_lsadc1_show_vdd_gnd_sel : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    vdd_gnd_mode=%d (0:disabled; 1:GND1/GND2; 2:disabled; 3:VDD1/VDD2) ---- \n",
+	pr_info("--- debug : rtk_lsadc1_show_vdd_gnd_sel : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    vdd_gnd_mode=%d (0:disabled; 1:GND1/GND2; 2:disabled; 3:VDD1/VDD2) ---- \n",
 		ctrl_reg, isr_value, lsadc_status_reg, vdd_gnd_mode);
 
 	return sprintf(buf, "%d\n", vdd_gnd_mode);
 }
 
-ssize_t rtd1295_lsadc1_store_vdd_gnd_sel(struct device *dev, struct device_attribute *attr,
+ssize_t rtk_lsadc1_store_vdd_gnd_sel(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	uint ctrl_reg;
 	uint lsadc_status_reg;
@@ -446,26 +559,26 @@ ssize_t rtd1295_lsadc1_store_vdd_gnd_sel(struct device *dev, struct device_attri
 	int vdd_gnd_mode = 0;
 	int value=0;
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC1_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC1_STATUS_ADDR);
 
 	vdd_gnd_mode = (ctrl_reg & LSADC1_CTRL_VDD_GND_SEL_MASK) >> 4;
 
 	if(buf ==NULL) {
-		pr_err("--- debug : rtd1295_lsadc1_store_vdd_gnd_sel	====  buffer is null, return \n");
+		pr_err("--- debug : rtk_lsadc1_store_vdd_gnd_sel	====  buffer is null, return \n");
 		return count;
 	}
 	sscanf(buf, "%d", &value);
 
-	pr_err("--- debug : rtd1295_lsadc1_store_vdd_gnd_sel : get value=%d \n", value);
+	pr_err("--- debug : rtk_lsadc1_store_vdd_gnd_sel : get value=%d \n", value);
 
 	if(vdd_gnd_mode == value) {
-		pr_err("--- debug : rtd1295_lsadc1_store_vdd_gnd_sel	====  the same, do nothing (value=%d) \n", value);
+		pr_err("--- debug : rtk_lsadc1_store_vdd_gnd_sel	====  the same, do nothing (value=%d) \n", value);
 		return count;
 	}
 	if(value > 3 || value < 0) {
-		pr_err("--- debug : rtd1295_lsadc1_store_vdd_gnd_sel	====  value (%d) out of range, (valid data => 0-3) \n", value);
+		pr_err("--- debug : rtk_lsadc1_store_vdd_gnd_sel	====  value (%d) out of range, (valid data => 0-3) \n", value);
 		return count;
 	}
 
@@ -473,37 +586,37 @@ ssize_t rtd1295_lsadc1_store_vdd_gnd_sel(struct device *dev, struct device_attri
 
 	ctrl_reg =(ctrl_reg & (~LSADC1_CTRL_VDD_GND_SEL_MASK))|(vdd_gnd_mode << 4);
 	LSADC_WRITEL(ctrl_reg, LSADC1_CTRL_ADDR);
-	pr_err("--- debug : rtd1295_lsadc1_store_vdd_gnd_sel : write ctrl_reg=0x%x vdd_gnd_mode=%d \n", ctrl_reg, vdd_gnd_mode);
+	pr_err("--- debug : rtk_lsadc1_store_vdd_gnd_sel : write ctrl_reg=0x%x vdd_gnd_mode=%d \n", ctrl_reg, vdd_gnd_mode);
 
-	isr_value = MISC_READL(MIS_ISR_REG_ADDR);
+	isr_value = readl(pc->isr_addr);
 	ctrl_reg = LSADC_READL(LSADC1_CTRL_ADDR);
 	lsadc_status_reg = LSADC_READL(LSADC1_STATUS_ADDR);
 
-	pr_info("--- debug : rtd1295_lsadc1_store_vdd_gnd_sel : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    vdd_gnd_mode=%d ---- \n",
+	pr_info("--- debug : rtk_lsadc1_store_vdd_gnd_sel : ctrl_reg=0x%x, isr_value=0x%x, lsadc_status_reg=0x%x \n    vdd_gnd_mode=%d ---- \n",
 		ctrl_reg, isr_value, lsadc_status_reg, vdd_gnd_mode);
 
 	return count;
 }
 
-ssize_t rtd1295_lsadc_show_vdd_mux_sel(struct device *dev, struct device_attribute *attr, char *buf)
+ssize_t rtk_lsadc_show_vdd_mux_sel(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	int vdd_mux_sel = 0;
 
 	vdd_mux_sel = (readl(pc->crt_lsadc_pg_addr) & CRT_LSADC_VDDMUX_SEL_MASK) >> CRT_LSADC_VDDMUX_SEL_OFFSET;
 
-	pr_info("--- debug : rtd1295_lsadc_show_vdd_mux_sel : vdd_mux_sel=%d (0:VDD1; 1:VDD2) ---- \n", vdd_mux_sel);
+	pr_info("--- debug : rtk_lsadc_show_vdd_mux_sel : vdd_mux_sel=%d (0:VDD1; 1:VDD2) ---- \n", vdd_mux_sel);
 
 	return sprintf(buf, "%d\n", vdd_mux_sel);
 }
 
-ssize_t rtd1295_lsadc_store_vdd_mux_sel(struct device *dev, struct device_attribute *attr,
+ssize_t rtk_lsadc_store_vdd_mux_sel(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	int vdd_mux_sel = 0;
 	int value=0;
@@ -513,19 +626,19 @@ ssize_t rtd1295_lsadc_store_vdd_mux_sel(struct device *dev, struct device_attrib
 	vdd_mux_sel = (crt_lsadc_pg_val & CRT_LSADC_VDDMUX_SEL_MASK) >> CRT_LSADC_VDDMUX_SEL_OFFSET;
 
 	if(buf ==NULL) {
-		pr_err("--- debug : rtd1295_lsadc_store_vdd_mux_sel	====  buffer is null, return \n");
+		pr_err("--- debug : rtk_lsadc_store_vdd_mux_sel	====  buffer is null, return \n");
 		return count;
 	}
 	sscanf(buf, "%d", &value);
 
-	pr_err("--- debug : rtd1295_lsadc_store_vdd_mux_sel : get value=%d \n", value);
+	pr_err("--- debug : rtk_lsadc_store_vdd_mux_sel : get value=%d \n", value);
 
 	if(vdd_mux_sel == value) {
-		pr_err("--- debug : rtd1295_lsadc_store_vdd_mux_sel	====  the same, do nothing (value=%d) \n", value);
+		pr_err("--- debug : rtk_lsadc_store_vdd_mux_sel	====  the same, do nothing (value=%d) \n", value);
 		return count;
 	}
 	if(value > 1 || value < 0) {
-		pr_err("--- debug : rtd1295_lsadc_store_vdd_mux_sel	====  value (%d) out of range, (valid data => 0-1) \n", value);
+		pr_err("--- debug : rtk_lsadc_store_vdd_mux_sel	====  value (%d) out of range, (valid data => 0-1) \n", value);
 		return count;
 	}
 
@@ -535,30 +648,30 @@ ssize_t rtd1295_lsadc_store_vdd_mux_sel(struct device *dev, struct device_attrib
 	pc->crt_lsadc_pg_val = crt_lsadc_pg_val;
 	writel(pc->crt_lsadc_pg_val, pc->crt_lsadc_pg_addr);
 
-	pr_err("--- debug : rtd1295_lsadc_store_vdd_mux_sel : write crt_lsadc_pg_val=0x%x vdd_mux_sel=%d \n", crt_lsadc_pg_val, vdd_mux_sel);
+	pr_err("--- debug : rtk_lsadc_store_vdd_mux_sel : write crt_lsadc_pg_val=0x%x vdd_mux_sel=%d \n", crt_lsadc_pg_val, vdd_mux_sel);
 
 	return count;
 }
 
-ssize_t rtd1295_lsadc_show_vdd_mux1(struct device *dev, struct device_attribute *attr, char *buf)
+ssize_t rtk_lsadc_show_vdd_mux1(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	int vdd_mux1 = 0;
 
 	vdd_mux1 = (readl(pc->crt_lsadc_pg_addr) & CRT_LSADC_VDD_MUX1_MASK) >> CRT_LSADC_VDD_MUX1_OFFSET;
 
-	pr_info("--- debug : rtd1295_lsadc_show_vdd_mux1 : vdd_mux1=%d (VDD1 input MUX select) ---- \n", vdd_mux1);
+	pr_info("--- debug : rtk_lsadc_show_vdd_mux1 : vdd_mux1=%d (VDD1 input MUX select) ---- \n", vdd_mux1);
 
 	return sprintf(buf, "%d\n", vdd_mux1);
 }
 
-ssize_t rtd1295_lsadc_store_vdd_mux1(struct device *dev, struct device_attribute *attr,
+ssize_t rtk_lsadc_store_vdd_mux1(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	int vdd_mux1 = 0;
 	int value=0;
@@ -568,19 +681,19 @@ ssize_t rtd1295_lsadc_store_vdd_mux1(struct device *dev, struct device_attribute
 	vdd_mux1 = (crt_lsadc_pg_val & CRT_LSADC_VDD_MUX1_MASK) >> CRT_LSADC_VDD_MUX1_OFFSET;
 
 	if(buf ==NULL) {
-		pr_err("--- debug : rtd1295_lsadc_store_vdd_mux1	====  buffer is null, return \n");
+		pr_err("--- debug : rtk_lsadc_store_vdd_mux1	====  buffer is null, return \n");
 		return count;
 	}
 	sscanf(buf, "%d", &value);
 
-	pr_err("--- debug : rtd1295_lsadc_store_vdd_mux1 : get value=%d \n", value);
+	pr_err("--- debug : rtk_lsadc_store_vdd_mux1 : get value=%d \n", value);
 
 	if(vdd_mux1 == value) {
-		pr_err("--- debug : rtd1295_lsadc_store_vdd_mux1	====  the same, do nothing (value=%d) \n", value);
+		pr_err("--- debug : rtk_lsadc_store_vdd_mux1	====  the same, do nothing (value=%d) \n", value);
 		return count;
 	}
 	if(value > 15 || value < 0) {
-		pr_err("--- debug : rtd1295_lsadc_store_vdd_mux1	====  value (%d) out of range, (valid data => 0-15) \n", value);
+		pr_err("--- debug : rtk_lsadc_store_vdd_mux1	====  value (%d) out of range, (valid data => 0-15) \n", value);
 		return count;
 	}
 
@@ -590,30 +703,30 @@ ssize_t rtd1295_lsadc_store_vdd_mux1(struct device *dev, struct device_attribute
 	pc->crt_lsadc_pg_val = crt_lsadc_pg_val;
 	writel(pc->crt_lsadc_pg_val, pc->crt_lsadc_pg_addr);
 
-	pr_err("--- debug : rtd1295_lsadc_store_vdd_mux1 : write crt_lsadc_pg_val=0x%x vdd_mux1=%d \n", crt_lsadc_pg_val, vdd_mux1);
+	pr_err("--- debug : rtk_lsadc_store_vdd_mux1 : write crt_lsadc_pg_val=0x%x vdd_mux1=%d \n", crt_lsadc_pg_val, vdd_mux1);
 
 	return count;
 }
 
-ssize_t rtd1295_lsadc_show_vdd_mux2(struct device *dev, struct device_attribute *attr, char *buf)
+ssize_t rtk_lsadc_show_vdd_mux2(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	int vdd_mux2 = 0;
 
 	vdd_mux2 = (readl(pc->crt_lsadc_pg_addr) & CRT_LSADC_VDD_MUX2_MASK) >> CRT_LSADC_VDD_MUX2_OFFSET;
 
-	pr_info("--- debug : rtd1295_lsadc_show_vdd_mux2 : vdd_mux2=%d (VDD2 input MUX select) ---- \n", vdd_mux2);
+	pr_info("--- debug : rtk_lsadc_show_vdd_mux2 : vdd_mux2=%d (VDD2 input MUX select) ---- \n", vdd_mux2);
 
 	return sprintf(buf, "%d\n", vdd_mux2);
 }
 
-ssize_t rtd1295_lsadc_store_vdd_mux2(struct device *dev, struct device_attribute *attr,
+ssize_t rtk_lsadc_store_vdd_mux2(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	struct rtd1295_lsadc_device *pc = platform_get_drvdata(pdev);
+	struct rtk_lsadc_device *pc = platform_get_drvdata(pdev);
 
 	int vdd_mux2 = 0;
 	int value=0;
@@ -623,19 +736,19 @@ ssize_t rtd1295_lsadc_store_vdd_mux2(struct device *dev, struct device_attribute
 	vdd_mux2 = (crt_lsadc_pg_val & CRT_LSADC_VDD_MUX2_MASK) >> CRT_LSADC_VDD_MUX2_OFFSET;
 
 	if(buf ==NULL) {
-		pr_err("--- debug : rtd1295_lsadc_store_vdd_mux2	====  buffer is null, return \n");
+		pr_err("--- debug : rtk_lsadc_store_vdd_mux2	====  buffer is null, return \n");
 		return count;
 	}
 	sscanf(buf, "%d", &value);
 
-	pr_err("--- debug : rtd1295_lsadc_store_vdd_mux2 : get value=%d \n", value);
+	pr_err("--- debug : rtk_lsadc_store_vdd_mux2 : get value=%d \n", value);
 
 	if(vdd_mux2 == value) {
-		pr_err("--- debug : rtd1295_lsadc_store_vdd_mux2	====  the same, do nothing (value=%d) \n", value);
+		pr_err("--- debug : rtk_lsadc_store_vdd_mux2	====  the same, do nothing (value=%d) \n", value);
 		return count;
 	}
 	if(value > 15 || value < 0) {
-		pr_err("--- debug : rtd1295_lsadc_store_vdd_mux2	====  value (%d) out of range, (valid data => 0-15) \n", value);
+		pr_err("--- debug : rtk_lsadc_store_vdd_mux2	====  value (%d) out of range, (valid data => 0-15) \n", value);
 		return count;
 	}
 
@@ -645,25 +758,29 @@ ssize_t rtd1295_lsadc_store_vdd_mux2(struct device *dev, struct device_attribute
 	pc->crt_lsadc_pg_val = crt_lsadc_pg_val;
 	writel(pc->crt_lsadc_pg_val, pc->crt_lsadc_pg_addr);
 
-	pr_err("--- debug : rtd1295_lsadc_store_vdd_mux2 : write crt_lsadc_pg_val=0x%x vdd_mux2=%d \n", crt_lsadc_pg_val, vdd_mux2);
+	pr_err("--- debug : rtk_lsadc_store_vdd_mux2 : write crt_lsadc_pg_val=0x%x vdd_mux2=%d \n", crt_lsadc_pg_val, vdd_mux2);
 
 	return count;
 }
 
-static DEVICE_ATTR(debounce0, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtd1295_lsadc0_show_debounce, rtd1295_lsadc0_store_debounce);
-static DEVICE_ATTR(debounce1, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtd1295_lsadc1_show_debounce, rtd1295_lsadc1_store_debounce);
-static DEVICE_ATTR(vdd_gnd_mode1, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtd1295_lsadc1_show_vdd_gnd_sel, rtd1295_lsadc1_store_vdd_gnd_sel);
-static DEVICE_ATTR(vdd_mux_sel, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtd1295_lsadc_show_vdd_mux_sel, rtd1295_lsadc_store_vdd_mux_sel);
-static DEVICE_ATTR(vdd_mux1, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtd1295_lsadc_show_vdd_mux1, rtd1295_lsadc_store_vdd_mux1);
-static DEVICE_ATTR(vdd_mux2, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtd1295_lsadc_show_vdd_mux2, rtd1295_lsadc_store_vdd_mux2);
-static DEVICE_ATTR(info0, S_IRUGO, rtd1295_lsadc0_show_info, NULL);
-static DEVICE_ATTR(info1, S_IRUGO, rtd1295_lsadc1_show_info, NULL);
+static DEVICE_ATTR(debounce0, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtk_lsadc0_show_debounce, rtk_lsadc0_store_debounce);
+static DEVICE_ATTR(debounce1, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtk_lsadc1_show_debounce, rtk_lsadc1_store_debounce);
+static DEVICE_ATTR(threshold00, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtk_lsadc0_show_threshold0, rtk_lsadc0_store_threshold0);
+static DEVICE_ATTR(threshold01, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtk_lsadc0_show_threshold1, rtk_lsadc0_store_threshold1);
+static DEVICE_ATTR(vdd_gnd_mode1, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtk_lsadc1_show_vdd_gnd_sel, rtk_lsadc1_store_vdd_gnd_sel);
+static DEVICE_ATTR(vdd_mux_sel, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtk_lsadc_show_vdd_mux_sel, rtk_lsadc_store_vdd_mux_sel);
+static DEVICE_ATTR(vdd_mux1, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtk_lsadc_show_vdd_mux1, rtk_lsadc_store_vdd_mux1);
+static DEVICE_ATTR(vdd_mux2, ((S_IRUGO | S_IWUGO) & ~S_IWOTH), rtk_lsadc_show_vdd_mux2, rtk_lsadc_store_vdd_mux2);
+static DEVICE_ATTR(info0, S_IRUGO, rtk_lsadc0_show_info, NULL);
+static DEVICE_ATTR(info1, S_IRUGO, rtk_lsadc1_show_info, NULL);
 
-static struct attribute *rtd1295_attr_base[] = {
+static struct attribute *rtk_attr_base[] = {
 	&dev_attr_info0.attr,
 	&dev_attr_info1.attr,
 	&dev_attr_debounce0.attr,
 	&dev_attr_debounce1.attr,
+	&dev_attr_threshold00.attr,
+	&dev_attr_threshold01.attr,
 	&dev_attr_vdd_gnd_mode1.attr,
 	&dev_attr_vdd_mux_sel.attr,
 	&dev_attr_vdd_mux1.attr,
@@ -671,13 +788,13 @@ static struct attribute *rtd1295_attr_base[] = {
 	NULL
 };
 
-static const struct attribute_group rtd1295_group_base = {
-	.attrs = rtd1295_attr_base,
+static const struct attribute_group rtk_group_base = {
+	.attrs = rtk_attr_base,
 };
 
-static int __init rtd1295_lsadc_probe(struct platform_device *pdev)
+static int __init rtk_lsadc_probe(struct platform_device *pdev)
 {
-	struct rtd1295_lsadc_device *priv, *pc;
+	struct rtk_lsadc_device *priv, *pc;
 	struct device_node *lsadc0_pad0_node, *lsadc0_pad1_node;
 	struct device_node *lsadc1_pad0_node, *lsadc1_pad1_node;
 	int ret = -EINVAL, val;
@@ -688,29 +805,34 @@ static int __init rtd1295_lsadc_probe(struct platform_device *pdev)
 	uint irq_num0, irq_num1;
 	uint clk_gating_en[2], lsadc_power_reg;
 	uint vdd_mux_sel, vdd_mux1, vdd_mux2, vdd_mux_en;
+	#if defined(CONFIG_ARCH_RTD129x)
 	void __iomem *lsadc_clk_addr;
+	#elif defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+	struct clk *clk;
+	struct reset_control *rstc;
+	#endif /* CONFIG_ARCH_RTD129x | CONFIG_ARCH_RTD139x | CONFIG_ARCH_RTD16xx */
 
-	pr_info("--- debug : rtd1295_lsadc_probe \n");
+	pr_info("--- debug : rtk_lsadc_probe \n");
 
-	lsadc0_pad0_node = of_get_child_by_name(pdev->dev.of_node, "rtd1295-lsadc0-pad0");
+	lsadc0_pad0_node = of_get_child_by_name(pdev->dev.of_node, "rtk-lsadc0-pad0");
 	if (!lsadc0_pad0_node) {
-		dev_err(&pdev->dev, "could not find [rtd1295-lsadc0-pad0] sub-node\n");
+		dev_err(&pdev->dev, "could not find [rtk-lsadc0-pad0] sub-node\n");
 		return -EINVAL;
 	}
-	lsadc0_pad1_node = of_get_child_by_name(pdev->dev.of_node, "rtd1295-lsadc0-pad1");
+	lsadc0_pad1_node = of_get_child_by_name(pdev->dev.of_node, "rtk-lsadc0-pad1");
 	if (!lsadc0_pad1_node) {
-		dev_err(&pdev->dev, "could not find [rtd1295-lsadc0-pad1] sub-node\n");
+		dev_err(&pdev->dev, "could not find [rtk-lsadc0-pad1] sub-node\n");
 		return -EINVAL;
 	}
 
-	lsadc1_pad0_node = of_get_child_by_name(pdev->dev.of_node, "rtd1295-lsadc1-pad0");
+	lsadc1_pad0_node = of_get_child_by_name(pdev->dev.of_node, "rtk-lsadc1-pad0");
 	if (!lsadc1_pad0_node) {
-		dev_err(&pdev->dev, "could not find [rtd1295-lsadc1-pad0] sub-node\n");
+		dev_err(&pdev->dev, "could not find [rtk-lsadc1-pad0] sub-node\n");
 		return -EINVAL;
 	}
-	lsadc1_pad1_node = of_get_child_by_name(pdev->dev.of_node, "rtd1295-lsadc1-pad1");
+	lsadc1_pad1_node = of_get_child_by_name(pdev->dev.of_node, "rtk-lsadc1-pad1");
 	if (!lsadc1_pad1_node) {
-		dev_err(&pdev->dev, "could not find [rtd1295-lsadc1-pad1] sub-node\n");
+		dev_err(&pdev->dev, "could not find [rtk-lsadc1-pad1] sub-node\n");
 		return -EINVAL;
 	}
 
@@ -727,9 +849,9 @@ static int __init rtd1295_lsadc_probe(struct platform_device *pdev)
 	priv->dev = &pdev->dev;
 	priv->lsadc[0].irq = irq_num0;
 	priv->lsadc[1].irq = irq_num1;
-	priv->misc_addr = of_iomap(pdev->dev.of_node, 0);
+	priv->isr_addr = of_iomap(pdev->dev.of_node, 0);
 	priv->lsadc_addr = of_iomap(pdev->dev.of_node, 1);
-	priv->crt_lsadc_pg_addr = ioremap(CRT_LSADC_PG_ADDR, 4);
+	priv->crt_lsadc_pg_addr = of_iomap(pdev->dev.of_node, 2);
 
 	platform_set_drvdata(pdev, priv);
 
@@ -831,6 +953,7 @@ static int __init rtd1295_lsadc_probe(struct platform_device *pdev)
 	if (!of_property_read_u32(lsadc1_pad1_node, "detect_range_ctrl", &val))
 		priv->lsadc[1].padInfoSet[1].vref_sel=val;
 
+	#if defined(CONFIG_ARCH_RTD129x)
 	if (get_rtd129x_cpu_revision() >= RTD129x_CHIP_REVISION_B00) {
 		// Enable LSADC clock
 		lsadc_clk_addr = ioremap(CRT_LSADC_CLK_ADDR, 0x4);
@@ -838,6 +961,24 @@ static int __init rtd1295_lsadc_probe(struct platform_device *pdev)
 		writel(val, lsadc_clk_addr);
 		__iounmap(lsadc_clk_addr);
 	}
+	#elif defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+	clk = clk_get(&pdev->dev, NULL);
+	if (IS_ERR(clk)) {
+		clk = NULL;
+		pr_err("can't get LSADC clock\n");
+	} else {
+		clk_prepare_enable(clk);
+	}
+
+
+	rstc = reset_control_get(&pdev->dev, NULL);
+	if (IS_ERR(rstc)) {
+		pr_err("can't get LSADC reset\n");
+	} else {
+		reset_control_deassert(rstc);
+		reset_control_put(rstc);
+	}
+	#endif /* CONFIG_ARCH_RTD129x | CONFIG_ARCH_RTD139x | CONFIG_ARCH_RTD16xx */
 
 	lsadc_power_reg = LSADC_READL(LSADC0_POWER_ADDR) & ~(LSADC0_CLK_GATING_EN | LSADC1_CLK_GATING_EN);
 	if(priv->lsadc[0].clk_gating_en == 1)
@@ -907,7 +1048,7 @@ static int __init rtd1295_lsadc_probe(struct platform_device *pdev)
 
 	ctrl_reg = ctrl_reg | LSADC_CTRL_MASK_ENABLE | LSADC0_CTRL_DEBOUNCE_CNT | LSADC_CTRL_MASK_SEL_WAIT ;
 	LSADC_WRITEL(ctrl_reg, LSADC0_CTRL_ADDR);
-	pr_err("--- debug :    rtd1295_lsadc0_probe	ctrl_reg=0x%x  irq_num=%d---  \n",ctrl_reg, irq_num0);
+	pr_err("--- debug :    rtk_lsadc0_probe	ctrl_reg=0x%x  irq_num=%d---  \n",ctrl_reg, irq_num0);
 
 	if( (lsadc_status_reg & LSADC_STATUS_MASK_IRQ_EN) != LSADC_STATUS_MASK_IRQ_EN ) {
 		lsadc_status_reg = lsadc_status_reg | LSADC_STATUS_MASK_IRQ_EN ;
@@ -1003,7 +1144,7 @@ static int __init rtd1295_lsadc_probe(struct platform_device *pdev)
 
 	ctrl_reg = ctrl_reg | LSADC_CTRL_MASK_ENABLE | LSADC1_CTRL_DEBOUNCE_CNT | LSADC_CTRL_MASK_SEL_WAIT ;
 	LSADC_WRITEL(ctrl_reg, LSADC1_CTRL_ADDR);
-	pr_err("--- debug :    rtd1295_lsadc1_probe	ctrl_reg=0x%x  irq_num=%d---  \n",ctrl_reg, irq_num1);
+	pr_err("--- debug :    rtk_lsadc1_probe	ctrl_reg=0x%x  irq_num=%d---  \n",ctrl_reg, irq_num1);
 
 	if( (lsadc_status_reg & LSADC_STATUS_MASK_IRQ_EN) != LSADC_STATUS_MASK_IRQ_EN ) {
 		lsadc_status_reg = lsadc_status_reg | LSADC_STATUS_MASK_IRQ_EN ;
@@ -1040,7 +1181,7 @@ static int __init rtd1295_lsadc_probe(struct platform_device *pdev)
 	pr_err("--- debug :    write crt_lsadc_pg_val=0x%x  --  \n",priv->crt_lsadc_pg_val);
 
 	/* Register sysfs hooks */
-	ret = sysfs_create_group(&pdev->dev.kobj, &rtd1295_group_base);
+	ret = sysfs_create_group(&pdev->dev.kobj, &rtk_group_base);
 	if (ret)
 		goto out_err_register;
 
@@ -1048,15 +1189,15 @@ static int __init rtd1295_lsadc_probe(struct platform_device *pdev)
 
 out_err_register:
 	pr_err("--- debug :    sysfs_create_group() failed, ret = %d\n", ret);
-	sysfs_remove_group(&pdev->dev.kobj, &rtd1295_group_base);
+	sysfs_remove_group(&pdev->dev.kobj, &rtk_group_base);
 err:
 	return ret;
 }
 
-static int rtd1295_lsadc_remove(struct platform_device *pdev)
+static int rtk_lsadc_remove(struct platform_device *pdev)
 {
-	struct rtd1295_lsadc_device *priv = platform_get_drvdata(pdev);
-	sysfs_remove_group(&pdev->dev.kobj, &rtd1295_group_base);
+	struct rtk_lsadc_device *priv = platform_get_drvdata(pdev);
+	sysfs_remove_group(&pdev->dev.kobj, &rtk_group_base);
 #ifdef LSADC_IRQ_DEFINED
 	free_irq(priv->lsadc[0].irq, priv);
 	free_irq(priv->lsadc[1].irq, priv);
@@ -1064,26 +1205,26 @@ static int rtd1295_lsadc_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id rtd1295_lsadc_of_match[] = {
-	{ .compatible = "realtek,rtd1295-lsadc" },
+static const struct of_device_id rtk_lsadc_of_match[] = {
+	{ .compatible = "realtek,rtk-lsadc" },
 	{ }
 };
-MODULE_DEVICE_TABLE(of, rtd1295_lsadc_of_match);
+MODULE_DEVICE_TABLE(of, rtk_lsadc_of_match);
 
 
-static struct platform_driver rtd1295_lsadc_platform_driver = {
+static struct platform_driver rtk_lsadc_platform_driver = {
 	.driver		= {
 		.owner	= THIS_MODULE,
-		.name	= "rtd1295-lsadc",
-		.of_match_table = rtd1295_lsadc_of_match,
+		.name	= "rtk-lsadc",
+		.of_match_table = rtk_lsadc_of_match,
 	},
-	.probe 		= rtd1295_lsadc_probe,
-	.remove 	= rtd1295_lsadc_remove,
+	.probe 		= rtk_lsadc_probe,
+	.remove 	= rtk_lsadc_remove,
 };
-module_platform_driver(rtd1295_lsadc_platform_driver);
+module_platform_driver(rtk_lsadc_platform_driver);
 
-MODULE_DESCRIPTION("RTD1295 LSADC driver");
+MODULE_DESCRIPTION("RTK LSADC driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:rtd1295-lsadc");
+MODULE_ALIAS("platform:rtk-lsadc");
 
 

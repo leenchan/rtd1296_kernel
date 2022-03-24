@@ -40,14 +40,6 @@
 #include <net/netlink.h>
 #include <net/sch_generic.h>
 #include <net/pkt_sched.h>
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-#include <net/rtl/rtl_types.h>
-#include <net/rtl/rtl865x_netif.h>
-#include <net/rtl/rtl865x_outputQueue.h>
-#if defined(CONFIG_PROC_FS)
-#include <linux/proc_fs.h>
-#endif /* CONFIG_PROC_FS */
-#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
 
 /* HTB algorithm.
     Author: devik@cdi.cz
@@ -125,7 +117,6 @@ struct htb_class {
 	 * Written often fields
 	 */
 	struct gnet_stats_basic_packed bstats;
-	struct gnet_stats_queue	qstats;
 	struct tc_htb_xstats	xstats;	/* our special stats */
 
 	/* token bucket parameters */
@@ -148,6 +139,8 @@ struct htb_class {
 	enum htb_cmode		cmode;		/* current mode of the class */
 	struct rb_node		pq_node;	/* node for event queue */
 	struct rb_node		node[TC_HTB_NUMPRIO];	/* node for self or feed tree */
+
+	unsigned int drops ____cacheline_aligned_in_smp;
 };
 
 struct htb_level {
@@ -169,7 +162,7 @@ struct htb_sched {
 	struct work_struct	work;
 
 	/* non shaped skbs; let them go directly thru */
-	struct sk_buff_head	direct_queue;
+	struct qdisc_skb_head	direct_queue;
 	long			direct_pkts;
 
 	struct qdisc_watchdog	watchdog;
@@ -237,7 +230,7 @@ static struct htb_class *htb_classify(struct sk_buff *skb, struct Qdisc *sch,
 	}
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
-	while (tcf && (result = tc_classify(skb, tcf, &res)) >= 0) {
+	while (tcf && (result = tc_classify(skb, tcf, &res, false)) >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {
 		case TC_ACT_QUEUED:
@@ -577,7 +570,24 @@ static inline void htb_deactivate(struct htb_sched *q, struct htb_class *cl)
 	list_del_init(&cl->un.leaf.drop_list);
 }
 
-static int htb_enqueue(struct sk_buff *skb, struct Qdisc *sch)
+static void htb_enqueue_tail(struct sk_buff *skb, struct Qdisc *sch,
+			     struct qdisc_skb_head *qh)
+{
+	struct sk_buff *last = qh->tail;
+
+	if (last) {
+		skb->next = NULL;
+		last->next = skb;
+		qh->tail = skb;
+	} else {
+		qh->tail = skb;
+		qh->head = skb;
+	}
+	qh->qlen++;
+}
+
+static int htb_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+		       struct sk_buff **to_free)
 {
 	int uninitialized_var(ret);
 	struct htb_sched *q = qdisc_priv(sch);
@@ -586,22 +596,23 @@ static int htb_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	if (cl == HTB_DIRECT) {
 		/* enqueue to helper queue */
 		if (q->direct_queue.qlen < q->direct_qlen) {
-			__skb_queue_tail(&q->direct_queue, skb);
+			htb_enqueue_tail(skb, sch, &q->direct_queue);
 			q->direct_pkts++;
 		} else {
-			return qdisc_drop(skb, sch);
+			return qdisc_drop(skb, sch, to_free);
 		}
 #ifdef CONFIG_NET_CLS_ACT
 	} else if (!cl) {
 		if (ret & __NET_XMIT_BYPASS)
 			qdisc_qstats_drop(sch);
-		kfree_skb(skb);
+		__qdisc_drop(skb, to_free);
 		return ret;
 #endif
-	} else if ((ret = qdisc_enqueue(skb, cl->un.leaf.q)) != NET_XMIT_SUCCESS) {
+	} else if ((ret = qdisc_enqueue(skb, cl->un.leaf.q,
+					to_free)) != NET_XMIT_SUCCESS) {
 		if (net_xmit_drop_count(ret)) {
 			qdisc_qstats_drop(sch);
-			cl->qstats.drops++;
+			cl->drops++;
 		}
 		return ret;
 	} else {
@@ -893,11 +904,10 @@ static struct sk_buff *htb_dequeue(struct Qdisc *sch)
 	unsigned long start_at;
 
 	/* try to dequeue direct packets as high prio (!) to minimize cpu work */
-	skb = __skb_dequeue(&q->direct_queue);
+	skb = __qdisc_dequeue_head(&q->direct_queue);
 	if (skb != NULL) {
 ok:
 		qdisc_bstats_update(sch, skb);
-		qdisc_unthrottled(sch);
 		qdisc_qstats_backlog_dec(sch, skb);
 		sch->q.qlen--;
 		return skb;
@@ -936,44 +946,12 @@ ok:
 		}
 	}
 	qdisc_qstats_overlimit(sch);
-	if (likely(next_event > q->now)) {
-		if (!test_bit(__QDISC_STATE_DEACTIVATED,
-			      &qdisc_root_sleeping(q->watchdog.qdisc)->state)) {
-			ktime_t time = ns_to_ktime(next_event);
-			qdisc_throttled(q->watchdog.qdisc);
-			hrtimer_start(&q->watchdog.timer, time,
-				      HRTIMER_MODE_ABS_PINNED);
-		}
-	} else {
+	if (likely(next_event > q->now))
+		qdisc_watchdog_schedule_ns(&q->watchdog, next_event);
+	else
 		schedule_work(&q->work);
-	}
 fin:
 	return skb;
-}
-
-/* try to drop from each class (by prio) until one succeed */
-static unsigned int htb_drop(struct Qdisc *sch)
-{
-	struct htb_sched *q = qdisc_priv(sch);
-	int prio;
-
-	for (prio = TC_HTB_NUMPRIO - 1; prio >= 0; prio--) {
-		struct list_head *p;
-		list_for_each(p, q->drops + prio) {
-			struct htb_class *cl = list_entry(p, struct htb_class,
-							  un.leaf.drop_list);
-			unsigned int len;
-			if (cl->un.leaf.q->ops->drop &&
-			    (len = cl->un.leaf.q->ops->drop(cl->un.leaf.q))) {
-				sch->qstats.backlog -= len;
-				sch->q.qlen--;
-				if (!cl->un.leaf.q->q.qlen)
-					htb_deactivate(q, cl);
-				return len;
-			}
-		}
-	}
-	return 0;
 }
 
 /* reset all classes */
@@ -998,7 +976,7 @@ static void htb_reset(struct Qdisc *sch)
 		}
 	}
 	qdisc_watchdog_cancel(&q->watchdog);
-	__skb_queue_purge(&q->direct_queue);
+	__qdisc_reset_queue(&q->direct_queue);
 	sch->q.qlen = 0;
 	sch->qstats.backlog = 0;
 	memset(q->hlevel, 0, sizeof(q->hlevel));
@@ -1022,7 +1000,9 @@ static void htb_work_func(struct work_struct *work)
 	struct htb_sched *q = container_of(work, struct htb_sched, work);
 	struct Qdisc *sch = q->watchdog.qdisc;
 
+	rcu_read_lock();
 	__netif_schedule(qdisc_root(sch));
+	rcu_read_unlock();
 }
 
 static int htb_init(struct Qdisc *sch, struct nlattr *opt)
@@ -1055,15 +1035,13 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt)
 
 	qdisc_watchdog_init(&q->watchdog, sch);
 	INIT_WORK(&q->work, htb_work_func);
-	__skb_queue_head_init(&q->direct_queue);
+	qdisc_skb_head_init(&q->direct_queue);
 
 	if (tb[TCA_HTB_DIRECT_QLEN])
 		q->direct_qlen = nla_get_u32(tb[TCA_HTB_DIRECT_QLEN]);
-	else {
+	else
 		q->direct_qlen = qdisc_dev(sch)->tx_queue_len;
-		if (q->direct_qlen < 2)	/* some devices have zero tx_queue_len */
-			q->direct_qlen = 2;
-	}
+
 	if ((q->rate2quantum = gopt->rate2quantum) < 1)
 		q->rate2quantum = 1;
 	q->defcls = gopt->defcls;
@@ -1132,10 +1110,12 @@ static int htb_dump_class(struct Qdisc *sch, unsigned long arg,
 	if (nla_put(skb, TCA_HTB_PARMS, sizeof(opt), &opt))
 		goto nla_put_failure;
 	if ((cl->rate.rate_bytes_ps >= (1ULL << 32)) &&
-	    nla_put_u64(skb, TCA_HTB_RATE64, cl->rate.rate_bytes_ps))
+	    nla_put_u64_64bit(skb, TCA_HTB_RATE64, cl->rate.rate_bytes_ps,
+			      TCA_HTB_PAD))
 		goto nla_put_failure;
 	if ((cl->ceil.rate_bytes_ps >= (1ULL << 32)) &&
-	    nla_put_u64(skb, TCA_HTB_CEIL64, cl->ceil.rate_bytes_ps))
+	    nla_put_u64_64bit(skb, TCA_HTB_CEIL64, cl->ceil.rate_bytes_ps,
+			      TCA_HTB_PAD))
 		goto nla_put_failure;
 
 	return nla_nest_end(skb, nest);
@@ -1149,16 +1129,24 @@ static int
 htb_dump_class_stats(struct Qdisc *sch, unsigned long arg, struct gnet_dump *d)
 {
 	struct htb_class *cl = (struct htb_class *)arg;
+	struct gnet_stats_queue qs = {
+		.drops = cl->drops,
+	};
 	__u32 qlen = 0;
 
-	if (!cl->level && cl->un.leaf.q)
+	if (!cl->level && cl->un.leaf.q) {
 		qlen = cl->un.leaf.q->q.qlen;
-	cl->xstats.tokens = PSCHED_NS2TICKS(cl->tokens);
-	cl->xstats.ctokens = PSCHED_NS2TICKS(cl->ctokens);
+		qs.backlog = cl->un.leaf.q->qstats.backlog;
+	}
+	cl->xstats.tokens = clamp_t(s64, PSCHED_NS2TICKS(cl->tokens),
+				    INT_MIN, INT_MAX);
+	cl->xstats.ctokens = clamp_t(s64, PSCHED_NS2TICKS(cl->ctokens),
+				     INT_MIN, INT_MAX);
 
-	if (gnet_stats_copy_basic(d, NULL, &cl->bstats) < 0 ||
+	if (gnet_stats_copy_basic(qdisc_root_sleeping_running(sch),
+				  d, NULL, &cl->bstats) < 0 ||
 	    gnet_stats_copy_rate_est(d, NULL, &cl->rate_est) < 0 ||
-	    gnet_stats_copy_queue(d, NULL, &cl->qstats, qlen) < 0)
+	    gnet_stats_copy_queue(d, NULL, &qs, qlen) < 0)
 		return -1;
 
 	return gnet_stats_copy_app(d, &cl->xstats, sizeof(cl->xstats));
@@ -1271,7 +1259,7 @@ static void htb_destroy(struct Qdisc *sch)
 			htb_destroy_class(sch, cl);
 	}
 	qdisc_class_hash_destroy(&q->clhash);
-	__skb_queue_purge(&q->direct_queue);
+	__qdisc_reset_queue(&q->direct_queue);
 }
 
 static int htb_delete(struct Qdisc *sch, unsigned long arg)
@@ -1410,7 +1398,8 @@ static int htb_change_class(struct Qdisc *sch, u32 classid,
 		if (htb_rate_est || tca[TCA_RATE]) {
 			err = gen_new_estimator(&cl->bstats, NULL,
 						&cl->rate_est,
-						qdisc_root_sleeping_lock(sch),
+						NULL,
+						qdisc_root_sleeping_running(sch),
 						tca[TCA_RATE] ? : &est.nla);
 			if (err) {
 				kfree(cl);
@@ -1472,11 +1461,10 @@ static int htb_change_class(struct Qdisc *sch, u32 classid,
 			parent->children++;
 	} else {
 		if (tca[TCA_RATE]) {
-			spinlock_t *lock = qdisc_root_sleeping_lock(sch);
-
 			err = gen_replace_estimator(&cl->bstats, NULL,
 						    &cl->rate_est,
-						    lock,
+						    NULL,
+						    qdisc_root_sleeping_running(sch),
 						    tca[TCA_RATE]);
 			if (err)
 				return err;
@@ -1567,288 +1555,6 @@ static void htb_unbind_filter(struct Qdisc *sch, unsigned long arg)
 		cl->filter_cnt--;
 }
 
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-
-#define BANDWIDTH_GAP_FOR_PORT		10000
-#if defined(CONFIG_RTD_1295_HWNAT)
-#define FULL_SPEED	1000000000
-#else /* CONFIG_RTD_1295_HWNAT */
-#if defined(CONFIG_RTL_8196C) ||defined(CONFIG_RTL_819XD) ||defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_8197F)
-#if defined(CONFIG_RTL_8367_QOS_SUPPORT)
-#define FULL_SPEED	1000000000
-#else
-#define FULL_SPEED	100000000
-#endif /* CONFIG_RTL_8367_QOS_SUPPORT */
-#elif defined(CONFIG_RTL_8198)||defined(CONFIG_RTL_8198C)
-#define FULL_SPEED	1000000000
-#else
-#error "Please select the correct chip model."
-#endif
-#endif /* CONFIG_RTD_1295_HWNAT */
-
-static int htb_syncHwQueue(struct net_device *dev)
-{
-	/*	Qdisc exist	*/
-	struct Qdisc		*q;
-	u32			queueNum;
-	u32			topClassNum;
-	u32			idx;
-	struct htb_class	*cl;
-	struct htb_class	*classHandle[TC_HTB_MAXDEPTH - 1];
-	rtl865x_qos_t		queueInfo[RTL8651_OUTPUTQUEUE_SIZE];
-	struct htb_sched	*defQ;
-	u32			defClassId;
-	u32			tmpBandwidth1, tmpBandwidth2;
-	int			i;
-
-	memset(queueInfo, 0, RTL8651_OUTPUTQUEUE_SIZE * sizeof(rtl865x_qos_t));
-	queueNum = topClassNum = 0;
-
-	defQ = qdisc_priv(netdev_get_tx_queue(dev, 0)->qdisc_sleeping);
-	defClassId = TC_H_MAKE(netdev_get_tx_queue(dev, 0)->qdisc_sleeping->handle, defQ->defcls);
-
-	for (i = 0; i < dev->num_tx_queues; i++)
-	{
-		struct netdev_queue *txq = netdev_get_tx_queue(dev, i);
-		struct Qdisc *txq_root = txq->qdisc_sleeping;
-		spin_lock_bh(qdisc_lock(txq_root));
-		list_for_each_entry(q, &txq_root->list, list)
-		{
-			if (q->parent)
-			{
-				cl = htb_find(q->parent, netdev_get_tx_queue(dev, 0)->qdisc_sleeping);
-
-				if (cl == NULL)
-				{
-					spin_unlock_bh(qdisc_lock(txq_root));
-					return -EINVAL;
-				}
-				{
-
-					#if defined(CONFIG_RTL_HW_QOS_SP_PRIO)
-					queueInfo[queueNum].prio = 7 - cl->prio;
-					#endif /* CONFIG_RTL_HW_QOS_SP_PRIO */
-					#if defined(CONFIG_RTD_1295_HWNAT)
-					queueInfo[queueNum].bandwidth = cl->rate.rate_bytes_ps * 8;
-					queueInfo[queueNum].ceil = cl->ceil.rate_bytes_ps * 8;
-					#else /* defined(CONFIG_RTD_1295_HWNAT) */
-					queueInfo[queueNum].bandwidth = cl->rate.rate_bps;
-					queueInfo[queueNum].ceil = cl->ceil.rate_bps;
-					#endif /* defined(CONFIG_RTD_1295_HWNAT) */
-					queueInfo[queueNum].handle = queueInfo[queueNum].queueId = cl->common.classid;
-					memcpy(queueInfo[queueNum].ifname,
-						dev->name, sizeof(dev->name));
-					//printk("queueInfo[%d]:prio:%d,bw:%d,ceil:%d,handle:%x[%s]:[%d].\n",queueNum,queueInfo[queueNum].prio,
-					//	queueInfo[queueNum].bandwidth,queueInfo[queueNum].ceil,queueInfo[queueNum].handle,__FUNCTION__,__LINE__);
-					if (cl->common.classid == defClassId)
-						queueInfo[queueNum].flags |= QOS_DEF_QUEUE;
-					else
-						queueInfo[queueNum].flags &= (~QOS_DEF_QUEUE);
-
-					if (queueInfo[queueNum].bandwidth == queueInfo[queueNum].ceil)
-					{
-						/*	Consider ceil==rate as as STR	*/
-						queueInfo[queueNum].flags = (queueInfo[queueNum].flags & (~QOS_TYPE_MASK)) | QOS_TYPE_STR | QOS_VALID_MASK;
-					}
-					else
-					{
-						/*	Otherwise, set all queue as WFQ	*/
-						queueInfo[queueNum].flags = (queueInfo[queueNum].flags & (~QOS_TYPE_MASK)) | QOS_TYPE_WFQ | QOS_VALID_MASK;
-					}
-
-					while (cl && cl->level != TC_HTB_MAXDEPTH - 1)
-					{
-						cl = cl->parent;
-					}
-
-					if (cl && (cl->level == TC_HTB_MAXDEPTH - 1))
-					{
-						int newRoot;
-
-						newRoot = 1;
-						for (idx = 0; idx < topClassNum; idx++)
-						{
-							if (classHandle[idx]->common.classid == cl->common.classid)
-							{
-								newRoot = 0;
-								break;
-							}
-						}
-
-						if (newRoot)
-						{
-							classHandle[topClassNum] = cl;
-							topClassNum++;
-						}
-					}
-				}
-				queueNum++;
-			}
-		}
-		spin_unlock_bh(qdisc_lock(txq_root));
-	}
-
-	if (topClassNum == 0)
-	{
-		rtl865x_qosFlushBandwidth(dev->name);
-		rtl865x_closeQos(dev->name);
-	}
-	else
-	{
-		int32		i;
-		int32		portBandwidth, tmpPortBandwidth;
-		int32		totalRnum;
-		int32		totalGbandwidth, totalRbandwidth, calcRbandwidth;
-
-		portBandwidth = 0;
-		for (idx = 0; idx < topClassNum; idx++)
-		{
-			{
-				#if defined(CONFIG_RTD_1295_HWNAT)
-				portBandwidth += (classHandle[idx]->ceil.rate_bytes_ps * 8);
-				#else /* CONFIG_RTD_1295_HWNAT */
-				portBandwidth += (classHandle[idx]->ceil.rate_bps);
-				#endif /* CONFIG_RTD_1295_HWNAT */
-			}
-		}
-
-		/*	Do port bandwidth adjust here		*/
-		tmpPortBandwidth = portBandwidth + (BANDWIDTH_GAP_FOR_PORT);
-#if 0
-		tmpPortBandwidth = portBandwidth << 3;
-		tmpPortBandwidth += tmpPortBandwidth >> 3;
-		tmpPortBandwidth -= tmpPortBandwidth >> 5;
-		if (tmpPortBandwidth > 0x200000)
-			tmpPortBandwidth = ((tmpPortBandwidth / 1000) << 10);
-		else
-			tmpPortBandwidth = ((tmpPortBandwidth << 10) / 1000);
-#endif
-
-		/////////////////////////////////////////////////////////////////////////////
-		//Patch for qos: to improve no-match rule throughput especially for low speed(~500kbps)
-		//tmpPortBandwidth+=192000;	//Added 192kbps
-		/////////////////////////////////////////////////////////////////////////////
-
-		rtl865x_qosSetBandwidth(dev->name, tmpPortBandwidth);
-
-		totalGbandwidth = totalRbandwidth = totalRnum = 0;
-
-		/*	Check for G type queue's total bandwidth	*/
-		for(i=0; i<queueNum; i++)
-		{
-			if((queueInfo[i].ceil==portBandwidth)
-				&& queueInfo[i].bandwidth<queueInfo[i].ceil)	/* change bandwidth granulity from bps(bit/sec) to Bps(byte/sec) */
-			{
-				/*totalGbandwidth += ((queueInfo[i].bandwidth<<3)/1000)<<7;*/
-				totalGbandwidth += ((queueInfo[i].bandwidth));
-			}
-			else if (queueInfo[i].ceil < portBandwidth)
-			{
-				/*totalRbandwidth += ((queueInfo[i].ceil<<3)/1000)<<7;*/
-				totalRbandwidth += ((queueInfo[i].ceil));
-				totalRnum++;
-
-				tmpBandwidth1 = queueInfo[i].ceil;
-
-				tmpBandwidth2 = (tmpBandwidth1 >> EGRESS_BANDWIDTH_GRANULARITY_BYTELEN) << EGRESS_BANDWIDTH_GRANULARITY_BYTELEN;
-				if (tmpBandwidth1 - tmpBandwidth2 > (EGRESS_BANDWIDTH_GRANULARITY >> 1))
-				{
-					queueInfo[i].bandwidth = ((queueInfo[i].bandwidth >> EGRESS_BANDWIDTH_GRANULARITY_BYTELEN) + 1) << EGRESS_BANDWIDTH_GRANULARITY_BYTELEN;
-					queueInfo[i].ceil = ((queueInfo[i].ceil >> EGRESS_BANDWIDTH_GRANULARITY_BYTELEN) + 1) << EGRESS_BANDWIDTH_GRANULARITY_BYTELEN;
-				}
-				else
-				{
-					queueInfo[i].bandwidth = (queueInfo[i].ceil >> EGRESS_BANDWIDTH_GRANULARITY_BYTELEN) << EGRESS_BANDWIDTH_GRANULARITY_BYTELEN;
-					queueInfo[i].ceil = (queueInfo[i].ceil >> EGRESS_BANDWIDTH_GRANULARITY_BYTELEN) << EGRESS_BANDWIDTH_GRANULARITY_BYTELEN;
-				}
-
-				if (queueInfo[i].bandwidth < EGRESS_BANDWIDTH_GRANULARITY)	/* 8K bytes == 64K bits	*/
-					queueInfo[i].bandwidth = queueInfo[i].ceil = EGRESS_BANDWIDTH_GRANULARITY;
-			}
-			/*
-			else
-			{
-				printk("Set output queue error: Queue bandwidth[%d]bps > Port bandwidth[%d]bps\n",
-					queueInfo[i].ceil, portBandwidth);
-			}
-			*/
-		}
-
-		if (totalRbandwidth != 0 && ((totalGbandwidth + totalRbandwidth) > portBandwidth))
-		{
-			/*	Should reduce the R type bandwidth	*/
-			calcRbandwidth = portBandwidth - totalGbandwidth;
-
-#if 0
-			for(i = 0; i < queueNum; i++)
-			{
-				if (queueInfo[i].bandwidth == queueInfo[i].ceil)
-				{
-					queueInfo[i].ceil = queueInfo[i].bandwidth
-						= queueInfo[i].bandwidth - (totalRbandwidth - calcRbandwidth) / totalRnum;
-				}
-			}
-#endif
-		}
-
-		for (i = 0; i < queueNum; i++)
-		{
-			if (queueInfo[i].bandwidth != queueInfo[i].ceil)
-			{
-				/*	Do queue bandwidth adjust here		*/
-				queueInfo[i].ceil += queueInfo[i].ceil >> 3;
-				#if 0
-				if (queueInfo[i].ceil > 0x200000)
-					queueInfo[i].ceil = ((queueInfo[i].ceil / 1000) << 10);
-				else
-					queueInfo[i].ceil = ((queueInfo[i].ceil << 10) / 1000);
-				#endif
-				if (queueInfo[i].ceil > FULL_SPEED)
-					queueInfo[i].ceil = FULL_SPEED;
-			}
-			else
-			{
-				/*	str	*/
-				#if 0
-				if (queueInfo[i].ceil > 1000000)
-					queueInfo[i].ceil = queueInfo[i].bandwidth = (queueInfo[i].ceil / 1000000) << 20;
-				else if (queueInfo[i].ceil>1000)
-					queueInfo[i].ceil = queueInfo[i].bandwidth = (queueInfo[i].ceil / 1000) << 10;
-				#endif
-				if (queueInfo[i].ceil > FULL_SPEED)
-					queueInfo[i].ceil = queueInfo[i].bandwidth = FULL_SPEED;
-			}
-		}
-
-		rtl865x_qosProcessQueue(dev->name, queueInfo);
-	}
-
-	return 0;
-}
-
-static int htb_getClassIDByMark(__u32 mark, __u32 *classID, struct Qdisc *sch)
-{
-	struct htb_sched	*q = qdisc_priv(sch);
-	struct tcf_result	res;
-	struct tcf_proto	*tcf;
-
-	tcf = q->filter_list;
-	if (tcf)
-	{
-		if ((tc_classifyMark(mark, tcf, &res)) == SUCCESS)
-		{
-			*classID = res.classid;
-			return SUCCESS;
-		}
-
-		/* we have got inner class; apply inner filter chain */
-	}
-
-	return FAILED;
-}
-
-#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
-
 static void htb_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 {
 	struct htb_sched *q = qdisc_priv(sch);
@@ -1887,10 +1593,6 @@ static const struct Qdisc_class_ops htb_class_ops = {
 	.unbind_tcf	=	htb_unbind_filter,
 	.dump		=	htb_dump_class,
 	.dump_stats	=	htb_dump_class_stats,
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-	.syncHwQueue	=	htb_syncHwQueue,
-	.getHandleByKey	=	htb_getClassIDByMark,
-#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
 };
 
 static struct Qdisc_ops htb_qdisc_ops __read_mostly = {
@@ -1900,7 +1602,6 @@ static struct Qdisc_ops htb_qdisc_ops __read_mostly = {
 	.enqueue	=	htb_enqueue,
 	.dequeue	=	htb_dequeue,
 	.peek		=	qdisc_peek_dequeued,
-	.drop		=	htb_drop,
 	.init		=	htb_init,
 	.reset		=	htb_reset,
 	.destroy	=	htb_destroy,

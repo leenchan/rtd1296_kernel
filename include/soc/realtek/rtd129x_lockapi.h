@@ -1,3 +1,14 @@
+/*
+ * rtd129x_lockapi.h
+ *
+ * Copyright (c) 2017 Realtek Semiconductor Corp.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ */
+
 #ifndef _RTD129x_LOCKAPI_H_
 #define _RTD129x_LOCKAPI_H_
 
@@ -12,7 +23,7 @@
 #define _at_(X) X " " LINE2STR(__LINE__)
 
 #if defined(EN_SPINLOCK) || defined(EN_SPINLOCK_IRQ) || defined(EN_SEMAPHORE) || defined(EN_MUTEX)
-
+#ifdef CONFIG_ARCH_RTD129x
     #define LOCKAPI_EN
     #define rtk_lockapi_trylock(X,Y)         _rtk_lockapi_trylock(&X,Y)
     #define rtk_lockapi_lock(X,Y)            _rtk_lockapi_lock(&X,Y)
@@ -25,6 +36,19 @@
     #define rtk_lockapi_trylock3(X,Y,Z)        _rtk_lockapi_trylock3(&X,Y,Z)
     #define rtk_lockapi_lock3(X,Y,Z)         _rtk_lockapi_lock3(&X,Y,Z)
     #define rtk_lockapi_unlock3(X,Y,Z)       _rtk_lockapi_unlock3(X,Y,Z)
+#else
+    #define rtk_lockapi_trylock(X,Y)
+    #define rtk_lockapi_lock(X,Y)
+    #define rtk_lockapi_unlock(X,Y)
+
+    #define rtk_lockapi_trylock2(X,Y)
+    #define rtk_lockapi_lock2(X,Y)
+    #define rtk_lockapi_unlock2(X,Y)
+
+    #define rtk_lockapi_trylock3(X,Y,Z)
+    #define rtk_lockapi_lock3(X,Y,Z)
+    #define rtk_lockapi_unlock3(X,Y,Z)
+#endif /* CONFIG_ARCH_RTD129x */
 #else
     #define rtk_lockapi_trylock(X,Y)
     #define rtk_lockapi_lock(X,Y)

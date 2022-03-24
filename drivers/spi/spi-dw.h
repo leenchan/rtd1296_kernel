@@ -31,7 +31,7 @@
 #define DW_SPI_IDR			0x58
 #define DW_SPI_VERSION			0x5c
 #define DW_SPI_DR			0x60
-
+#define DW_SPI_RX_SAMPLE_DLY		0xf0
 /* Bit fields in CTRLR0 */
 #define SPI_DFS_OFFSET			0
 
@@ -123,6 +123,7 @@ struct dw_spi {
 	u8			n_bytes;	/* current is a 1/2 bytes op */
 	u32			dma_width;
 	irqreturn_t		(*transfer_handler)(struct dw_spi *dws);
+	u32			current_freq;	/* frequency in hz */
 
 	/* DMA info */
 	int			dma_inited;
@@ -130,7 +131,7 @@ struct dw_spi {
 	struct dma_chan		*rxchan;
 	unsigned long		dma_chan_busy;
 	dma_addr_t		dma_addr; /* phy address of the Data register */
-	struct dw_spi_dma_ops	*dma_ops;
+	const struct dw_spi_dma_ops *dma_ops;
 	void			*dma_tx;
 	void			*dma_rx;
 
@@ -222,7 +223,15 @@ static inline void spi_reset_chip(struct dw_spi *dws)
 {
 	spi_enable_chip(dws, 0);
 	spi_mask_intr(dws, 0xff);
+	/* Set Rx Sample Delay for greenpeak 0xf*/
+        dw_writel(dws, DW_SPI_RX_SAMPLE_DLY, 0xf);	
 	spi_enable_chip(dws, 1);
+}
+
+static inline void spi_shutdown_chip(struct dw_spi *dws)
+{
+	spi_enable_chip(dws, 0);
+	spi_set_clk(dws, 0);
 }
 
 /*

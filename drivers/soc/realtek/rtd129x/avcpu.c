@@ -22,19 +22,20 @@
 #include <linux/sched.h>
 #include <linux/platform_device.h>
 #include <linux/mtd/mtd.h>
+#include <linux/delay.h>
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
 #include <asm/io.h>
 #include <soc/realtek/memory.h>
 #include <soc/realtek/rtk_ipc_shm.h>
+#include <soc/realtek/avcpu.h>
 
-#include "avcpu.h"
 
 #define CRT_BASE	0x98000000
 #define EMMC_FW_TABLE_OFFSET  0x620000
 
 #define HEADER_OFFSET         EMMC_FW_TABLE_OFFSET//0x2000000
-#define EMMC_BLOCK_SIZE       (PAGE_SIZE / 8)
+#define EMMC_BLOCK_SIZE       (0x200)
 
 #define MIPS_KSEG0BASE 0x80000000
 
@@ -80,13 +81,17 @@ static struct platform_driver avcpu_device_driver = {
     },
 };
 
+#ifdef CONFIG_RTK_XEN_SUPPORT
+extern void rtk_xen_acpu_notify(int state);
+#endif //CONFIG_RTK_XEN_SUPPORT
+
 static int avcpu_ipc_shm_reset(void)
 {
     int ret = 0;
-    struct RTK119X_ipc_shm old_shm = {0};
-    struct RTK119X_ipc_shm new_shm = {0};
+    struct rtk_ipc_shm old_shm = {0};
+    struct rtk_ipc_shm new_shm = {0};
 
-    memcpy(&old_shm, AVCPU_IPC_SHM, sizeof(struct RTK119X_ipc_shm));
+    memcpy(&old_shm, AVCPU_IPC_SHM, sizeof(struct rtk_ipc_shm));
 
     /* start to copy some static variable from old shm */
     new_shm.sys_assign_serial = old_shm.sys_assign_serial;
@@ -94,7 +99,7 @@ static int avcpu_ipc_shm_reset(void)
     new_shm.u_boot_version_magic = old_shm.u_boot_version_magic;
     new_shm.u_boot_version_info = old_shm.u_boot_version_info;
 
-    memcpy_toio(AVCPU_IPC_SHM, &new_shm, sizeof(struct RTK119X_ipc_shm));
+    memcpy_toio(AVCPU_IPC_SHM, &new_shm, sizeof(struct rtk_ipc_shm));
 
     return ret;
 }
@@ -165,22 +170,37 @@ static int avcpu_stop(void)
 {
     unsigned int mask = 0;
 
+#ifdef CONFIG_RTK_XEN_SUPPORT
+    // Notify ACPU if not in idle state
+    struct rtk_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
+    unsigned int reg = __be32_to_cpu(readl(&ipc->xen_domu_boot_st));
+
+    if (XEN_DOMU_BOOT_ST_AUTHOR_GET(reg) != XEN_DOMU_BOOT_ST_AUTHOR_SCPU ||
+        XEN_DOMU_BOOT_ST_STATE_GET(reg) != XEN_DOMU_BOOT_ST_STATE_SCPU_WAIT_DONE) {
+        pr_info("Notify ACPU enter idle before take it off...\n");
+        rtk_xen_acpu_notify(XEN_DOMU_BOOT_ST_STATE_SCPU_POWOFF);
+    }
+#endif //CONFIG_RTK_XEN_SUPPORT
+
     blocking_notifier_call_chain(&avcpu_chain_head, AVCPU_RESET_PREPARE, NULL);
 
     writel(0x4, crt_base + 0x264); //PLL_VODMA2
     writel(0x0, crt_base + 0x24);  //DISP_PLL_DIV2
     writel(0x0, crt_base + 0x190); //PLL_HDMI
+    wmb();
 
     /* Turn off CLK */
     writel(readl(crt_base + 0x10) & ~BIT(4), crt_base + 0x10); //CLK : ACPU
     mask = ~(unsigned int)(BIT(17) | BIT(15) | BIT(14) | BIT(8));
     writel(readl(crt_base + 0x0c) & mask, crt_base + 0x0c); //CLK : SE, VO, TVE, HDMI
+    wmb();
 
     /* Hold RST */
     writel(readl(crt_base + 0x04) & ~BIT(0), crt_base + 0x04); //RST : ACPU
     mask = ~(unsigned int)(BIT(28) | BIT(22) | BIT(20) | BIT(19) | BIT(12));
     writel(readl(crt_base) & mask, crt_base); // RST : AE, SE, VO, TVE, HDMI
     writel(readl(crt_base + 0x50) & ~BIT(15), crt_base + 0x50); //RST : DISP
+    wmb();
     pr_info("\033[33mstop avcpu\033[m\n");
     return 0;
 }
@@ -188,9 +208,23 @@ static int avcpu_stop(void)
 static int avcpu_start(void)
 {
     writel(readl(crt_base + 0x04) | BIT(0), crt_base + 0x04);
+    wmb();
+    mdelay(50);
     writel(readl(crt_base + 0x10) | BIT(4), crt_base + 0x10);
+    wmb();
     pr_info("\033[33mstart avcpu\033[m\n");
     return 0;
+}
+
+int avcpu_alive(void)
+{
+    int ret = 0;
+
+    ret = !!(readl(crt_base + 0x04) & BIT(0));
+    ret &= !!(readl(crt_base + 0x10) & BIT(4));
+    ret &= !!(readl(crt_base + 0x0c) & BIT(15));
+
+    return ret;
 }
 
 long avcpu_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
@@ -222,6 +256,12 @@ long avcpu_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
                 //pr_debug("\033[33m%s:%d status:%d\033[m\n", __func__, __LINE__, avpriv.status);
                 break;
             }
+        case AVCPU_IOCGALIVE:
+            if(!avcpu_alive()) {
+                pr_info("AVCPU not up!\n");
+                ret = -1;
+            }
+            break;
         default:
             ret = -EINVAL;
             break;
@@ -326,6 +366,51 @@ static int read_emmc_data(unsigned int blk_offset, size_t size, void *buf)
     return ret;
 }
 
+int read_emmc_data_to_ioremap(unsigned long offset, unsigned int size, void  __iomem *ioptr)
+{
+	int ret = 0;
+	void *buf = NULL;
+	unsigned long read_end = offset + size;
+	unsigned int read_size = 0;
+	unsigned int read_left = 0;
+
+	if (!size) {
+		pr_err("bad size\n");
+		return -EINVAL;
+	}
+
+	if (!ioptr) {
+		pr_err("bad ioptr\n");
+		return -EINVAL;
+	}
+
+	if (!(buf = (void*)__get_free_page(GFP_KERNEL))) {
+		pr_err("couldn't allocate page\n");
+		return -ENOMEM;
+	}
+
+	/* only read 1 PAGE in each iteration since mmc_fast_rw only
+	   supports physical-continuous buffer */
+	do {
+		read_left = read_end - offset;
+		if (read_left >= PAGE_SIZE)
+			read_size = PAGE_SIZE;
+		else
+			read_size = ALIGN(read_left, EMMC_BLOCK_SIZE);
+
+		ret = read_emmc_data(offset / EMMC_BLOCK_SIZE, read_size, buf);
+		if (ret < 0)
+			goto out;
+
+		memcpy_toio(ioptr, buf, PAGE_SIZE);
+		offset += PAGE_SIZE;
+		ioptr += PAGE_SIZE;
+	} while (offset < read_end);
+out:
+	free_page((unsigned long)buf);
+	return ret;
+}
+
 unsigned long mips_to_arm(unsigned long addr)
 {
     return (unsigned long)__va(addr & 0x1fffffff);
@@ -388,6 +473,31 @@ void dump_fw_desc_entry_v1(fw_desc_entry_v1_t *fw_entry)
         printk("[ERR] %s:%d fw_entry is NULL.\n", __FUNCTION__, __LINE__);
     }
 }
+
+void dump_fw_desc_entry_v2(fw_desc_entry_v2_t *fw_entry)
+{
+    int i;
+
+    if (fw_entry != NULL) {
+        printf("## Fw Desc Entry ##############################\n");
+        printf("## fw_entry                        = 0x%08x\n", fw_entry);
+        printf("## fw_entry->type                  = 0x%08x\n", fw_entry->type);
+        printf("## fw_entry->lzma                  = 0x%08x\n", fw_entry->lzma);
+        printf("## fw_entry->ro                    = 0x%08x\n", fw_entry->ro);
+        printf("## fw_entry->version               = 0x%08x\n", fw_entry->version);
+        printf("## fw_entry->target_addr           = 0x%08x\n", fw_entry->target_addr);
+        printf("## fw_entry->offset                = 0x%08lx\n", fw_entry->offset);
+        printf("## fw_entry->length                = 0x%08x\n", fw_entry->length);
+        printf("## fw_entry->paddings              = 0x%08x\n", fw_entry->paddings);
+        printf("## fw_entry->sha_hash              = ");
+        for (i = 0 ; i < 32 ; i++)
+            printf("%02x", fw_entry->sha_hash[i]);
+        printf("\n");
+        printf("###############################################\n\n");
+    } else {
+        printf("[ERR] %s:%d fw_entry is NULL.\n", __FUNCTION__, __LINE__);
+    }
+}
 #endif
 
 
@@ -395,31 +505,33 @@ int load_av_from_emmc(char *audio_image, unsigned int audio_start,
         char *video_image_1, unsigned int video_start_1, char *video_image_2, unsigned int video_start_2)
 {
     fw_desc_table_v1_t *fw_desc_table_v1;
-    fw_desc_entry_v1_t *fw_entry, *fw_entry_v1;
-    fw_desc_entry_v1_t *audio_fw_entry = NULL;
-    fw_desc_entry_v11_t *fw_entry_v11;
-    fw_desc_entry_v21_t *fw_entry_v21;
+    void *fw_entry = NULL, *audio_fw_entry = NULL, *fw_desc_ptr = NULL;
+    //fw_desc_entry_v1_t *fw_entry_v1;
+    //fw_desc_entry_v11_t *fw_entry_v11;
+    //fw_desc_entry_v21_t *fw_entry_v21;
+    //fw_desc_entry_v2_t *fw_entry_v2;
+    //fw_desc_entry_v12_t *fw_entry_v12;
+    //fw_desc_entry_v22_t *fw_entry_v22;
     part_desc_entry_v1_t *part_entry;
     unsigned int part_count = 0;
     unsigned long fw_desc_table_base = 0;
-    unsigned int fw_total_len = 0;
-    unsigned int fw_total_paddings = 0;
     unsigned int fw_entry_num = 0;
+    unsigned int fw_entry_size = 0;
+    unsigned char fw_desc_version;
     //unsigned int eMMC_bootcode_area_size = 0x220000;        // eMMC bootcode area size
     unsigned int eMMC_fw_desc_table_start = 0x620000;
     unsigned char *ptr = NULL;
     int i, ret = 0;
-    unsigned int __iomem *afwPtr = ioremap(ACPU_FIREWARE_PHYS, ACPU_FIREWARE_SIZE);
-
-    if (!afwPtr) {
-        pr_err("avcpu: ioremap fail for ACPU FW region!\n");
-        return -EFAULT;
-    }
+    unsigned int __iomem *afwPtr = NULL;
+    /* common data in both V1/V2 */
+    unsigned char entry_type = 0;
+    unsigned int entry_target_addr = 0, audio_fw_target_addr = 0;
+    u64 entry_offset = 0, audio_fw_offset = 0;
+    unsigned int entry_length = 0, audio_fw_length = 0;
 
     fw_desc_table_base = __get_free_page(GFP_KERNEL);
     if (!fw_desc_table_base) {
         pr_info("avcpu: can not allocate enough memory...\n");
-	iounmap(afwPtr);
         return -ENOMEM;
     }
 
@@ -433,36 +545,56 @@ int load_av_from_emmc(char *audio_image, unsigned int audio_start,
 
     printk("avcpu: fw_desc_table_v1->signature = %s \n", fw_desc_table_v1->signature);
     printk("avcpu: fw_desc_table_v1->version = 0x%x \n", fw_desc_table_v1->version);
-
-    fw_desc_table_v1->checksum = BE32_TO_CPU(fw_desc_table_v1->checksum);
-    fw_desc_table_v1->paddings = BE32_TO_CPU(fw_desc_table_v1->paddings);
-    fw_desc_table_v1->part_list_len = BE32_TO_CPU(fw_desc_table_v1->part_list_len);
-    fw_desc_table_v1->fw_list_len = BE32_TO_CPU(fw_desc_table_v1->fw_list_len);
-
     printk("avcpu: fw_desc_table_v1->paddings = %d!!\n", fw_desc_table_v1->paddings);
+    fw_desc_version = fw_desc_table_v1->version;
 #ifdef DUBUG_FW_DESC_TABLE
     dump_fw_desc_table_v1(fw_desc_table_v1);
 #endif
 
     /* Check partition existence */
-    if (fw_desc_table_v1->part_list_len == 0)
-    {
+    if (fw_desc_table_v1->part_list_len == 0) {
         printk("[ERR] %s:No partition found!\n", __FUNCTION__);
-        //return RTK_PLAT_ERR_PARSE_FW_DESC;
-    }
-    else
-    {
+    } else {
         part_count = fw_desc_table_v1->part_list_len / sizeof(part_desc_entry_v1_t);
     }
 
     printk("avcpu: part_count = %d\n", part_count);
-    fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v1_t);
+
+    switch (fw_desc_version) {
+        case FW_DESC_TABLE_V1_T_VERSION_1:
+            fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v1_t);
+            fw_entry_size = sizeof(fw_desc_entry_v1_t);
+            break;
+        case FW_DESC_TABLE_V1_T_VERSION_11:
+            fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v11_t);
+            fw_entry_size = sizeof(fw_desc_entry_v11_t);
+            break;
+        case FW_DESC_TABLE_V1_T_VERSION_21:
+            fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v21_t);
+            fw_entry_size = sizeof(fw_desc_entry_v21_t);
+            break;
+        case FW_DESC_TABLE_V2_T_VERSION_2:
+            fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v2_t);
+            fw_entry_size = sizeof(fw_desc_entry_v2_t);
+            break;
+        case FW_DESC_TABLE_V2_T_VERSION_12:
+            fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v12_t);
+            fw_entry_size = sizeof(fw_desc_entry_v12_t);
+            break;
+        case FW_DESC_TABLE_V2_T_VERSION_22:
+            fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v22_t);
+            fw_entry_size = sizeof(fw_desc_entry_v22_t);
+            break;
+        default:
+            printk("**** Error fw_desc_version 0x%x\n", fw_desc_version);
+            ret = RTK_PLAT_ERR_PARSE_FW_DESC;
+            goto out;
+    }
+
     printk("[INFO] fw desc table base: 0x%08x, count: %d\n", eMMC_fw_desc_table_start, fw_entry_num);
 
     part_entry = (part_desc_entry_v1_t *)((unsigned long)fw_desc_table_base + sizeof(fw_desc_table_v1_t));
-    fw_entry = (fw_desc_entry_v1_t *)((unsigned long)fw_desc_table_base +
-            sizeof(fw_desc_table_v1_t) +
-            fw_desc_table_v1->part_list_len);
+    fw_entry = (void*)((unsigned long)fw_desc_table_base + sizeof(fw_desc_table_v1_t) + fw_desc_table_v1->part_list_len);
 
     for (i = 0; i < part_count; i++)
     {
@@ -473,102 +605,33 @@ int load_av_from_emmc(char *audio_image, unsigned int audio_start,
 #endif
     }
 
-    fw_total_len = 0;
-    fw_total_paddings = 0;
-
     /* Parse firmware entries and compute fw_total_len */
     printk("@@@@ fw_desc_table_v1->version = 0x%.8x\n", fw_desc_table_v1->version);
-    switch (fw_desc_table_v1->version)
-    {
-        case FW_DESC_TABLE_V1_T_VERSION_1:
-            fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v1_t);
 
-            for (i = 0; i < fw_entry_num; i++)
-            {
-                fw_entry[i].version = BE32_TO_CPU(fw_entry[i].version);
-                fw_entry[i].target_addr = BE32_TO_CPU(fw_entry[i].target_addr);
-                fw_entry[i].offset = BE32_TO_CPU(fw_entry[i].offset) - eMMC_fw_desc_table_start;    /* offset from fw_desc_table_base */
-                fw_entry[i].length = BE32_TO_CPU(fw_entry[i].length);
-                fw_entry[i].paddings = BE32_TO_CPU(fw_entry[i].paddings);
-                fw_entry[i].checksum = BE32_TO_CPU(fw_entry[i].checksum);
+    for (i = 0 ; i < fw_entry_num ; i++) {
+        fw_desc_ptr = (void*)fw_entry + (i * fw_entry_size);
+        FW_ENTRY_MEMBER_GET(entry_type, fw_desc_ptr, type, fw_desc_version);
+        FW_ENTRY_MEMBER_GET(entry_target_addr, fw_desc_ptr, target_addr, fw_desc_version);
+        FW_ENTRY_MEMBER_GET(entry_offset, fw_desc_ptr, offset, fw_desc_version);
+        FW_ENTRY_MEMBER_GET(entry_length, fw_desc_ptr, length, fw_desc_version);
 
-                printk("[OK] fw_entry[%d] type=%d offset = 0x%x length = 0x%x (paddings = 0x%x)\n",
-                        i, fw_entry[i].type, fw_entry[i].offset, fw_entry[i].length, fw_entry[i].paddings);
+        printk("[OK] fw_entry[%d], type=%d, offset = 0x%lx, length = 0x%x, target_addr:0x%x\n",
+                i, entry_type, (unsigned long)entry_offset, entry_length, entry_target_addr);
 
-                if (fw_entry[i].type == FW_TYPE_AUDIO)
-                {
-                    audio_fw_entry = &fw_entry[i];
-                    printk("##### got fw_entry[%d].type == FW_TYPE_AUDIO ###\n", i);
-                    printk("avcpu: Audio FW found\n");
-                }
-
+        if (entry_type == FW_TYPE_AUDIO) {
+            audio_fw_entry = fw_desc_ptr;
+            audio_fw_target_addr = entry_target_addr;
+            audio_fw_offset = entry_offset;
+            audio_fw_length = entry_length;
+            printk("##### got fw_entry[%d].type == FW_TYPE_AUDIO ###\n", i);
+            printk("avcpu: Audio FW found\n");
+        }
 #ifdef DUBUG_FW_DESC_TABLE
-                dump_fw_desc_entry_v1(&(fw_entry[i]));
-#endif
-
-                fw_total_len += fw_entry[i].length;
-                fw_total_paddings += fw_entry[i].paddings;
-            }
-
-
-            break;
-
-        case FW_DESC_TABLE_V1_T_VERSION_11:
-            fw_entry_v11 = (fw_desc_entry_v11_t*)fw_entry;
-            fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v11_t);
-            for(i = 0; i < fw_entry_num; i++) {
-                fw_entry_v1 = &fw_entry_v11[i].v1;
-                fw_entry_v1->version = BE32_TO_CPU(fw_entry_v1->version);
-                fw_entry_v1->target_addr = BE32_TO_CPU(fw_entry_v1->target_addr);
-                fw_entry_v1->offset = BE32_TO_CPU(fw_entry_v1->offset) - eMMC_fw_desc_table_start;  /* offset from fw_desc_table_base */
-                fw_entry_v1->length = BE32_TO_CPU(fw_entry_v1->length);
-                fw_entry_v1->paddings = BE32_TO_CPU(fw_entry_v1->paddings);
-                fw_entry_v1->checksum = BE32_TO_CPU(fw_entry_v1->checksum);
-
-                printk("[OK] fw_entry[%d] offset = 0x%x length = 0x%x (paddings = 0x%x) act_size = %d part_num = %d\n",
-                        i, fw_entry_v1->offset, fw_entry_v1->length, fw_entry_v1->paddings, fw_entry_v11[i].act_size, fw_entry_v11[i].part_num);
-
-#ifdef DUBUG_FW_DESC_TABLE
-                dump_fw_desc_entry_v1(&(fw_entry[i]));
-#endif
-
-                fw_total_len += fw_entry_v1->length;
-                fw_total_paddings += fw_entry_v1->paddings;
-            }
-
-
-            break;
-
-        case FW_DESC_TABLE_V1_T_VERSION_21:
-            fw_entry_v21 = (fw_desc_entry_v21_t*)fw_entry;
-            fw_entry_num = fw_desc_table_v1->fw_list_len / sizeof(fw_desc_entry_v21_t);
-            for(i = 0; i < fw_entry_num; i++) {
-                fw_entry_v1 = &fw_entry_v21[i].v1;
-                fw_entry_v1->version = BE32_TO_CPU(fw_entry_v1->version);
-                fw_entry_v1->target_addr = BE32_TO_CPU(fw_entry_v1->target_addr);
-                fw_entry_v1->offset = BE32_TO_CPU(fw_entry_v1->offset) - eMMC_fw_desc_table_start;  /* offset from fw_desc_table_base */
-                fw_entry_v1->length = BE32_TO_CPU(fw_entry_v1->length);
-                fw_entry_v1->paddings = BE32_TO_CPU(fw_entry_v1->paddings);
-                fw_entry_v1->checksum = BE32_TO_CPU(fw_entry_v1->checksum);
-
-                printk("[OK] fw_entry[%d] offset = 0x%x length = 0x%x (paddings = 0x%x) act_size = %d part_num = %d\n",
-                        i, fw_entry_v1->offset, fw_entry_v1->length, fw_entry_v1->paddings, fw_entry_v21[i].act_size, fw_entry_v21[i].part_num);
-
-#ifdef DUBUG_FW_DESC_TABLE
-                dump_fw_desc_entry_v1(&(fw_entry[i]));
-#endif
-
-                fw_total_len += fw_entry_v1->length;
-                fw_total_paddings += fw_entry_v1->paddings;
-            }
-
-
-            break;
-
-        default:
-            printk("[ERR] %s:unknown version:%d\n", __FUNCTION__, fw_desc_table_v1->version);
-            ret = RTK_PLAT_ERR_PARSE_FW_DESC;
-            goto out;
+        if (FW_DESC_BASE_VERSION(fw_desc_version) == 1)
+            dump_fw_desc_entry_v1((fw_desc_entry_v1_t*)fw_desc_ptr);
+        else if (FW_DESC_BASE_VERSION(fw_desc_version) == 2)
+            dump_fw_desc_entry_v2((fw_desc_entry_v2_t*)fw_desc_ptr);
+#endif //DUBUG_FW_DESC_TABLE
     }
 
     printk("====> audio_image=0x%.8lx audio_start=0x%.8x\n", (unsigned long)audio_image, audio_start);
@@ -584,12 +647,12 @@ int load_av_from_emmc(char *audio_image, unsigned int audio_start,
             ret = -ENODEV;
             goto out;
         }
-        printk("avcpu: audio_fw_entry->offset = 0x%x \n", audio_fw_entry->offset);
-        printk("avcpu: audio_fw_entry->length = 0x%x \n", audio_fw_entry->length);
-        printk("avcpu: audio_fw_entry->target_addr = 0x%x \n", audio_fw_entry->target_addr);
+        printk("avcpu: audio_fw_entry->offset = 0x%lx \n", (unsigned long)audio_fw_offset);
+        printk("avcpu: audio_fw_entry->length = 0x%x \n", audio_fw_length);
+        printk("avcpu: audio_fw_entry->target_addr = 0x%x \n", audio_fw_target_addr);
 
         // currently we only support align access...
-        if (audio_fw_entry->offset & (EMMC_BLOCK_SIZE - 1))
+        if (audio_fw_offset & (EMMC_BLOCK_SIZE - 1))
             BUG();
 
 #ifdef CONFIG_RTK_IPCSHM_RESET // perform IPC_SHM reset before setting entry value
@@ -599,18 +662,27 @@ int load_av_from_emmc(char *audio_image, unsigned int audio_start,
            goto out;
        }
 #endif
-        writel(CPU_TO_BE32(audio_fw_entry->target_addr | MIPS_KSEG0BASE), rpc_base + 0xe0);
+        writel(CPU_TO_BE32(audio_fw_target_addr | MIPS_KSEG0BASE), rpc_base + 0xe0);
         printk("audio entry value: %08x \n", *((unsigned int *)(rpc_base + 0xe0)));
 
-        audio_fw_entry->target_addr = audio_fw_entry->target_addr;
+        if (!(afwPtr = ioremap(audio_fw_target_addr, audio_fw_length))) {
+            pr_err("avcpu: ioremap fail for ACPU FW region!\n");
+            ret = -EFAULT;
+            goto out;
+        }
 
-        ret = read_emmc_data((audio_fw_entry->offset+eMMC_fw_desc_table_start) / EMMC_BLOCK_SIZE,
-                audio_fw_entry->length, (void *)(afwPtr));
+	ret = read_emmc_data_to_ioremap(audio_fw_offset, audio_fw_length, (void *)(afwPtr));
 
         if (ret < 0)
             goto out;
-        printk("ret: %lx length: %x \n", ret * EMMC_BLOCK_SIZE, audio_fw_entry->length);
 
+        printk("ret: %x length: %x \n", ret * EMMC_BLOCK_SIZE, audio_fw_length);
+
+        if (FW_DESC_EXT_VERSION(fw_desc_version) != 0) {
+            printk("%s, extend version 0x%x, not supported YET!!\n", __func__, FW_DESC_EXT_VERSION(fw_desc_version));
+            ret = RTK_PLAT_ERR_PARSE_FW_DESC;
+            goto out;
+        }
         //dmac_flush_range((void *)afwPtr, audio_fw_entry->length);
         //outer_flush_range(afwPtr, audio_fw_entry->length);
         // flush the data cache...
@@ -624,7 +696,9 @@ int load_av_from_emmc(char *audio_image, unsigned int audio_start,
 
 out:
     free_page(fw_desc_table_base);
-    iounmap(afwPtr);
+
+    if (afwPtr)
+        iounmap(afwPtr);
 
     return ret;
 }

@@ -25,14 +25,13 @@
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
-
-#include <asm/uaccess.h>
-#include <asm/io.h>
+#include <linux/uaccess.h>
+#include <linux/io.h>
 #include <asm/system_misc.h>
 #include <asm/atomic.h>
 
 #include <soc/realtek/rtd129x_lockapi.h>
-#include <soc/realtek/rtd129x_cpu.h>
+#include <soc/realtek/rtk_cpu.h>
 
 static long locakapi_lcounter;
 static int locakapi_counter;
@@ -47,7 +46,9 @@ spinlock_t lockapi_slock;
 //static int lockapi_flags;
 static DEFINE_MUTEX(lockapi_mutex);
 
-static atomic_t lockapi_atom= ATOMIC_INIT(0);
+#if 0 /* defined but not used */
+static atomic_t lockapi_atom = ATOMIC_INIT(0);
+#endif
 
 static struct device *myproc_lockapi_dev;
 static char caller_name1[MAX_LOG_MSG_LEN];
@@ -752,7 +753,7 @@ void debug_lockapi_entry( int mode, unsigned int refloop, unsigned int nop_loop 
 			debug_lockapi_lock(&flags,"_");
 		}
 		end_jiffies = jiffies;
-		printk(KERN_ERR "end, %lld, %lld in loop %d, nop loop %lld\n", start_jiffies, end_jiffies, refloop, debug_nop_count);
+		printk(KERN_ERR "end, %lud, %lud in loop %d, nop loop %d\n", start_jiffies, end_jiffies, refloop, debug_nop_count);
 	}
 	if( mode == 1 ) {
 		looptest = refloop;
@@ -763,7 +764,7 @@ void debug_lockapi_entry( int mode, unsigned int refloop, unsigned int nop_loop 
 			debug_lockapi_unlock(flags,"_");
 		}
 		end_jiffies = jiffies;
-		printk(KERN_ERR "end, %lld, %lld in loop %d, nop loop %lld\n", start_jiffies, end_jiffies, refloop, debug_nop_count);
+		printk(KERN_ERR "end, %lud, %lud in loop %d, nop loop %d\n", start_jiffies, end_jiffies, refloop, debug_nop_count);
 	}
 	if( mode == 2 ) {
 		looptest = refloop;
@@ -774,7 +775,7 @@ void debug_lockapi_entry( int mode, unsigned int refloop, unsigned int nop_loop 
 			debug_lockapi_unlock(flags,"_");
 		}
 		end_jiffies = jiffies;
-		printk(KERN_ERR "end, %lld, %lld in loop %d, nop loop %lld\n", start_jiffies, end_jiffies, refloop, debug_nop_count);
+		printk(KERN_ERR "end, %lud, %lud in loop %d, nop loop %d\n", start_jiffies, end_jiffies, refloop, debug_nop_count);
 	}
 }
 /*
@@ -900,10 +901,10 @@ myproc_lockapi_write(struct file *file, const char __user *buf, size_t count, lo
 	}
 
 	if( reminder_str_len ) {
-		input_nop_count = simple_strtol(ptr_input, ptr_input+reminder_str_len, 10);
+		input_nop_count = simple_strtol(ptr_input, &ptr_input + reminder_str_len, 10);
 		input_nop_count = input_nop_count * 10;
 	}
-	printk(KERN_ERR "****** %s %03d, mode %d, test_loop=%lld, nop count %d\n", __FUNCTION__, __LINE__, test_mode, test_loop, input_nop_count);
+	printk(KERN_ERR "****** %s %03d, mode %d, test_loop=%d, nop count %d\n", __FUNCTION__, __LINE__, test_mode, test_loop, input_nop_count);
 
 	debug_lockapi_entry(test_mode, test_loop, input_nop_count);
 

@@ -17,11 +17,6 @@
 #include "br_private.h"
 #include "br_private_stp.h"
 
-#if defined (CONFIG_RTL_STP) || defined(CONFIG_RTL_HW_STP)
-#include <net/rtl/rtl_nic.h>
-#include <net/rtl/rtk_stp.h>
-#endif
-
 /* called under bridge lock */
 static int br_is_designated_for_some_port(const struct net_bridge *br)
 {
@@ -45,7 +40,9 @@ static void br_hello_timer_expired(unsigned long arg)
 	if (br->dev->flags & IFF_UP) {
 		br_config_bpdu_generation(br);
 
-		mod_timer(&br->hello_timer, round_jiffies(jiffies + br->hello_time));
+		if (br->stp_enabled == BR_KERNEL_STP)
+			mod_timer(&br->hello_timer,
+				  round_jiffies(jiffies + br->hello_time));
 	}
 	spin_unlock(&br->lock);
 }
@@ -93,35 +90,14 @@ static void br_forward_delay_timer_expired(unsigned long arg)
 	spin_lock(&br->lock);
 	if (p->state == BR_STATE_LISTENING) {
 		br_set_state(p, BR_STATE_LEARNING);
-		#if defined (CONFIG_RTL_STP)
-		rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_LEARNING);
-		#endif
-
-		#if defined(CONFIG_RTL_HW_STP)
-		rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_LEARNING);
-		#endif
 		mod_timer(&p->forward_delay_timer,
 			  jiffies + br->forward_delay);
 	} else if (p->state == BR_STATE_LEARNING) {
 		br_set_state(p, BR_STATE_FORWARDING);
-		#if defined (CONFIG_RTL_STP)
-		rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_FORWARDING);
-		#endif
-
-		#if defined(CONFIG_RTL_HW_STP)
-		rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_FORWARDING);
-		#endif
-
-		#ifdef CONFIG_RTK_MESH
-		if (strstr(p->dev->name, "msh"))
-			br_signal_pathsel(p->br);
-		#endif
-
 		if (br_is_designated_for_some_port(br))
 			br_topology_change_detection(br);
 		netif_carrier_on(br->dev);
 	}
-	br_log_state(p);
 	rcu_read_lock();
 	br_ifinfo_notify(RTM_NEWLINK, p);
 	rcu_read_unlock();

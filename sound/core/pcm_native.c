@@ -36,22 +36,6 @@
 #include <sound/minors.h>
 #include <linux/uio.h>
 
-#ifdef RTK_TRACE_ALSA_EN
-#define RTK_TRACE_ALSA(format, ...) printk(KERN_ALERT format, ##__VA_ARGS__);
-#define RTK_TRACE_ALSA_SEC(sec, format, ...)    \
-{\
-    static long count = 0;\
-    if((jiffies - count) > HZ * sec)\
-    {\
-        count = jiffies;\
-        printk(KERN_ALERT format, ##__VA_ARGS__);\
-    }\
-}
-#else
-#define RTK_TRACE_ALSA(format, ...)
-#define RTK_TRACE_ALSA_SEC(sec, format, ...)
-#endif
-
 /*
  *  Compatibility
  */
@@ -514,6 +498,16 @@ static void snd_pcm_set_state(struct snd_pcm_substream *substream, int state)
 	snd_pcm_stream_unlock_irq(substream);
 }
 
+static inline void snd_pcm_timer_notify(struct snd_pcm_substream *substream,
+					int event)
+{
+#ifdef CONFIG_SND_PCM_TIMER
+	if (substream->timer)
+		snd_timer_notify(substream->timer, event,
+					&substream->runtime->trigger_tstamp);
+#endif
+}
+
 static int snd_pcm_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params)
 {
@@ -678,7 +672,8 @@ static int snd_pcm_sw_params(struct snd_pcm_substream *substream,
 	}
 	snd_pcm_stream_unlock_irq(substream);
 
-	if (params->tstamp_mode > SNDRV_PCM_TSTAMP_LAST)
+	if (params->tstamp_mode < 0 ||
+	    params->tstamp_mode > SNDRV_PCM_TSTAMP_LAST)
 		return -EINVAL;
 	if (params->proto >= SNDRV_PROTOCOL_VERSION(2, 0, 12) &&
 	    params->tstamp_type > SNDRV_PCM_TSTAMP_TYPE_LAST)
@@ -892,7 +887,7 @@ struct action_ops {
  *  Note: the stream state might be changed also on failure
  *  Note2: call with calling stream lock + link lock
  */
-static int snd_pcm_action_group(struct action_ops *ops,
+static int snd_pcm_action_group(const struct action_ops *ops,
 				struct snd_pcm_substream *substream,
 				int state, int do_lock)
 {
@@ -949,7 +944,7 @@ static int snd_pcm_action_group(struct action_ops *ops,
 /*
  *  Note: call with stream lock
  */
-static int snd_pcm_action_single(struct action_ops *ops,
+static int snd_pcm_action_single(const struct action_ops *ops,
 				 struct snd_pcm_substream *substream,
 				 int state)
 {
@@ -969,7 +964,7 @@ static int snd_pcm_action_single(struct action_ops *ops,
 /*
  *  Note: call with stream lock
  */
-static int snd_pcm_action(struct action_ops *ops,
+static int snd_pcm_action(const struct action_ops *ops,
 			  struct snd_pcm_substream *substream,
 			  int state)
 {
@@ -1001,7 +996,7 @@ static int snd_pcm_action(struct action_ops *ops,
 /*
  *  Note: don't use any locks before
  */
-static int snd_pcm_action_lock_irq(struct action_ops *ops,
+static int snd_pcm_action_lock_irq(const struct action_ops *ops,
 				   struct snd_pcm_substream *substream,
 				   int state)
 {
@@ -1015,7 +1010,7 @@ static int snd_pcm_action_lock_irq(struct action_ops *ops,
 
 /*
  */
-static int snd_pcm_action_nonatomic(struct action_ops *ops,
+static int snd_pcm_action_nonatomic(const struct action_ops *ops,
 				    struct snd_pcm_substream *substream,
 				    int state)
 {
@@ -1070,12 +1065,10 @@ static void snd_pcm_post_start(struct snd_pcm_substream *substream, int state)
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
 	    runtime->silence_size > 0)
 		snd_pcm_playback_silence(substream, ULONG_MAX);
-	if (substream->timer)
-		snd_timer_notify(substream->timer, SNDRV_TIMER_EVENT_MSTART,
-				 &runtime->trigger_tstamp);
+	snd_pcm_timer_notify(substream, SNDRV_TIMER_EVENT_MSTART);
 }
 
-static struct action_ops snd_pcm_action_start = {
+static const struct action_ops snd_pcm_action_start = {
 	.pre_action = snd_pcm_pre_start,
 	.do_action = snd_pcm_do_start,
 	.undo_action = snd_pcm_undo_start,
@@ -1120,15 +1113,13 @@ static void snd_pcm_post_stop(struct snd_pcm_substream *substream, int state)
 	if (runtime->status->state != state) {
 		snd_pcm_trigger_tstamp(substream);
 		runtime->status->state = state;
-		if (substream->timer)
-			snd_timer_notify(substream->timer, SNDRV_TIMER_EVENT_MSTOP,
-					 &runtime->trigger_tstamp);
+		snd_pcm_timer_notify(substream, SNDRV_TIMER_EVENT_MSTOP);
 	}
 	wake_up(&runtime->sleep);
 	wake_up(&runtime->tsleep);
 }
 
-static struct action_ops snd_pcm_action_stop = {
+static const struct action_ops snd_pcm_action_stop = {
 	.pre_action = snd_pcm_pre_stop,
 	.do_action = snd_pcm_do_stop,
 	.post_action = snd_pcm_post_stop
@@ -1236,22 +1227,16 @@ static void snd_pcm_post_pause(struct snd_pcm_substream *substream, int push)
 	snd_pcm_trigger_tstamp(substream);
 	if (push) {
 		runtime->status->state = SNDRV_PCM_STATE_PAUSED;
-		if (substream->timer)
-			snd_timer_notify(substream->timer,
-					 SNDRV_TIMER_EVENT_MPAUSE,
-					 &runtime->trigger_tstamp);
+		snd_pcm_timer_notify(substream, SNDRV_TIMER_EVENT_MPAUSE);
 		wake_up(&runtime->sleep);
 		wake_up(&runtime->tsleep);
 	} else {
 		runtime->status->state = SNDRV_PCM_STATE_RUNNING;
-		if (substream->timer)
-			snd_timer_notify(substream->timer,
-					 SNDRV_TIMER_EVENT_MCONTINUE,
-					 &runtime->trigger_tstamp);
+		snd_pcm_timer_notify(substream, SNDRV_TIMER_EVENT_MCONTINUE);
 	}
 }
 
-static struct action_ops snd_pcm_action_pause = {
+static const struct action_ops snd_pcm_action_pause = {
 	.pre_action = snd_pcm_pre_pause,
 	.do_action = snd_pcm_do_pause,
 	.undo_action = snd_pcm_undo_pause,
@@ -1295,14 +1280,12 @@ static void snd_pcm_post_suspend(struct snd_pcm_substream *substream, int state)
 	snd_pcm_trigger_tstamp(substream);
 	runtime->status->suspended_state = runtime->status->state;
 	runtime->status->state = SNDRV_PCM_STATE_SUSPENDED;
-	if (substream->timer)
-		snd_timer_notify(substream->timer, SNDRV_TIMER_EVENT_MSUSPEND,
-				 &runtime->trigger_tstamp);
+	snd_pcm_timer_notify(substream, SNDRV_TIMER_EVENT_MSUSPEND);
 	wake_up(&runtime->sleep);
 	wake_up(&runtime->tsleep);
 }
 
-static struct action_ops snd_pcm_action_suspend = {
+static const struct action_ops snd_pcm_action_suspend = {
 	.pre_action = snd_pcm_pre_suspend,
 	.do_action = snd_pcm_do_suspend,
 	.post_action = snd_pcm_post_suspend
@@ -1401,12 +1384,10 @@ static void snd_pcm_post_resume(struct snd_pcm_substream *substream, int state)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	snd_pcm_trigger_tstamp(substream);
 	runtime->status->state = runtime->status->suspended_state;
-	if (substream->timer)
-		snd_timer_notify(substream->timer, SNDRV_TIMER_EVENT_MRESUME,
-				 &runtime->trigger_tstamp);
+	snd_pcm_timer_notify(substream, SNDRV_TIMER_EVENT_MRESUME);
 }
 
-static struct action_ops snd_pcm_action_resume = {
+static const struct action_ops snd_pcm_action_resume = {
 	.pre_action = snd_pcm_pre_resume,
 	.do_action = snd_pcm_do_resume,
 	.undo_action = snd_pcm_undo_resume,
@@ -1509,7 +1490,7 @@ static void snd_pcm_post_reset(struct snd_pcm_substream *substream, int state)
 		snd_pcm_playback_silence(substream, ULONG_MAX);
 }
 
-static struct action_ops snd_pcm_action_reset = {
+static const struct action_ops snd_pcm_action_reset = {
 	.pre_action = snd_pcm_pre_reset,
 	.do_action = snd_pcm_do_reset,
 	.post_action = snd_pcm_post_reset
@@ -1553,7 +1534,7 @@ static void snd_pcm_post_prepare(struct snd_pcm_substream *substream, int state)
 	snd_pcm_set_state(substream, SNDRV_PCM_STATE_PREPARED);
 }
 
-static struct action_ops snd_pcm_action_prepare = {
+static const struct action_ops snd_pcm_action_prepare = {
 	.pre_action = snd_pcm_pre_prepare,
 	.do_action = snd_pcm_do_prepare,
 	.post_action = snd_pcm_post_prepare
@@ -1649,7 +1630,7 @@ static void snd_pcm_post_drain_init(struct snd_pcm_substream *substream, int sta
 {
 }
 
-static struct action_ops snd_pcm_action_drain_init = {
+static const struct action_ops snd_pcm_action_drain_init = {
 	.pre_action = snd_pcm_pre_drain_init,
 	.do_action = snd_pcm_do_drain_init,
 	.post_action = snd_pcm_post_drain_init
@@ -2000,11 +1981,11 @@ static int snd_pcm_hw_rule_sample_bits(struct snd_pcm_hw_params *params,
 	return snd_interval_refine(hw_param_interval(params, rule->var), &t);
 }
 
-#if SNDRV_PCM_RATE_5512 != 1 << 0 || SNDRV_PCM_RATE_192000 != 1 << 13
+#if SNDRV_PCM_RATE_5512 != 1 << 0 || SNDRV_PCM_RATE_192000 != 1 << 12
 #error "Change this table"
 #endif
 
-static unsigned int rates[] = { 5512, 8000, 11025, 16000, 22050, 24000, 32000, 44100,
+static unsigned int rates[] = { 5512, 8000, 11025, 16000, 22050, 32000, 44100,
                                  48000, 64000, 88200, 96000, 176400, 192000 };
 
 const struct snd_pcm_hw_constraint_list snd_pcm_known_rates = {
@@ -2254,7 +2235,8 @@ void snd_pcm_release_substream(struct snd_pcm_substream *substream)
 
 	snd_pcm_drop(substream);
 	if (substream->hw_opened) {
-		if (substream->ops->hw_free != NULL)
+		if (substream->ops->hw_free &&
+		    substream->runtime->status->state != SNDRV_PCM_STATE_OPEN)
 			substream->ops->hw_free(substream);
 		substream->ops->close(substream);
 		substream->hw_opened = 0;
@@ -2357,18 +2339,13 @@ static int snd_pcm_capture_open(struct inode *inode, struct file *file)
 {
 	struct snd_pcm *pcm;
 	int err = nonseekable_open(inode, file);
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	if (err < 0)
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return err;
-	}
 	pcm = snd_lookup_minor_data(iminor(inode),
 				    SNDRV_DEVICE_TYPE_PCM_CAPTURE);
 	err = snd_pcm_open(file, pcm, SNDRV_PCM_STREAM_CAPTURE);
 	if (pcm)
 		snd_card_unref(pcm->card);
-    RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 	return err;
 }
 
@@ -2435,14 +2412,10 @@ static int snd_pcm_release(struct inode *inode, struct file *file)
 	struct snd_pcm_substream *substream;
 	struct snd_pcm_file *pcm_file;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pcm_file = file->private_data;
 	substream = pcm_file->substream;
 	if (snd_BUG_ON(!substream))
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -ENXIO;
-	}
 	pcm = substream->pcm;
 	mutex_lock(&pcm->open_mutex);
 	snd_pcm_release_substream(substream);
@@ -2451,7 +2424,6 @@ static int snd_pcm_release(struct inode *inode, struct file *file)
 	wake_up(&pcm->open_wait);
 	module_put(pcm->card->module);
 	snd_card_file_remove(pcm->card, file);
-    RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 	return 0;
 }
 
@@ -2665,8 +2637,10 @@ static int snd_pcm_hwsync(struct snd_pcm_substream *substream)
 			break;
 		/* Fall through */
 	case SNDRV_PCM_STATE_PREPARED:
-	case SNDRV_PCM_STATE_SUSPENDED:
 		err = 0;
+		break;
+	case SNDRV_PCM_STATE_SUSPENDED:
+		err = -ESTRPIPE;
 		break;
 	case SNDRV_PCM_STATE_XRUN:
 		err = -EPIPE;
@@ -2755,6 +2729,7 @@ static int snd_pcm_sync_ptr(struct snd_pcm_substream *substream,
 	sync_ptr.s.status.hw_ptr = status->hw_ptr;
 	sync_ptr.s.status.tstamp = status->tstamp;
 	sync_ptr.s.status.suspended_state = status->suspended_state;
+	sync_ptr.s.status.audio_tstamp = status->audio_tstamp;
 	snd_pcm_stream_unlock_irq(substream);
 	if (copy_to_user(_sync_ptr, &sync_ptr, sizeof(sync_ptr)))
 		return -EFAULT;
@@ -2839,19 +2814,20 @@ static int snd_pcm_common_ioctl1(struct file *file,
 		snd_pcm_stream_unlock_irq(substream);
 		return res;
 	}
-    case SNDRV_PCM_IOCTL_VOLUME_SET:
-    case SNDRV_PCM_IOCTL_VOLUME_GET:
-    case SNDRV_PCM_IOCTL_GET_LATENCY:
-    case SNDRV_PCM_IOCTL_GET_FW_DELAY:
-    {
-        snd_printd("############## %s %d\n", __FUNCTION__, __LINE__);
-        snd_printd("substream->name = %s\n", substream->pcm->card->driver);
-        //realtek sound card driver name
-        if((strcmp(substream->pcm->card->driver, "snd_alsa_rtk") == 0)) {
-            substream->ops->ioctl(substream, cmd, arg);
-        }
-        return 0;
-    }
+#ifdef CONFIG_RTK_PLATFORM
+	case SNDRV_PCM_IOCTL_VOLUME_SET:
+	case SNDRV_PCM_IOCTL_VOLUME_GET:
+	case SNDRV_PCM_IOCTL_EQ_SET:
+	case SNDRV_PCM_IOCTL_GET_LATENCY:
+	case SNDRV_PCM_IOCTL_GET_FW_DELAY:
+		snd_printd("############## %s %d\n", __func__, __LINE__);
+		snd_printd("substream->name = %s\n", substream->pcm->card->driver);
+		/* realtek sound card driver name */
+		if((strcmp(substream->pcm->card->driver, "snd_alsa_rtk") == 0))
+			substream->ops->ioctl(substream, cmd, arg);
+
+		return 0;
+#endif /* CONFIG_RTK_PLATFORM */
 	}
 	pcm_dbg(substream->pcm, "unknown ioctl = 0x%x\n", cmd);
 	return -ENOTTY;
@@ -3035,21 +3011,14 @@ static long snd_pcm_capture_ioctl(struct file *file, unsigned int cmd,
 				  unsigned long arg)
 {
 	struct snd_pcm_file *pcm_file;
-    long ret;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pcm_file = file->private_data;
 
 	if (((cmd >> 8) & 0xff) != 'A')
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -ENOTTY;
-	}
 
-	ret = snd_pcm_capture_ioctl1(file, pcm_file->substream, cmd,
+	return snd_pcm_capture_ioctl1(file, pcm_file->substream, cmd,
 				      (void __user *)arg);
-    RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
-    return ret;
 }
 
 int snd_pcm_kernel_ioctl(struct snd_pcm_substream *substream,
@@ -3086,30 +3055,19 @@ static ssize_t snd_pcm_read(struct file *file, char __user *buf, size_t count,
 	struct snd_pcm_runtime *runtime;
 	snd_pcm_sframes_t result;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pcm_file = file->private_data;
 	substream = pcm_file->substream;
 	if (PCM_RUNTIME_CHECK(substream))
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -ENXIO;
-	}
 	runtime = substream->runtime;
 	if (runtime->status->state == SNDRV_PCM_STATE_OPEN)
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -EBADFD;
-	}
 	if (!frame_aligned(runtime, count))
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -EINVAL;
-	}
 	count = bytes_to_frames(runtime, count);
 	result = snd_pcm_lib_read(substream, buf, count);
 	if (result > 0)
 		result = frames_to_bytes(runtime, result);
-    RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 	return result;
 }
 
@@ -3147,49 +3105,29 @@ static ssize_t snd_pcm_readv(struct kiocb *iocb, struct iov_iter *to)
 	void __user **bufs;
 	snd_pcm_uframes_t frames;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pcm_file = iocb->ki_filp->private_data;
 	substream = pcm_file->substream;
 	if (PCM_RUNTIME_CHECK(substream))
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -ENXIO;
-	}
 	runtime = substream->runtime;
 	if (runtime->status->state == SNDRV_PCM_STATE_OPEN)
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -EBADFD;
-	}
 	if (!iter_is_iovec(to))
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -EINVAL;
-	}
 	if (to->nr_segs > 1024 || to->nr_segs != runtime->channels)
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -EINVAL;
-	}
 	if (!frame_aligned(runtime, to->iov->iov_len))
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -EINVAL;
-	}
 	frames = bytes_to_samples(runtime, to->iov->iov_len);
 	bufs = kmalloc(sizeof(void *) * to->nr_segs, GFP_KERNEL);
 	if (bufs == NULL)
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -ENOMEM;
-	}
 	for (i = 0; i < to->nr_segs; ++i)
 		bufs[i] = to->iov[i].iov_base;
 	result = snd_pcm_lib_readv(substream, bufs, frames);
 	if (result > 0)
 		result = frames_to_bytes(runtime, result);
 	kfree(bufs);
-    RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 	return result;
 }
 
@@ -3240,7 +3178,7 @@ static unsigned int snd_pcm_playback_poll(struct file *file, poll_table * wait)
 
 	substream = pcm_file->substream;
 	if (PCM_RUNTIME_CHECK(substream))
-		return -ENXIO;
+		return POLLOUT | POLLWRNORM | POLLERR;
 	runtime = substream->runtime;
 
 	poll_wait(file, &runtime->sleep, wait);
@@ -3275,15 +3213,11 @@ static unsigned int snd_pcm_capture_poll(struct file *file, poll_table * wait)
         unsigned int mask;
 	snd_pcm_uframes_t avail;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pcm_file = file->private_data;
 
 	substream = pcm_file->substream;
 	if (PCM_RUNTIME_CHECK(substream))
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
-		return -ENXIO;
-	}
+		return POLLIN | POLLRDNORM | POLLERR;
 	runtime = substream->runtime;
 
 	poll_wait(file, &runtime->sleep, wait);
@@ -3311,7 +3245,6 @@ static unsigned int snd_pcm_capture_poll(struct file *file, poll_table * wait)
 		break;
 	}
 	snd_pcm_stream_unlock_irq(substream);
-    RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 	return mask;
 }
 
@@ -3492,7 +3425,7 @@ int snd_pcm_lib_default_mmap(struct snd_pcm_substream *substream,
 					 area,
 					 substream->runtime->dma_area,
 					 substream->runtime->dma_addr,
-					 area->vm_end - area->vm_start);
+					 substream->runtime->dma_bytes);
 #endif /* CONFIG_X86 */
 	/* mmap with fault handler */
 	area->vm_ops = &snd_pcm_vm_ops_data_fault;
@@ -3579,38 +3512,24 @@ static int snd_pcm_mmap(struct file *file, struct vm_area_struct *area)
 	struct snd_pcm_substream *substream;	
 	unsigned long offset;
 	
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pcm_file = file->private_data;
 	substream = pcm_file->substream;
 	if (PCM_RUNTIME_CHECK(substream))
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -ENXIO;
-	}
 
 	offset = area->vm_pgoff << PAGE_SHIFT;
 	switch (offset) {
 	case SNDRV_PCM_MMAP_OFFSET_STATUS:
 		if (pcm_file->no_compat_mmap)
-		{
-            RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 			return -ENXIO;
-		}
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return snd_pcm_mmap_status(substream, file, area);
 	case SNDRV_PCM_MMAP_OFFSET_CONTROL:
 		if (pcm_file->no_compat_mmap)
-		{
-            RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 			return -ENXIO;
-		}
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return snd_pcm_mmap_control(substream, file, area);
 	default:
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return snd_pcm_mmap_data(substream, file, area);
 	}
-    RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 	return 0;
 }
 
@@ -3620,16 +3539,11 @@ static int snd_pcm_fasync(int fd, struct file * file, int on)
 	struct snd_pcm_substream *substream;
 	struct snd_pcm_runtime *runtime;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pcm_file = file->private_data;
 	substream = pcm_file->substream;
 	if (PCM_RUNTIME_CHECK(substream))
-	{
-        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -ENXIO;
-	}
 	runtime = substream->runtime;
-    RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 	return fasync_helper(fd, file, on, &runtime->fasync);
 }
 
@@ -3761,7 +3675,6 @@ static unsigned long snd_pcm_get_unmapped_area(struct file *file,
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	unsigned long offset = pgoff << PAGE_SHIFT;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	switch (offset) {
 	case SNDRV_PCM_MMAP_OFFSET_STATUS:
 		return (unsigned long)runtime->status;

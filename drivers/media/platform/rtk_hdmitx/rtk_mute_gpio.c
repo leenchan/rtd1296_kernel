@@ -24,6 +24,7 @@
 struct device_node *hdmitx_dev_node;
 static int audio_mute_gpio = -1;
 struct timer_list *mute_gpio_timer;
+static int i2s_ctrl_gpio = -1;
 
 
 void set_mute_gpio(int gpio_number, int gpio_value)
@@ -54,6 +55,26 @@ void set_mute_gpio_pulse(void)
 }
 
 /**
+ * set_i2s_output - Control I2S audio output DAC
+ */
+void set_i2s_output(int gpio_value)
+{
+	int gpio_number;
+
+	if (i2s_ctrl_gpio < 0)
+		return;
+
+	gpio_number = i2s_ctrl_gpio;
+	if (gpio_request(gpio_number, hdmitx_dev_node->name)) {
+		HDMI_ERROR("[%s] Request gpio(%d) fail", __func__, gpio_number);
+	} else {
+		HDMI_INFO("Set i2s_ctrl_gpio=%u", gpio_value);
+		gpio_direction_output(gpio_number, gpio_value);
+		gpio_free(gpio_number);
+	}
+}
+
+/**
  * setup_mute_gpio - Initial audio DAC mute pin control
  */
 void setup_mute_gpio(struct device_node *dev_node)
@@ -66,8 +87,8 @@ void setup_mute_gpio(struct device_node *dev_node)
 						"gpio-audio-mute", 0);
 
 	if (audio_mute_gpio < 0) {
-		HDMI_INFO("Undefined gpio-audio-mute, sikp %s", __func__);
-		goto end;
+		HDMI_INFO("Undefined gpio-audio-mute, sikp");
+		goto i2s;
 	} else {
 		HDMI_INFO("audio mute gpio(%d)", audio_mute_gpio);
 	}
@@ -79,6 +100,17 @@ void setup_mute_gpio(struct device_node *dev_node)
 		setup_timer(mute_gpio_timer, mute_gpio_timer_callback, 0);
 	else
 		HDMI_ERROR("[%s] kmalloc fail", __func__);
+
+i2s:
+	i2s_ctrl_gpio = of_get_named_gpio(hdmitx_dev_node,
+						"gpio-i2s-ctrl", 0);
+
+	if (i2s_ctrl_gpio < 0) {
+		HDMI_INFO("Undefined gpio-i2s-ctrl, sikp");
+		goto end;
+	} else {
+		HDMI_INFO("i2s control gpio(%d)", i2s_ctrl_gpio);
+	}
 
 end:
 	return;

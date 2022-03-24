@@ -42,6 +42,7 @@
 #ifdef CONFIG_INFINIBAND_QIB_DCA
 #include <linux/dca.h>
 #endif
+#include <rdma/rdma_vt.h>
 
 #include "qib.h"
 #include "qib_common.h"
@@ -243,6 +244,13 @@ int qib_init_pportdata(struct qib_pportdata *ppd, struct qib_devdata *dd,
 	ppd->ibport_data.pmastats =
 		alloc_percpu(struct qib_pma_counters);
 	if (!ppd->ibport_data.pmastats)
+		return -ENOMEM;
+	ppd->ibport_data.rvp.rc_acks = alloc_percpu(u64);
+	ppd->ibport_data.rvp.rc_qacks = alloc_percpu(u64);
+	ppd->ibport_data.rvp.rc_delayed_comp = alloc_percpu(u64);
+	if (!(ppd->ibport_data.rvp.rc_acks) ||
+	    !(ppd->ibport_data.rvp.rc_qacks) ||
+	    !(ppd->ibport_data.rvp.rc_delayed_comp))
 		return -ENOMEM;
 
 	if (qib_cc_table_size < IB_CCT_MIN_ENTRIES)
@@ -449,8 +457,6 @@ static int loadtime_init(struct qib_devdata *dd)
 	init_timer(&dd->intrchk_timer);
 	dd->intrchk_timer.function = verify_interrupt;
 	dd->intrchk_timer.data = (unsigned long) dd;
-
-	ret = qib_cq_init(dd);
 done:
 	return ret;
 }
@@ -608,8 +614,8 @@ static int qib_create_workqueues(struct qib_devdata *dd)
 
 			snprintf(wq_name, sizeof(wq_name), "qib%d_%d",
 				dd->unit, pidx);
-			ppd->qib_wq =
-				create_singlethread_workqueue(wq_name);
+			ppd->qib_wq = alloc_ordered_workqueue(wq_name,
+							      WQ_MEM_RECLAIM);
 			if (!ppd->qib_wq)
 				goto wq_error;
 		}
@@ -631,6 +637,9 @@ wq_error:
 static void qib_free_pportdata(struct qib_pportdata *ppd)
 {
 	free_percpu(ppd->ibport_data.pmastats);
+	free_percpu(ppd->ibport_data.rvp.rc_acks);
+	free_percpu(ppd->ibport_data.rvp.rc_qacks);
+	free_percpu(ppd->ibport_data.rvp.rc_delayed_comp);
 	ppd->ibport_data.pmastats = NULL;
 }
 
@@ -869,6 +878,10 @@ static void qib_shutdown_device(struct qib_devdata *dd)
 	struct qib_pportdata *ppd;
 	unsigned pidx;
 
+	if (dd->flags & QIB_SHUTDOWN)
+		return;
+	dd->flags |= QIB_SHUTDOWN;
+
 	for (pidx = 0; pidx < dd->num_pports; ++pidx) {
 		ppd = dd->pport + pidx;
 
@@ -1081,7 +1094,7 @@ void qib_free_devdata(struct qib_devdata *dd)
 	qib_dbg_ibdev_exit(&dd->verbs_dev);
 #endif
 	free_percpu(dd->int_counter);
-	ib_dealloc_device(&dd->verbs_dev.ibdev);
+	rvt_dealloc_device(&dd->verbs_dev.rdi);
 }
 
 u64 qib_int_counter(struct qib_devdata *dd)
@@ -1120,9 +1133,12 @@ struct qib_devdata *qib_alloc_devdata(struct pci_dev *pdev, size_t extra)
 {
 	unsigned long flags;
 	struct qib_devdata *dd;
-	int ret;
+	int ret, nports;
 
-	dd = (struct qib_devdata *) ib_alloc_device(sizeof(*dd) + extra);
+	/* extra is * number of ports */
+	nports = extra / sizeof(struct qib_pportdata);
+	dd = (struct qib_devdata *)rvt_alloc_device(sizeof(*dd) + extra,
+						    nports);
 	if (!dd)
 		return ERR_PTR(-ENOMEM);
 
@@ -1171,7 +1187,7 @@ struct qib_devdata *qib_alloc_devdata(struct pci_dev *pdev, size_t extra)
 bail:
 	if (!list_empty(&dd->list))
 		list_del_init(&dd->list);
-	ib_dealloc_device(&dd->verbs_dev.ibdev);
+	rvt_dealloc_device(&dd->verbs_dev.rdi);
 	return ERR_PTR(ret);
 }
 
@@ -1211,6 +1227,7 @@ void qib_disable_after_error(struct qib_devdata *dd)
 
 static void qib_remove_one(struct pci_dev *);
 static int qib_init_one(struct pci_dev *, const struct pci_device_id *);
+static void qib_shutdown_one(struct pci_dev *);
 
 #define DRIVER_LOAD_MSG "Intel " QIB_DRV_NAME " loaded: "
 #define PFX QIB_DRV_NAME ": "
@@ -1228,6 +1245,7 @@ static struct pci_driver qib_driver = {
 	.name = QIB_DRV_NAME,
 	.probe = qib_init_one,
 	.remove = qib_remove_one,
+	.shutdown = qib_shutdown_one,
 	.id_table = qib_pci_tbl,
 	.err_handler = &qib_pci_err_handler,
 };
@@ -1421,7 +1439,6 @@ static void cleanup_device_data(struct qib_devdata *dd)
 	}
 	kfree(tmp);
 	kfree(dd->boardname);
-	qib_cq_exit(dd);
 }
 
 /*
@@ -1580,6 +1597,13 @@ static void qib_remove_one(struct pci_dev *pdev)
 	qib_postinit_cleanup(dd);
 }
 
+static void qib_shutdown_one(struct pci_dev *pdev)
+{
+	struct qib_devdata *dd = pci_get_drvdata(pdev);
+
+	qib_shutdown_device(dd);
+}
+
 /**
  * qib_create_rcvhdrq - create a receive header queue
  * @dd: the qlogic_ib device
@@ -1680,7 +1704,7 @@ int qib_setup_eagerbufs(struct qib_ctxtdata *rcd)
 	 * heavy filesystem activity makes these fail, and we can
 	 * use compound pages.
 	 */
-	gfp_flags = __GFP_WAIT | __GFP_IO | __GFP_COMP;
+	gfp_flags = __GFP_RECLAIM | __GFP_IO | __GFP_COMP;
 
 	egrcnt = rcd->rcvegrcnt;
 	egroff = rcd->rcvegr_tid_base;

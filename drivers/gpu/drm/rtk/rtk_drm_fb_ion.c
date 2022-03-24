@@ -35,13 +35,8 @@ static void drm_fb_ion_destroy(struct drm_framebuffer *fb)
     drm_framebuffer_cleanup(fb);
 
     for (i = 0; i < 4; i++) {
-        if (fb_ion->obj[i]) {
-            DRM_DEBUG_KMS("[%s %d]\n", __FUNCTION__, __LINE__);
-#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
+        if (fb_ion->obj[i])
             drm_gem_object_unreference_unlocked(&fb_ion->obj[i]->base);
-#endif
-            drm_gem_object_unreference_unlocked(&fb_ion->obj[i]->base);
-        }
     }
 
     kfree(fb_ion);
@@ -73,7 +68,7 @@ static struct drm_framebuffer_funcs drm_fb_ion_funcs = {
 };
 
 static struct drm_fb_ion *drm_fb_ion_alloc(struct drm_device *dev,
-        struct drm_mode_fb_cmd2 *mode_cmd, struct rtk_gem_ion_object **obj,
+        const struct drm_mode_fb_cmd2 *mode_cmd, struct rtk_gem_ion_object **obj,
         unsigned int num_planes)
 {
     struct drm_fb_ion *fb_ion;
@@ -100,7 +95,7 @@ static struct drm_fb_ion *drm_fb_ion_alloc(struct drm_device *dev,
 }
 
 struct drm_framebuffer *drm_fb_ion_create(struct drm_device *dev,
-        struct drm_file *file_priv, struct drm_mode_fb_cmd2 *mode_cmd)
+        struct drm_file *file_priv, const struct drm_mode_fb_cmd2 *mode_cmd)
 {
     struct drm_fb_ion *fb_ion;
     struct rtk_gem_ion_object *objs[4];
@@ -118,7 +113,7 @@ struct drm_framebuffer *drm_fb_ion_create(struct drm_device *dev,
         unsigned int height = mode_cmd->height / (i ? vsub : 1);
         unsigned int min_size;
 
-        obj = drm_gem_object_lookup(dev, file_priv, mode_cmd->handles[i]);
+        obj = drm_gem_object_lookup(file_priv, mode_cmd->handles[i]);
         if (!obj) {
             dev_err(dev->dev, "Failed to lookup GEM object\n");
             ret = -ENXIO;

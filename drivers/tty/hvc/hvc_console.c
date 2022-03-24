@@ -29,7 +29,7 @@
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/list.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/major.h>
 #include <linux/atomic.h>
 #include <linux/sysrq.h>
@@ -330,7 +330,8 @@ static int hvc_install(struct tty_driver *driver, struct tty_struct *tty)
 	int rc;
 
 	/* Auto increments kref reference if found. */
-	if (!(hp = hvc_get_by_index(tty->index)))
+	hp = hvc_get_by_index(tty->index);
+	if (!hp)
 		return -ENODEV;
 
 	tty->driver_data = hp;
@@ -428,7 +429,7 @@ static void hvc_close(struct tty_struct *tty, struct file * filp)
 		 * there is no buffered data otherwise sleeps on a wait queue
 		 * waking periodically to check chars_in_buffer().
 		 */
-		tty_wait_until_sent_from_close(tty, HVC_CLOSE_WAIT);
+		tty_wait_until_sent(tty, HVC_CLOSE_WAIT);
 	} else {
 		if (hp->port.count < 0)
 			printk(KERN_ERR "hvc_close %X: oops, count is %d\n",
@@ -642,7 +643,7 @@ int hvc_poll(struct hvc_struct *hp)
 		goto bail;
 
 	/* Now check if we can get data (are we throttled ?) */
-	if (test_bit(TTY_THROTTLED, &tty->flags))
+	if (tty_throttled(tty))
 		goto throttled;
 
 	/* If we aren't notifier driven and aren't throttled, we always
@@ -824,7 +825,7 @@ static int hvc_poll_get_char(struct tty_driver *driver, int line)
 
 	n = hp->ops->get_chars(hp->vtermno, &ch, 1);
 
-	if (n == 0)
+	if (n <= 0)
 		return NO_POLL_CHAR;
 
 	return ch;
@@ -1016,25 +1017,9 @@ out:
 	return err;
 }
 
-/* This isn't particularly necessary due to this being a console driver
- * but it is nice to be thorough.
- */
-static void __exit hvc_exit(void)
-{
-	if (hvc_driver) {
-		kthread_stop(hvc_task);
-
-		tty_unregister_driver(hvc_driver);
-		/* return tty_struct instances allocated in hvc_init(). */
-		put_tty_driver(hvc_driver);
-		unregister_console(&hvc_console);
-	}
-}
-module_exit(hvc_exit);
-
 #ifdef CONFIG_RTK_XEN_SUPPORT
 static void domu_crash_print(struct console *co, const char *b,
-                              unsigned count)
+				unsigned count)
 {
 	static char buf[512] = "";
 
@@ -1056,10 +1041,4 @@ static void domu_crash_console_start(void)
 {
 	register_console(&domu_crash_console);
 }
-
-static void __exit domu_crash_console_exit(void)
-{
-	unregister_console(&domu_crash_console);
-}
-module_exit(domu_crash_console_exit);
 #endif

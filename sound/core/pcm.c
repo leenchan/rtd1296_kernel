@@ -28,14 +28,9 @@
 #include <sound/core.h>
 #include <sound/minors.h>
 #include <sound/pcm.h>
+#include <sound/timer.h>
 #include <sound/control.h>
 #include <sound/info.h>
-
-#ifdef RTK_TRACE_ALSA_EN
-#define RTK_TRACE_ALSA(format, ...) printk(KERN_ALERT format, ##__VA_ARGS__);
-#else
-#define RTK_TRACE_ALSA(format, ...)
-#endif
 
 MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>, Abramo Bagnara <abramo@alsa-project.org>");
 MODULE_DESCRIPTION("Midlevel PCM code for ALSA.");
@@ -155,7 +150,9 @@ static int snd_pcm_control_ioctl(struct snd_card *card,
 				err = -ENXIO;
 				goto _error;
 			}
+			mutex_lock(&pcm->open_mutex);
 			err = snd_pcm_info_user(substream, info);
+			mutex_unlock(&pcm->open_mutex);
 		_error:
 			mutex_unlock(&register_mutex);
 			return err;
@@ -699,7 +696,6 @@ int snd_pcm_new_stream(struct snd_pcm *pcm, int stream, int substream_count)
 #if IS_ENABLED(CONFIG_SND_PCM_OSS)
 	mutex_init(&pstr->oss.setup_mutex);
 #endif
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pstr->stream = stream;
 	pstr->pcm = pcm;
 	pstr->substream_count = substream_count;
@@ -755,7 +751,6 @@ int snd_pcm_new_stream(struct snd_pcm *pcm, int stream, int substream_count)
 		atomic_set(&substream->mmap_count, 0);
 		prev = substream;
 	}
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 	return 0;
 }				
 EXPORT_SYMBOL(snd_pcm_new_stream);
@@ -772,7 +767,6 @@ static int _snd_pcm_new(struct snd_card *card, const char *id, int device,
 		.dev_disconnect = snd_pcm_dev_disconnect,
 	};
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	if (snd_BUG_ON(!card))
 		return -ENXIO;
 	if (rpcm)
@@ -802,7 +796,6 @@ static int _snd_pcm_new(struct snd_card *card, const char *id, int device,
 	}
 	if (rpcm)
 		*rpcm = pcm;
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 	return 0;
 }
 
@@ -825,12 +818,8 @@ static int _snd_pcm_new(struct snd_card *card, const char *id, int device,
 int snd_pcm_new(struct snd_card *card, const char *id, int device,
 		int playback_count, int capture_count, struct snd_pcm **rpcm)
 {
-    int ret;
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
-	ret = _snd_pcm_new(card, id, device, playback_count, capture_count,
+	return _snd_pcm_new(card, id, device, playback_count, capture_count,
 			false, rpcm);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
-    return ret;
 }
 EXPORT_SYMBOL(snd_pcm_new);
 
@@ -1037,11 +1026,13 @@ void snd_pcm_detach_substream(struct snd_pcm_substream *substream)
 	snd_free_pages((void*)runtime->control,
 		       PAGE_ALIGN(sizeof(struct snd_pcm_mmap_control)));
 	kfree(runtime->hw_constraints.rules);
-#ifdef CONFIG_SND_PCM_XRUN_DEBUG
-	kfree(runtime->hwptr_log);
-#endif
-	kfree(runtime);
+	/* Avoid concurrent access to runtime via PCM timer interface */
+	if (substream->timer)
+		spin_lock_irq(&substream->timer->lock);
 	substream->runtime = NULL;
+	if (substream->timer)
+		spin_unlock_irq(&substream->timer->lock);
+	kfree(runtime);
 	put_pid(substream->pid);
 	substream->pid = NULL;
 	substream->pstr->substream_opened--;
@@ -1112,7 +1103,6 @@ static int snd_pcm_dev_register(struct snd_device *device)
 			break;
 		}
 		/* register pcm */
-        RTK_TRACE_ALSA(" @ %s %d\n", __func__, __LINE__);
 		err = snd_register_device(devtype, pcm->card, pcm->device,
 					  &snd_pcm_f_ops[cidx], pcm,
 					  &pcm->streams[cidx].dev);
@@ -1140,7 +1130,6 @@ static int snd_pcm_dev_disconnect(struct snd_device *device)
 	struct snd_pcm_substream *substream;
 	int cidx;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	mutex_lock(&register_mutex);
 	mutex_lock(&pcm->open_mutex);
 	wake_up(&pcm->open_wait);
@@ -1167,7 +1156,6 @@ static int snd_pcm_dev_disconnect(struct snd_device *device)
 	}
 	mutex_unlock(&pcm->open_mutex);
 	mutex_unlock(&register_mutex);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 	return 0;
 }
 
@@ -1204,7 +1192,7 @@ int snd_pcm_notify(struct snd_pcm_notify *notify, int nfree)
 }
 EXPORT_SYMBOL(snd_pcm_notify);
 
-#ifdef CONFIG_PROC_FS
+#ifdef CONFIG_SND_PROC_FS
 /*
  *  Info interface
  */
@@ -1235,7 +1223,6 @@ static void snd_pcm_proc_init(void)
 {
 	struct snd_info_entry *entry;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	if ((entry = snd_info_create_module_entry(THIS_MODULE, "pcm", NULL)) != NULL) {
 		snd_info_set_text_ops(entry, NULL, snd_pcm_proc_read);
 		if (snd_info_register(entry) < 0) {
@@ -1244,7 +1231,6 @@ static void snd_pcm_proc_init(void)
 		}
 	}
 	snd_pcm_proc_entry = entry;
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 }
 
 static void snd_pcm_proc_done(void)
@@ -1252,10 +1238,10 @@ static void snd_pcm_proc_done(void)
 	snd_info_free_entry(snd_pcm_proc_entry);
 }
 
-#else /* !CONFIG_PROC_FS */
+#else /* !CONFIG_SND_PROC_FS */
 #define snd_pcm_proc_init()
 #define snd_pcm_proc_done()
-#endif /* CONFIG_PROC_FS */
+#endif /* CONFIG_SND_PROC_FS */
 
 
 /*
@@ -1264,21 +1250,17 @@ static void snd_pcm_proc_done(void)
 
 static int __init alsa_pcm_init(void)
 {
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	snd_ctl_register_ioctl(snd_pcm_control_ioctl);
 	snd_ctl_register_ioctl_compat(snd_pcm_control_ioctl);
 	snd_pcm_proc_init();
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 	return 0;
 }
 
 static void __exit alsa_pcm_exit(void)
 {
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	snd_ctl_unregister_ioctl(snd_pcm_control_ioctl);
 	snd_ctl_unregister_ioctl_compat(snd_pcm_control_ioctl);
 	snd_pcm_proc_done();
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 }
 
 module_init(alsa_pcm_init)

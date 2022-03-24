@@ -83,6 +83,12 @@
 	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, \
 			   ARM_SMCCC_OWNER_TRUSTED_OS_END, \
 			   OPTEE_SMC_FUNCID_CALLS_REVISION)
+struct optee_smc_calls_revision_result {
+	unsigned long major;
+	unsigned long minor;
+	unsigned long reserved0;
+	unsigned long reserved1;
+};
 
 /*
  * Get UUID of Trusted OS.
@@ -183,6 +189,13 @@
 #define OPTEE_SMC_GET_SHM_CONFIG \
 	OPTEE_SMC_FAST_CALL_VAL(OPTEE_SMC_FUNCID_GET_SHM_CONFIG)
 
+struct optee_smc_get_shm_config_result {
+	unsigned long status;
+	unsigned long start;
+	unsigned long size;
+	unsigned long settings;
+};
+
 /*
  * Exchanges capabilities between normal world and secure world
  *
@@ -205,12 +218,26 @@
 /* Normal world works as a uniprocessor system */
 #define OPTEE_SMC_NSEC_CAP_UNIPROCESSOR		BIT(0)
 /* Secure world has reserved shared memory for normal world to use */
-#define OPTEE_SMC_SEC_CAP_HAVE_RESERVERED_SHM	BIT(0)
+#define OPTEE_SMC_SEC_CAP_HAVE_RESERVED_SHM	BIT(0)
 /* Secure world can communicate via previously unregistered shared memory */
 #define OPTEE_SMC_SEC_CAP_UNREGISTERED_SHM	BIT(1)
+
+/*
+ * Secure world supports commands "register/unregister shared memory",
+ * secure world accepts command buffers located in any parts of non-secure RAM
+ */
+#define OPTEE_SMC_SEC_CAP_DYNAMIC_SHM		BIT(2)
+
 #define OPTEE_SMC_FUNCID_EXCHANGE_CAPABILITIES	9
 #define OPTEE_SMC_EXCHANGE_CAPABILITIES \
 	OPTEE_SMC_FAST_CALL_VAL(OPTEE_SMC_FUNCID_EXCHANGE_CAPABILITIES)
+
+struct optee_smc_exchange_capabilities_result {
+	unsigned long status;
+	unsigned long capabilities;
+	unsigned long reserved0;
+	unsigned long reserved1;
+};
 
 /*
  * Disable and empties cache of shared memory objects
@@ -244,6 +271,13 @@
 #define OPTEE_SMC_DISABLE_SHM_CACHE \
 	OPTEE_SMC_FAST_CALL_VAL(OPTEE_SMC_FUNCID_DISABLE_SHM_CACHE)
 
+struct optee_smc_disable_shm_cache_result {
+	unsigned long status;
+	unsigned long shm_upper32;
+	unsigned long shm_lower32;
+	unsigned long reserved0;
+};
+
 /*
  * Enable cache of shared memory objects
  *
@@ -270,7 +304,7 @@
 	OPTEE_SMC_FAST_CALL_VAL(OPTEE_SMC_FUNCID_ENABLE_SHM_CACHE)
 
 /*
- * Resume from RPC (for example after processing an IRQ)
+ * Resume from RPC (for example after processing a foreign interrupt)
  *
  * Call register usage:
  * a0	SMC Function ID, OPTEE_SMC_CALL_RETURN_FROM_RPC
@@ -355,19 +389,19 @@
 	OPTEE_SMC_RPC_VAL(OPTEE_SMC_RPC_FUNC_FREE)
 
 /*
- * Deliver an IRQ in normal world.
+ * Deliver foreign interrupt to normal world.
  *
  * "Call" register usage:
- * a0	OPTEE_SMC_RETURN_RPC_IRQ
+ * a0	OPTEE_SMC_RETURN_RPC_FOREIGN_INTR
  * a1-7	Resume information, must be preserved
  *
  * "Return" register usage:
  * a0	SMC Function ID, OPTEE_SMC_CALL_RETURN_FROM_RPC.
  * a1-7	Preserved
  */
-#define OPTEE_SMC_RPC_FUNC_IRQ		4
-#define OPTEE_SMC_RETURN_RPC_IRQ \
-	OPTEE_SMC_RPC_VAL(OPTEE_SMC_RPC_FUNC_IRQ)
+#define OPTEE_SMC_RPC_FUNC_FOREIGN_INTR		4
+#define OPTEE_SMC_RETURN_RPC_FOREIGN_INTR \
+	OPTEE_SMC_RPC_VAL(OPTEE_SMC_RPC_FUNC_FOREIGN_INTR)
 
 /*
  * Do an RPC request. The supplied struct optee_msg_arg tells which
@@ -410,9 +444,13 @@
 #define OPTEE_SMC_RETURN_EBADCMD	0x5
 #define OPTEE_SMC_RETURN_ENOMEM		0x6
 #define OPTEE_SMC_RETURN_ENOTAVAIL	0x7
-#define OPTEE_SMC_RETURN_IS_RPC(ret) \
-	(((ret) != OPTEE_SMC_RETURN_UNKNOWN_FUNCTION) && \
-	((((ret) & OPTEE_SMC_RETURN_RPC_PREFIX_MASK) == \
-		OPTEE_SMC_RETURN_RPC_PREFIX)))
+#define OPTEE_SMC_RETURN_IS_RPC(ret)	__optee_smc_return_is_rpc((ret))
+
+static inline bool __optee_smc_return_is_rpc(u32 ret)
+{
+	return ret != OPTEE_SMC_RETURN_UNKNOWN_FUNCTION &&
+	       (ret & OPTEE_SMC_RETURN_RPC_PREFIX_MASK) ==
+			OPTEE_SMC_RETURN_RPC_PREFIX;
+}
 
 #endif /* OPTEE_SMC_H */

@@ -1769,7 +1769,6 @@ csio_hw_use_fwconfig(struct csio_hw *hw, int reset, u32 *fw_cfg_param)
 		goto bye;
 	}
 
-	mempool_free(mbp, hw->mb_mempool);
 	if (finicsum != cfcsum) {
 		csio_warn(hw,
 		      "Config File checksum mismatch: csum=%#x, computed=%#x\n",
@@ -1780,6 +1779,10 @@ csio_hw_use_fwconfig(struct csio_hw *hw, int reset, u32 *fw_cfg_param)
 	rv = csio_hw_validate_caps(hw, mbp);
 	if (rv != 0)
 		goto bye;
+
+	mempool_free(mbp, hw->mb_mempool);
+	mbp = NULL;
+
 	/*
 	 * Note that we're operating with parameters
 	 * not supplied by the driver, rather than from hard-wired
@@ -3928,6 +3931,7 @@ csio_hw_init(struct csio_hw *hw)
 
 		evt_entry = kzalloc(sizeof(struct csio_evt_msg), GFP_KERNEL);
 		if (!evt_entry) {
+			rv = -ENOMEM;
 			csio_err(hw, "Failed to initialize eventq");
 			goto err_evtq_cleanup;
 		}

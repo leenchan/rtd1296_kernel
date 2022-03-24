@@ -1,18 +1,22 @@
 /*
- * Realtek SD card header file
+ * Realtek SD/MMC/mini SD card driver
  *
  * Authors:
- * Copyright (C) 2015 Realtek Ltd.
+ * Copyright (C) 2017 Realtek Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
 
+
 #ifndef DRIVERS_MMC_HOST_RTK_SDMMC_REG_H_
 #define DRIVERS_MMC_HOST_RTK_SDMMC_REG_H_
 
 // Card Reader Register Sets
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
+#define GPDATI1			      (0x120)
+#endif
 
 #define SDMMC_SYNC                    (0x0020)
 
@@ -21,7 +25,12 @@
 #define CR_PLL_SD2                    (0x01E4)
 #define CR_PLL_SD3                    (0x01E8)
 #define CR_PLL_SD4                    (0x01EC)
+
+#ifdef CONFIG_ARCH_RTD119X
+#define CR_PFUNC_CR                   (0x0380)
+#else
 #define CR_PFUNC_CR                   (0x0610)
+#endif
 
 #define SDIO_NORML_INT_STA            (0x0030)
 #define EMMC_DMA_CTL3                 (0x000C)

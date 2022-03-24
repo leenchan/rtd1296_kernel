@@ -62,7 +62,13 @@ unsigned int pli_IPCReadULONG(BYTE* src)
 unsigned long long  pli_IPCReadULONGLONG(BYTE* src)
 {
 #if 1
+
+#if defined(CONFIG_CPU_V7)
+    return __be32_to_cpu(readl(src));
+#else
     return __be64_to_cpu(readq(src));
+#endif /* CONFIG_CPU_V7 */
+
 #else
     volatile unsigned long long A;  // prevent gcc -O3 optimization to create non-atomic access
 	if (((int)src & 0x3) != 0)
@@ -89,7 +95,13 @@ void    pli_IPCWriteULONG(BYTE* des, unsigned int data)
 void    pli_IPCWriteULONGLONG(BYTE* des, unsigned long long data)
 {
 #if 1
+
+#if defined(CONFIG_CPU_V7)
+    return writel(__cpu_to_be32(data), des);
+#else
     return writeq(__cpu_to_be64(data), des);
+#endif /* CONFIG_CPU_V7 */
+
 #else
   volatile unsigned long long A; // prevent gcc -O3 optimization to create non-atomic access
 	if (((int)des & 0x3) != 0)
@@ -168,7 +180,6 @@ int ICQ_WriteCmd (void *cmd, RINGBUFFER_HEADER* rbHeader, void *rbHeaderBase)
 
 		write += size ;
 		write = write < limit ? write : write - (limit - base) ;
-		write =  (0x1FFFFFFF&write);
 
         #if 0
         { /* writecombine */

@@ -13,6 +13,8 @@
  *
  */
 
+
+
 /**
  * rtk_drm_funcs.h
  * Function prototypes for RTK DRM
@@ -25,11 +27,9 @@
 int rtk_drm_init(struct platform_device *dev);
 void rtk_drm_exit(struct platform_device *dev);
 
-/* KDS Callbacks */
-void show_framebuffer_on_crtc_cb(void *cb1, void *cb2);
-
 /* Plane Functions */
 struct rtk_drm_planes * rtk_plans_create(struct drm_device *dev);
+
 
 /* CRTC Functions */
 struct rtk_drm_crtc * rtk_crtc_create(struct drm_device *dev);

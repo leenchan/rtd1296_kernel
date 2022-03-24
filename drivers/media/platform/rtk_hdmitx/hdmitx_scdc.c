@@ -42,7 +42,7 @@ int hdmitx_write_scdc_port(unsigned char offset, unsigned char value)
 
 	p_adap = i2c_get_adapter(bus_id);
 	if (p_adap == NULL) {
-		HDMI_ERROR("[%s] get i2c adapter %d failed", __func__, bus_id);
+		HDMI_ERROR("[%s] get i2c adapter %d failed\n", __func__, bus_id);
 		goto scdc_write_fal;
 	}
 
@@ -77,9 +77,10 @@ int hdmitx_read_scdc_port(unsigned char offset, unsigned char *buf, unsigned cha
 	msgs[1].len = len;
 	msgs[1].buf = buf;
 
+
 	p_adap = i2c_get_adapter(bus_id);
 	if (p_adap == NULL) {
-		HDMI_ERROR("[%s] get i2c adapter %d failed", __func__, bus_id);
+		HDMI_ERROR("[%s] get i2c adapter %d failed\n", __func__, bus_id);
 		goto scdc_read_fail;
 	}
 
@@ -97,13 +98,25 @@ scdc_read_fail:
 	return SCDC_I2C_FAIL;
 }
 
-unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard, unsigned int dataInt0)
+/**
+ * hdmitx_send_scdc_TmdsConfig - SCDC TMDS Configuration
+ * @standard: VO_STANDARD
+ * @dataInt0:  VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME dataInt0
+ * @data_byte1: VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME dataByte1
+ *
+ * Return: SCDC TMDS_Config value
+ */
+unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard,
+	unsigned int dataInt0, unsigned char data_byte1)
 {
 	unsigned char config_data;
+	unsigned char color;
 	unsigned char deep_color;
 	unsigned char depp_depth;
 	unsigned char format_3D;
 	int ret_val;
+
+	color = data_byte1>>5;
 
 	deep_color = (dataInt0>>1)&0x1;
 	depp_depth = (dataInt0>>2)&0xF;
@@ -122,8 +135,8 @@ unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard, unsigned int da
 	case VO_STANDARD_HDTV_4096_2160P_50:
 	case VO_STANDARD_HDTV_4096_2160P_60:
 		config_data = 0x3;
-		break;
 
+		break;
 	/* Scramble, 1/40 data rate */
 	case VO_STANDARD_HDTV_2160P_23:
 	case VO_STANDARD_HDTV_2160P_24:
@@ -133,12 +146,14 @@ unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard, unsigned int da
 	case VO_STANDARD_HDTV_4096_2160P_24:
 	case VO_STANDARD_HDTV_4096_2160P_25:
 	case VO_STANDARD_HDTV_4096_2160P_30:
-		if (deep_color)
+		if (color == COLOR_YUV422)
+			config_data = 0x0;
+		else if (deep_color)
 			config_data = 0x3;
 		else
 			config_data = 0x0;
-		break;
 
+		break;
 	/* Depends on 340M_SCRAMBLE support */
 	case VO_STANDARD_HDTV_2160P_50_420:
 	case VO_STANDARD_HDTV_2160P_59_420:
@@ -148,11 +163,11 @@ unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard, unsigned int da
 		if (deep_color)
 			config_data = 0x3;
 		else if (hdmitx_edid_info.scdc_capable&SCDC_340M_SCRAMBLE)
-			config_data = 0x1;/* Scramble, 1/10 */
+			config_data = 0x1;// Scramble, 1/10
 		else
 			config_data = 0x0;
-		break;
 
+		break;
 	/* 3D frame packing, pixel freq*2 */
 	case VO_STANDARD_HDTV_2160P_23_3D:
 	case VO_STANDARD_HDTV_2160P_24_3D:
@@ -172,7 +187,7 @@ unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard, unsigned int da
 				(standard == VO_STANDARD_HDTV_2160P_60_3D) ||
 				(standard == VO_STANDARD_HDTV_4096_2160P_50_3D) ||
 				(standard == VO_STANDARD_HDTV_4096_2160P_60_3D))
-					HDMI_ERROR("4KP50/60 NOT support 3D Frame packing");
+				HDMI_ERROR("4KP50/60 NOT support 3D Frame packing");
 
 			format_3D = 1;
 			config_data = 0x3;
@@ -203,17 +218,15 @@ unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard, unsigned int da
 		ret_val = hdmitx_write_scdc_port(SCDCS_TMDS_Config, config_data);
 		if (ret_val == SCDC_I2C_OK)
 			hdmitx_edid_info.scdc_capable |= SCDC_PRESENT;
-
 		HDMI_INFO("Send SCDC TMDS_Config(0x%02x), deep_color(%u) 3D(%u)",
 			config_data, deep_color, format_3D);
 	} else if ((standard >= VO_STANDARD_HDTV_2160P_60_420) &&
 		(standard <= VO_STANDARD_HDTV_4096_2160P_50_420)) {
-		/* 4K YUV420*/
+		/* 4K YUV420 */
 		HDMI_ERROR("Sink not support SCDC_PRESENT, but YUV420 format should need");
 		ret_val = hdmitx_write_scdc_port(SCDCS_TMDS_Config, config_data);
 		if (ret_val == SCDC_I2C_OK)
 			hdmitx_edid_info.scdc_capable |= SCDC_PRESENT;
-
 		HDMI_INFO("Send SCDC TMDS_Config(0x%02x), deep_color(%u) 3D(%u)",
 			config_data, deep_color, format_3D);
 	}
@@ -223,11 +236,9 @@ unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard, unsigned int da
 
 void hdmitx_scdc_work_func(struct work_struct *work)
 {
+	unsigned char update_flags[2], status_flags[2], err_det[7];
 	unsigned int i;
 	unsigned int sum = 0;
-	unsigned char update_flags[2];
-	unsigned char status_flags[2];
-	unsigned char err_det[7];
 
 	if (hdmitx_read_scdc_port(SCDCS_Update_0, update_flags, 2))
 		return;
@@ -255,7 +266,8 @@ void hdmitx_scdc_work_func(struct work_struct *work)
 			HDMI_DEBUG("SCDC: CED checksum ok");
 	}
 
-	hdmitx_write_scdc_port(SCDCS_Update_0, update_flags[0]);/* Write clear */
+	/* Write clear */
+	hdmitx_write_scdc_port(SCDCS_Update_0, update_flags[0]);
 }
 
 
@@ -297,7 +309,7 @@ void register_hdmitx_scdcrr(struct device_node *dev)
 	tx_scdc.i2c1_req_reg = of_iomap(dev, 1);
 
 	if (tx_scdc.i2c1_req_reg == NULL) {
-		HDMI_ERROR("[%s] Unable to map I2C1_REQ registers", __func__);
+		HDMI_ERROR("[%s] Unable to map I2C1_REQ registers\n", __func__);
 		return;
 	}
 
@@ -307,11 +319,13 @@ void register_hdmitx_scdcrr(struct device_node *dev)
 	/* Get SCDC read request device node */
 	tx_scdc.dev_nd = of_get_child_by_name(dev, "scdc_rr");
 	if (!tx_scdc.dev_nd) {
-		HDMI_ERROR("[%s] Get SCDC read request node fail!", __func__);
+		HDMI_ERROR("[%s] Get SCDC read request node fail!\n", __func__);
 		return;
 	}
 
-	if (of_property_read_u32(tx_scdc.dev_nd, "enable-scdc-rr", &tx_scdc.enable_rr))
+	ret_value = of_property_read_u32(tx_scdc.dev_nd, "enable-scdc-rr",
+		&tx_scdc.enable_rr);
+	if (ret_value)
 		tx_scdc.enable_rr = 0;
 
 	if (!tx_scdc.enable_rr) {
@@ -327,7 +341,7 @@ void register_hdmitx_scdcrr(struct device_node *dev)
 	ret_value = request_irq(tx_scdc.i2c1_irq, hdmitx_scdc_isr,
 		IRQF_SHARED, "hdmitx_scdc", tx_scdc.dev_nd);
 	if (ret_value)
-		HDMI_ERROR("[%s] Request irq fail", __func__);
+		HDMI_ERROR("[%s] Request irq fail\n", __func__);
 
 }
 
@@ -352,7 +366,7 @@ void hdmitx_scdcrr_resume(void)
 	ret_value = request_irq(tx_scdc.i2c1_irq, hdmitx_scdc_isr,
 		IRQF_SHARED, "hdmitx_scdc", tx_scdc.dev_nd);
 	if (ret_value)
-		HDMI_ERROR("[%s] Request irq fail", __func__);
+		HDMI_ERROR("[%s] Request irq fail\n", __func__);
 
 }
 

@@ -31,32 +31,48 @@
 
 #include <net/ip_vs.h>
 
-#if defined(CONFIG_RTL_819X)
-#include <net/rtl/features/rtl_ps_hooks.h>
-#endif /* CONFIG_RTL_819X */
-
 static int
-tcp_conn_schedule(int af, struct sk_buff *skb, struct ip_vs_proto_data *pd,
+tcp_conn_schedule(struct netns_ipvs *ipvs, int af, struct sk_buff *skb,
+		  struct ip_vs_proto_data *pd,
 		  int *verdict, struct ip_vs_conn **cpp,
 		  struct ip_vs_iphdr *iph)
 {
-	struct net *net;
 	struct ip_vs_service *svc;
 	struct tcphdr _tcph, *th;
-	struct netns_ipvs *ipvs;
+	__be16 _ports[2], *ports = NULL;
 
-	th = skb_header_pointer(skb, iph->len, sizeof(_tcph), &_tcph);
-	if (th == NULL) {
+	/* In the event of icmp, we're only guaranteed to have the first 8
+	 * bytes of the transport header, so we only check the rest of the
+	 * TCP packet for non-ICMP packets
+	 */
+	if (likely(!ip_vs_iph_icmp(iph))) {
+		th = skb_header_pointer(skb, iph->len, sizeof(_tcph), &_tcph);
+		if (th) {
+			if (th->rst || !(sysctl_sloppy_tcp(ipvs) || th->syn))
+				return 1;
+			ports = &th->source;
+		}
+	} else {
+		ports = skb_header_pointer(
+			skb, iph->len, sizeof(_ports), &_ports);
+	}
+
+	if (!ports) {
 		*verdict = NF_DROP;
 		return 0;
 	}
-	net = skb_net(skb);
-	ipvs = net_ipvs(net);
+
 	/* No !th->ack check to allow scheduling on SYN+ACK for Active FTP */
 	rcu_read_lock();
-	if ((th->syn || sysctl_sloppy_tcp(ipvs)) && !th->rst &&
-	    (svc = ip_vs_service_find(net, af, skb->mark, iph->protocol,
-				      &iph->daddr, th->dest))) {
+
+	if (likely(!ip_vs_iph_inverse(iph)))
+		svc = ip_vs_service_find(ipvs, af, skb->mark, iph->protocol,
+					 &iph->daddr, ports[1]);
+	else
+		svc = ip_vs_service_find(ipvs, af, skb->mark, iph->protocol,
+					 &iph->saddr, ports[0]);
+
+	if (svc) {
 		int ignored;
 
 		if (ip_vs_todrop(ipvs)) {
@@ -379,6 +395,20 @@ static const char *const tcp_state_name_table[IP_VS_TCP_S_LAST+1] = {
 	[IP_VS_TCP_S_LAST]		=	"BUG!",
 };
 
+static const bool tcp_state_active_table[IP_VS_TCP_S_LAST] = {
+	[IP_VS_TCP_S_NONE]		=	false,
+	[IP_VS_TCP_S_ESTABLISHED]	=	true,
+	[IP_VS_TCP_S_SYN_SENT]		=	true,
+	[IP_VS_TCP_S_SYN_RECV]		=	true,
+	[IP_VS_TCP_S_FIN_WAIT]		=	false,
+	[IP_VS_TCP_S_TIME_WAIT]		=	false,
+	[IP_VS_TCP_S_CLOSE]		=	false,
+	[IP_VS_TCP_S_CLOSE_WAIT]	=	false,
+	[IP_VS_TCP_S_LAST_ACK]		=	false,
+	[IP_VS_TCP_S_LISTEN]		=	false,
+	[IP_VS_TCP_S_SYNACK]		=	true,
+};
+
 #define sNO IP_VS_TCP_S_NONE
 #define sES IP_VS_TCP_S_ESTABLISHED
 #define sSS IP_VS_TCP_S_SYN_SENT
@@ -400,6 +430,13 @@ static const char * tcp_state_name(int state)
 	if (state >= IP_VS_TCP_S_LAST)
 		return "ERR!";
 	return tcp_state_name_table[state] ? tcp_state_name_table[state] : "?";
+}
+
+static bool tcp_state_active(int state)
+{
+	if (state >= IP_VS_TCP_S_LAST)
+		return false;
+	return tcp_state_active_table[state];
 }
 
 static struct tcp_states_t tcp_states [] = {
@@ -524,12 +561,12 @@ set_tcp_state(struct ip_vs_proto_data *pd, struct ip_vs_conn *cp,
 
 		if (dest) {
 			if (!(cp->flags & IP_VS_CONN_F_INACTIVE) &&
-			    (new_state != IP_VS_TCP_S_ESTABLISHED)) {
+			    !tcp_state_active(new_state)) {
 				atomic_dec(&dest->activeconns);
 				atomic_inc(&dest->inactconns);
 				cp->flags |= IP_VS_CONN_F_INACTIVE;
 			} else if ((cp->flags & IP_VS_CONN_F_INACTIVE) &&
-				   (new_state == IP_VS_TCP_S_ESTABLISHED)) {
+				   tcp_state_active(new_state)) {
 				atomic_inc(&dest->activeconns);
 				atomic_dec(&dest->inactconns);
 				cp->flags &= ~IP_VS_CONN_F_INACTIVE;
@@ -552,9 +589,6 @@ tcp_state_transition(struct ip_vs_conn *cp, int direction,
 		     struct ip_vs_proto_data *pd)
 {
 	struct tcphdr _tcph, *th;
-#if defined (CONFIG_RTL_819X)
-	struct ip_vs_protocol *pp;
-#endif /* CONFIG_RTL_819X */
 
 #ifdef CONFIG_IP_VS_IPV6
 	int ihl = cp->af == AF_INET ? ip_hdrlen(skb) : sizeof(struct ipv6hdr);
@@ -568,13 +602,6 @@ tcp_state_transition(struct ip_vs_conn *cp, int direction,
 
 	spin_lock_bh(&cp->lock);
 	set_tcp_state(pd, cp, direction, th);
-#if defined(CONFIG_RTL_819X)
-	if (pd && pd->pp) {
-		pp = pd->pp;
-		rtl_tcp_state_transition_hooks(cp, direction, skb, pp);
-	}
-#endif /* CONFIG_RTL_819X */
-
 	spin_unlock_bh(&cp->lock);
 }
 
@@ -585,14 +612,13 @@ static inline __u16 tcp_app_hashkey(__be16 port)
 }
 
 
-static int tcp_register_app(struct net *net, struct ip_vs_app *inc)
+static int tcp_register_app(struct netns_ipvs *ipvs, struct ip_vs_app *inc)
 {
 	struct ip_vs_app *i;
 	__u16 hash;
 	__be16 port = inc->port;
 	int ret = 0;
-	struct netns_ipvs *ipvs = net_ipvs(net);
-	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(net, IPPROTO_TCP);
+	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(ipvs, IPPROTO_TCP);
 
 	hash = tcp_app_hashkey(port);
 
@@ -611,9 +637,9 @@ static int tcp_register_app(struct net *net, struct ip_vs_app *inc)
 
 
 static void
-tcp_unregister_app(struct net *net, struct ip_vs_app *inc)
+tcp_unregister_app(struct netns_ipvs *ipvs, struct ip_vs_app *inc)
 {
-	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(net, IPPROTO_TCP);
+	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(ipvs, IPPROTO_TCP);
 
 	atomic_dec(&pd->appcnt);
 	list_del_rcu(&inc->p_list);
@@ -623,7 +649,7 @@ tcp_unregister_app(struct net *net, struct ip_vs_app *inc)
 static int
 tcp_app_conn_bind(struct ip_vs_conn *cp)
 {
-	struct netns_ipvs *ipvs = net_ipvs(ip_vs_conn_net(cp));
+	struct netns_ipvs *ipvs = cp->ipvs;
 	int hash;
 	struct ip_vs_app *inc;
 	int result = 0;
@@ -667,9 +693,9 @@ tcp_app_conn_bind(struct ip_vs_conn *cp)
 /*
  *	Set LISTEN timeout. (ip_vs_conn_put will setup timer)
  */
-void ip_vs_tcp_conn_listen(struct net *net, struct ip_vs_conn *cp)
+void ip_vs_tcp_conn_listen(struct ip_vs_conn *cp)
 {
-	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(net, IPPROTO_TCP);
+	struct ip_vs_proto_data *pd = ip_vs_proto_data_get(cp->ipvs, IPPROTO_TCP);
 
 	spin_lock_bh(&cp->lock);
 	cp->state = IP_VS_TCP_S_LISTEN;
@@ -682,10 +708,8 @@ void ip_vs_tcp_conn_listen(struct net *net, struct ip_vs_conn *cp)
  *   timeouts is netns related now.
  * ---------------------------------------------
  */
-static int __ip_vs_tcp_init(struct net *net, struct ip_vs_proto_data *pd)
+static int __ip_vs_tcp_init(struct netns_ipvs *ipvs, struct ip_vs_proto_data *pd)
 {
-	struct netns_ipvs *ipvs = net_ipvs(net);
-
 	ip_vs_init_hash_table(ipvs->tcp_apps, TCP_APP_TAB_SIZE);
 	pd->timeout_table = ip_vs_create_timeout_table((int *)tcp_timeouts,
 							sizeof(tcp_timeouts));
@@ -695,7 +719,7 @@ static int __ip_vs_tcp_init(struct net *net, struct ip_vs_proto_data *pd)
 	return 0;
 }
 
-static void __ip_vs_tcp_exit(struct net *net, struct ip_vs_proto_data *pd)
+static void __ip_vs_tcp_exit(struct netns_ipvs *ipvs, struct ip_vs_proto_data *pd)
 {
 	kfree(pd->timeout_table);
 }

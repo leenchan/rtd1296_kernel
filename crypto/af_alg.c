@@ -149,6 +149,7 @@ EXPORT_SYMBOL_GPL(af_alg_release_parent);
 
 static int alg_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
+	const u32 allowed = CRYPTO_ALG_KERN_DRIVER_ONLY;
 	struct sock *sk = sock->sk;
 	struct alg_sock *ask = alg_sk(sk);
 	struct sockaddr_alg *sa = (void *)uaddr;
@@ -160,6 +161,10 @@ static int alg_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		return -EINVAL;
 
 	if (addr_len != sizeof(*sa))
+		return -EINVAL;
+
+	/* If caller uses non-allowed flag, return error. */
+	if ((sa->salg_feat & ~allowed) || (sa->salg_mask & ~allowed))
 		return -EINVAL;
 
 	sa->salg_type[sizeof(sa->salg_type) - 1] = 0;
@@ -278,7 +283,7 @@ int af_alg_accept(struct sock *sk, struct socket *newsock)
 	if (!type)
 		goto unlock;
 
-	sk2 = sk_alloc(sock_net(sk), PF_ALG, GFP_KERNEL, &alg_proto);
+	sk2 = sk_alloc(sock_net(sk), PF_ALG, GFP_KERNEL, &alg_proto, 0);
 	err = -ENOMEM;
 	if (!sk2)
 		goto unlock;
@@ -367,7 +372,7 @@ static int alg_create(struct net *net, struct socket *sock, int protocol,
 		return -EPROTONOSUPPORT;
 
 	err = -ENOMEM;
-	sk = sk_alloc(net, PF_ALG, GFP_KERNEL, &alg_proto);
+	sk = sk_alloc(net, PF_ALG, GFP_KERNEL, &alg_proto, kern);
 	if (!sk)
 		goto out;
 

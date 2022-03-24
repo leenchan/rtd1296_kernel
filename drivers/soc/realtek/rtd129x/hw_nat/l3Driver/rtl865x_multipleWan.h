@@ -1,10 +1,10 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2010  
+* Copyright c                  Realtek Semiconductor Corporation, 2010
 * All rights reserved.
-* 
+*
 * Program : multiple wan device driver header file
-* Abstract : 
-* Author : hyking (hyking_liu@realsil.com.cn)  
+* Abstract :
+* Author : hyking (hyking_liu@realsil.com.cn)
 *
 * This program is free software; you can redistribute it and/or modify
 * it under the terms of the GNU General Public License as published by

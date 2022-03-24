@@ -62,12 +62,42 @@
 #define EMMC_IP_DESC3			( 0x4ac)
 #define EMMC_MAIN2_DBG			( 0x4b0)
 
-
+#if defined(CONFIG_ARCH_RTD129x)
 #define EMMC_muxpad0				(0x600)	//mux for nand and emmc
 #define EMMC_muxpad1				(0x604)	//mux for sdio and sd card
 #define EMMC_PFUNC_NF1				(0x60c)	
 #define EMMC_PFUNC_CR				(0x610)	
 #define EMMC_muxpad2				(0x61c)
+#define EMMC_PDRIVE_NF0        ( 0x620 )
+#define EMMC_PDRIVE_NF1        ( 0x624 )
+#define EMMC_PDRIVE_NF2        ( 0x628 )
+#define EMMC_PDRIVE_NF3        ( 0x62c )
+#define EMMC_PDRIVE_NF4        ( 0x630 )
+
+#define EMMC_PDRIVE_CR0        ( 0x634 )
+#define EMMC_PDRIVE_CR1        ( 0x638 )
+#define EMMC_PDRIVE_SDIO           ( 0x63c )
+#define EMMC_PDRIVE_SDIO1          ( 0x640 )
+
+#elif defined(CONFIG_ARCH_RTD139x)	//139x
+#define ISO_MUXPAD	( 0x00000000 )
+#define ISO_muxpad4	( ISO_MUXPAD + 0x10 )
+#define pfunc_emmc0	( ISO_MUXPAD + 0x50 )
+#define pfunc_emmc1     ( ISO_MUXPAD + 0x54 )
+#define pfunc_emmc2     ( ISO_MUXPAD + 0x58 )
+#define pfunc_emmc3     ( ISO_MUXPAD + 0x5c )
+#define pfunc_emmc4     ( ISO_MUXPAD + 0x60 )
+#define pfunc_emmc5     ( ISO_MUXPAD + 0x64 )
+
+#elif defined(CONFIG_ARCH_RTD16xx)	//16xx
+#define M2TMX      ( 0x00000000 )
+#define m2tmx_muxpad0     ( M2TMX )
+#define m2tmx_pfunc4     ( M2TMX + 0x1c )
+#define m2tmx_pfunc5     ( M2TMX + 0x20 )
+#define m2tmx_pfunc6     ( M2TMX + 0x24 )
+#define m2tmx_pfunc7     ( M2TMX + 0x28 )
+#define m2tmx_pfunc8     ( M2TMX + 0x2c )
+#endif
 
 //MISC
 #define MISC_GP2DIR 				(0x108)
@@ -96,18 +126,11 @@
 #define EMMC_DQS_CTRL1         ( 0x498 )
 #define EMMC_SWC_SEL           ( 0x4d4 )
 
-#define EMMC_PDRIVE_NF0	       ( 0x620 )
-#define EMMC_PDRIVE_NF1	       ( 0x624 )
-#define EMMC_PDRIVE_NF2	       ( 0x628 )
-#define EMMC_PDRIVE_NF3	       ( 0x62c )
-#define EMMC_PDRIVE_NF4	       ( 0x630 )
-
-#define EMMC_PDRIVE_CR0	       ( 0x634 )
-#define EMMC_PDRIVE_CR1	       ( 0x638 )
-#define EMMC_PDRIVE_SDIO	   ( 0x63c )
-#define EMMC_PDRIVE_SDIO1	   ( 0x640 )
-
-
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#define EMMC_SWC_SEL1          ( 0x4d8 )
+#define EMMC_SWC_SEL2          ( 0x4dc )
+#define EMMC_SWC_SEL3          ( 0x4e0 )
+#endif
 
 #define RESP_LEN64                (0x1)
 #define RESP_LEN17                (0x2)

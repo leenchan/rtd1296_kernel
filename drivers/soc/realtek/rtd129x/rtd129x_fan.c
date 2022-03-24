@@ -19,6 +19,8 @@
 #include <linux/slab.h>
 #include <linux/reset.h>
 #include <linux/clk.h>
+#include <linux/clkdev.h>
+#include <linux/clk-provider.h>
 #include <linux/pwm.h>
 
 #define REG_FAN_CTRL 0x0
@@ -414,11 +416,11 @@ static const struct of_device_id rtk_fan_of_match[] = {
 };
 
 static struct platform_driver rtk_fan_driver = {
-	.probe	= rtk_fan_probe,
-	.remove	= rtk_fan_remove,
+	.probe = rtk_fan_probe,
+	.remove = rtk_fan_remove,
 	.driver = {
-		.name	= "rtk-fan",
-		.owner	= THIS_MODULE,
+		.name = "rtk-fan",
+		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(rtk_fan_of_match),
 	},
 };

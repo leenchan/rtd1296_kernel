@@ -587,6 +587,7 @@ static unsigned int get_slot_status(struct acpiphp_slot *slot)
 {
 	unsigned long long sta = 0;
 	struct acpiphp_func *func;
+	u32 dvid;
 
 	list_for_each_entry(func, &slot->funcs, sibling) {
 		if (func->flags & FUNC_HAS_STA) {
@@ -597,16 +598,24 @@ static unsigned int get_slot_status(struct acpiphp_slot *slot)
 			if (ACPI_SUCCESS(status) && sta)
 				break;
 		} else {
-			u32 dvid;
-
-			pci_bus_read_config_dword(slot->bus,
-						  PCI_DEVFN(slot->device,
-							    func->function),
-						  PCI_VENDOR_ID, &dvid);
-			if (dvid != 0xffffffff) {
+			if (pci_bus_read_dev_vendor_id(slot->bus,
+					PCI_DEVFN(slot->device, func->function),
+					&dvid, 0)) {
 				sta = ACPI_STA_ALL;
 				break;
 			}
+		}
+	}
+
+	if (!sta) {
+		/*
+		 * Check for the slot itself since it may be that the
+		 * ACPI slot is a device below PCIe upstream port so in
+		 * that case it may not even be reachable yet.
+		 */
+		if (pci_bus_read_dev_vendor_id(slot->bus,
+				PCI_DEVFN(slot->device, 0), &dvid, 0)) {
+			sta = ACPI_STA_ALL;
 		}
 	}
 
@@ -632,15 +641,14 @@ static void trim_stale_devices(struct pci_dev *dev)
 {
 	struct acpi_device *adev = ACPI_COMPANION(&dev->dev);
 	struct pci_bus *bus = dev->subordinate;
-	bool alive = false;
+	bool alive = dev->ignore_hotplug;
 
 	if (adev) {
 		acpi_status status;
 		unsigned long long sta;
 
 		status = acpi_evaluate_integer(adev->handle, "_STA", NULL, &sta);
-		alive = (ACPI_SUCCESS(status) && device_status_valid(sta))
-			|| dev->ignore_hotplug;
+		alive = alive || (ACPI_SUCCESS(status) && device_status_valid(sta));
 	}
 	if (!alive)
 		alive = pci_device_is_present(dev);
@@ -676,6 +684,9 @@ static void acpiphp_check_bridge(struct acpiphp_bridge *bridge)
 	if (bridge->is_going_away)
 		return;
 
+	if (bridge->pci_dev)
+		pm_runtime_get_sync(&bridge->pci_dev->dev);
+
 	list_for_each_entry(slot, &bridge->slots, node) {
 		struct pci_bus *bus = slot->bus;
 		struct pci_dev *dev, *tmp;
@@ -695,6 +706,9 @@ static void acpiphp_check_bridge(struct acpiphp_bridge *bridge)
 			disable_slot(slot);
 		}
 	}
+
+	if (bridge->pci_dev)
+		pm_runtime_put(&bridge->pci_dev->dev);
 }
 
 /*
@@ -708,7 +722,7 @@ static void acpiphp_sanitize_bus(struct pci_bus *bus)
 	unsigned long type_mask = IORESOURCE_IO | IORESOURCE_MEM;
 
 	list_for_each_entry_safe_reverse(dev, tmp, &bus->devices, bus_list) {
-		for (i=0; i<PCI_BRIDGE_RESOURCES; i++) {
+		for (i = 0; i < PCI_BRIDGE_RESOURCES; i++) {
 			struct resource *res = &dev->resource[i];
 			if ((res->flags & type_mask) && !res->start &&
 					res->end) {

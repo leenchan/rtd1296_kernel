@@ -89,7 +89,7 @@ int simple_open (struct inode *inode, struct file *filp)
 {
     unsigned int dev = MINOR(inode->i_rdev);
 
-    if (dev >= MAX_SIMPLE_DEV) 
+    if (dev >= MAX_SIMPLE_DEV)
         return -ENODEV;
     filp->f_op = simple_fops[dev];
 #ifdef CONFIG_DEFAULTS_KERNEL_2_6
@@ -154,7 +154,7 @@ int simple_remap_mmap(struct file *filp, struct vm_area_struct *vma)
     if (remap_pfn_range(vma, vma->vm_start, offset, vma->vm_end-vma->vm_start, vma->vm_page_prot))
 #else
     if (remap_page_range(vma->vm_start, offset, vma->vm_end-vma->vm_start, vma->vm_page_prot))
-#endif	    
+#endif
         return -EAGAIN;
 
     vma->vm_ops = &simple_remap_vm_ops;
@@ -180,7 +180,7 @@ struct page *simple_vma_nopage(struct vm_area_struct *vma, unsigned long address
     get_page(pageptr);
     return pageptr;
 }
-        
+
 static struct vm_operations_struct simple_nopage_vm_ops = {
     open:    simple_vma_open,
     close:   simple_vma_close,

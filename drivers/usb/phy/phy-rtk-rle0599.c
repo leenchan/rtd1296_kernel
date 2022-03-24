@@ -22,6 +22,7 @@
 #include <linux/uaccess.h>
 #include <linux/debugfs.h>
 #include <soc/realtek/rtd129x_efuse.h>
+#include <soc/realtek/rtk_chip.h>
 
 #include "phy-rtk-usb.h"
 #ifdef CONFIG_USB_PATCH_ON_RTK
@@ -32,12 +33,12 @@
 
 #define RTK_USB_RLE0599_PHY_NAME "rtk-usb-phy-rle0599"
 
-static struct reg_addr {
+struct reg_addr {
 	void __iomem *REG_WRAP_VStatusOut2;
 	void __iomem *REG_EHCI_INSNREG05;
 };
 
-static struct phy_data {
+struct phy_data {
 	int page0_size;
 	struct rtk_usb_phy_data_s *page0;
 	int page1_size;
@@ -45,6 +46,8 @@ static struct phy_data {
 
 	bool check_efuse;
 	u8 efuse_usb_dp_dm;
+	bool do_toggle;
+	bool use_default_parameter;
 };
 
 static u8 efuse_usb_dp_dm_table[0x10] = {0xe0, 0x80, 0x84, 0x88, 0x8c, 0x90, 0x94, 0x98,
@@ -57,24 +60,6 @@ static u8 efuse_usb_dp_dm_table[0x10] = {0xe0, 0x80, 0x84, 0x88, 0x8c, 0x90, 0x9
 #define USB_ST_BUSY		BIT(17)
 
 static DEFINE_SPINLOCK(rtk_phy_lock);
-
-#define phy_read(addr)			__raw_readl(addr)
-#define phy_write(addr, val)	do { smp_wmb(); __raw_writel(val, addr); } while(0)
-#define PHY_IO_TIMEOUT_MSEC		(50)
-
-int utmi_wait_register(void __iomem *reg, u32 mask, u32 result)
-{
-	unsigned long timeout = jiffies + msecs_to_jiffies(PHY_IO_TIMEOUT_MSEC);
-	while (time_before(jiffies, timeout)) {
-		smp_rmb();
-		if ((phy_read(reg) & mask) == result)
-			return 0;
-		udelay(100);
-	}
-	pr_err("\033[0;32;31m can't program USB phy \033[m\n");
-	return -1;
-}
-EXPORT_SYMBOL_GPL(utmi_wait_register);
 
 static char rtk_usb_phy_read(struct rtk_usb_phy_s *rtk_phy, char addr)
 {
@@ -120,7 +105,6 @@ static int rtk_usb_phy_write(struct rtk_usb_phy_s *rtk_phy, char addr, char data
 	struct reg_addr *regAddr = rtk_phy->reg_addr;
 	void __iomem *REG_WRAP_VStatusOut2 = regAddr->REG_WRAP_VStatusOut2;
 	void __iomem *REG_EHCI_INSNREG05 = regAddr->REG_EHCI_INSNREG05;
-	int shift_bits = rtk_phy->portN*8;
 
 	//printk("[%s:%d], addr = 0x%x, data = 0x%x\n", __FUNCTION__, __LINE__, addr, data);
 
@@ -130,7 +114,7 @@ static int rtk_usb_phy_write(struct rtk_usb_phy_s *rtk_phy, char addr, char data
 	rtk_lockapi_lock(flags,__FUNCTION__);
 #endif
 	//write data to VStatusOut2 (data output to phy)
-	phy_write(REG_WRAP_VStatusOut2, (u32) data<<shift_bits);
+	phy_write(REG_WRAP_VStatusOut2, (u32) data);
 #ifdef CONFIG_USB_PATCH_ON_RTK
 	/* Add global lock for emmc issue*/
 	rtk_lockapi_unlock(flags,__FUNCTION__);
@@ -187,8 +171,13 @@ static int updated_phy_parameter_by_efuse(struct rtk_usb_phy_s *rtk_usb_phy){
 	struct rtk_usb_phy_data_s *phy_page0_default_setting = phy_data->page0;
 	int i;
 
+#if 0
 	value = (efuse_readb(offest) << shift) & mask;
-	dev_dbg(rtk_usb_phy->dev, "Get Efuse EFUSE_USB_DP_DM %x Mask %x\n", efuse_readb(offest), mask);
+	dev_dbg(rtk_usb_phy->dev, "Get Efuse EFUSE_USB_DP_DM %x Mask %x\n",
+		    efuse_readb(offest), mask);
+#else
+	pr_err("%s(): ERROR Need implement efuse_readb\n", __func__);
+#endif
 	phy_data->efuse_usb_dp_dm = value;
 
 	for (i = 0; i<phy_data->page0_size; i++) {
@@ -211,7 +200,7 @@ int rtk_usb_phy_init(struct usb_phy* phy)
 	unsigned long flags;
 
 	struct rtk_usb_phy_s *rtk_phy = (struct rtk_usb_phy_s*) phy;
-	struct reg_addr *regAddr = rtk_phy->reg_addr;
+	//struct reg_addr *regAddr = rtk_phy->reg_addr;
 	struct phy_data *phy_data = rtk_phy->phy_data;
 	struct rtk_usb_phy_data_s *phy_page0_default_setting = phy_data->page0;
 	struct rtk_usb_phy_data_s *phy_page1_default_setting = phy_data->page1;
@@ -219,6 +208,12 @@ int rtk_usb_phy_init(struct usb_phy* phy)
 	spin_lock_irqsave(&rtk_phy_lock, flags);
 
 	if (initialized) goto out;
+
+	if (phy_data->use_default_parameter) {
+		dev_info(phy->dev, "%s phy use default parameter\n",
+			    __func__);
+		goto do_toggle;
+	}
 
 	dev_info(phy->dev, "Init RTK USB phy-rle0599\n");
 
@@ -235,7 +230,8 @@ int rtk_usb_phy_init(struct usb_phy* phy)
 				__FUNCTION__, __LINE__,
 				(phy_page0_default_setting + i)->addr,
 				(phy_page0_default_setting + i)->data);
-			return -1;
+			ret = -1;
+			goto out;
 		} else {
 			dev_dbg(phy->dev, "[%s:%d], page0 Good : addr = 0x%x, value = 0x%x\n",
 				__FUNCTION__, __LINE__,
@@ -264,6 +260,7 @@ int rtk_usb_phy_init(struct usb_phy* phy)
 		}
 	}
 
+do_toggle:
 	rtk_rle0599_phy_toggle(phy, false);
 
 	initialized = 1;
@@ -288,6 +285,9 @@ void rtk_rle0599_phy_toggle(struct usb_phy *usb2_phy, bool isConnect)
 	}
 
 	phy_data = rtk_phy->phy_data;
+
+	if (phy_data && !phy_data->do_toggle) return;
+
 	if (phy_data) {
 		int i;
 		struct rtk_usb_phy_data_s *phy_page0_default_setting = phy_data->page0;
@@ -378,7 +378,7 @@ static const struct file_operations rtk_rle0599_parameter_fops = {
 
 static int rtk_rle0599_set_parameter_show(struct seq_file *s, void *unused)
 {
-	struct rtk_usb_phy_s	*rtk_phy = s->private;
+	//struct rtk_usb_phy_s	*rtk_phy = s->private;
 
 	seq_printf(s, "Set Phy parameter by following command\n");
 	seq_printf(s, "echo \"page addr value\" > set_parameter\n");
@@ -473,7 +473,7 @@ static const struct file_operations rtk_rle0599_set_parameter_fops = {
 
 static int rtk_rle0599_toggle_show(struct seq_file *s, void *unused)
 {
-	struct rtk_usb_phy_s		*rtk_phy = s->private;
+	//struct rtk_usb_phy_s		*rtk_phy = s->private;
 
 	seq_printf(s, "ehco 1 to toggle Page1 addr 0xe0 BIT(2)\n");
 
@@ -490,7 +490,6 @@ static ssize_t rtk_rle0599_toggle_write(struct file *file,
 {
 	struct seq_file		*s = file->private_data;
 	struct rtk_usb_phy_s		*rtk_phy = s->private;
-	unsigned long		flags;
 	char			buf[32];
 
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
@@ -505,113 +504,6 @@ static ssize_t rtk_rle0599_toggle_write(struct file *file,
 static const struct file_operations rtk_rle0599_toggle_fops = {
 	.open			= rtk_rle0599_toggle_open,
 	.write			= rtk_rle0599_toggle_write,
-	.read			= seq_read,
-	.llseek			= seq_lseek,
-	.release		= single_release,
-};
-
-static u32 rtk_rle0599_reg_addr = 0;
-static u32 rtk_rle0599_reg_value = 0;
-
-static int rtk_rle0599_reg_show(struct seq_file *s, void *unused)
-{
-	struct rtk_usb_phy_s		*rtk_phy = s->private;
-	void __iomem *addr;
-	if (rtk_rle0599_reg_addr) {
-		addr = ioremap(rtk_rle0599_reg_addr, 0x4);
-		seq_printf(s, "Register Addr 0x%x = 0x%x\n", rtk_rle0599_reg_addr, readl(addr));
-
-		iounmap(addr);
-	}
-	return 0;
-}
-
-static int rtk_rle0599_reg_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, rtk_rle0599_reg_show, inode->i_private);
-}
-
-static ssize_t rtk_rle0599_reg_write(struct file *file,
-		const char __user *ubuf, size_t count, loff_t *ppos)
-{
-	struct seq_file		*s = file->private_data;
-	struct rtk_usb_phy_s		*rtk_phy = s->private;
-	unsigned long		flags;
-	char			buffer[40] = "";
-	char *buf = buffer;
-
-	u32 addr, value;
-	int ret;
-
-	if (copy_from_user(&buffer, ubuf, min_t(size_t, sizeof(buffer) - 1, count)))
-		return -EFAULT;
-
-	if (!strncmp(buf, "0x98", 4)) {
-		ret = sscanf(buf, "%x %x", &addr, &value);
-		if (addr > 0x98000000 && addr <= 0x98200000) {
-			rtk_rle0599_reg_addr = addr;
-			if (ret > 1) {
-				void __iomem *v_addr = ioremap(rtk_rle0599_reg_addr, 0x4);
-				rtk_rle0599_reg_value = value;
-				writel(rtk_rle0599_reg_value, v_addr);
-				iounmap(v_addr);
-			}
-		} else
-			dev_err(rtk_phy->dev, "Error: to set addr = 0x%x, value = 0x%x\n", addr, value);
-	}
-
-	return count;
-}
-
-static const struct file_operations rtk_rle0599_reg_fops = {
-	.open			= rtk_rle0599_reg_open,
-	.write			= rtk_rle0599_reg_write,
-	.read			= seq_read,
-	.llseek			= seq_lseek,
-	.release		= single_release,
-};
-
-static int rtk_rle0599_debug_show(struct seq_file *s, void *unused)
-{
-	struct rtk_usb_phy_s		*rtk_phy = s->private;
-
-	seq_printf(s, "To Enable/Disable Debug register\n");
-	seq_printf(s, "echo \"enable\" > debug\n");
-
-	return 0;
-}
-
-static int rtk_rle0599_debug_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, rtk_rle0599_debug_show, inode->i_private);
-}
-
-static ssize_t rtk_rle0599_debug_write(struct file *file,
-		const char __user *ubuf, size_t count, loff_t *ppos)
-{
-	static struct dentry *reg_file = NULL;
-	struct seq_file		*s = file->private_data;
-	struct rtk_usb_phy_s		*rtk_phy = s->private;
-	char			buf[32];
-
-	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
-		return -EFAULT;
-
-	if (!strncmp(buf, "enable", 6)) {
-		if (!reg_file)
-		reg_file = debugfs_create_file("reg", S_IRUGO | S_IWUSR, rtk_phy->debug_dir,
-				rtk_phy, &rtk_rle0599_reg_fops);
-	} else if (!strncmp(buf, "disable", 7)) {
-		debugfs_remove(reg_file);
-		reg_file = NULL;
-	}
-
-	return count;
-}
-
-static const struct file_operations rtk_rle0599_debug_fops = {
-	.open			= rtk_rle0599_debug_open,
-	.write			= rtk_rle0599_debug_write,
 	.read			= seq_read,
 	.llseek			= seq_lseek,
 	.release		= single_release,
@@ -647,10 +539,6 @@ static inline void create_debug_files(struct rtk_usb_phy_s *rtk_phy) {
 						&rtk_rle0599_toggle_fops))
 		goto file_error;
 
-	if (!debugfs_create_file("debug", S_IRUGO | S_IWUSR, rtk_phy->debug_dir, rtk_phy,
-						&rtk_rle0599_debug_fops))
-		goto file_error;
-
 	return;
 
 file_error:
@@ -678,9 +566,9 @@ static int rtk_usb_rle0599_phy_probe(struct platform_device *pdev)
 	rtk_usb_phy->phy.shutdown	= rtk_usb_phy_shutdown;
 
 	if (dev->of_node) {
-		ret = of_property_read_u32_index(dev->of_node, "portN", 0, &rtk_usb_phy->portN);
+		ret = of_property_read_u32_index(dev->of_node, "phyN", 0, &rtk_usb_phy->phyN);
 		if (ret) goto err;
-		dev_dbg(dev, "%s %s portN=%d\n", __FILE__, __func__, rtk_usb_phy->portN);
+		dev_dbg(dev, "%s %s phyN=%d\n", __FILE__, __func__, rtk_usb_phy->phyN);
 		addr = devm_kzalloc(dev, sizeof(*addr), GFP_KERNEL);
 		if (!addr) return -ENOMEM;
 
@@ -712,6 +600,12 @@ static int rtk_usb_rle0599_phy_probe(struct platform_device *pdev)
 	if (!phy_data->page1)
 		return -ENOMEM;
 
+	rtk_usb_phy->chip_id = get_rtd_chip_id();
+	rtk_usb_phy->chip_revision = get_rtd_chip_revision();
+
+	dev_info(dev, "%s: Chip %x revision is %x\n", __func__,
+		    rtk_usb_phy->chip_id, rtk_usb_phy->chip_revision);
+
 	if (dev->of_node) {
 		char tmp_addr[phy_data_page0_size];
 		char tmp_data[phy_data_page0_size];
@@ -736,10 +630,21 @@ static int rtk_usb_rle0599_phy_probe(struct platform_device *pdev)
 		}
 		rtk_usb_phy->phy_data = phy_data;
 
+		if (of_property_read_bool(dev->of_node, "do_toggle"))
+			phy_data->do_toggle = true;
+		else
+			phy_data->do_toggle = false;
+
 		if (of_property_read_bool(dev->of_node, "check_efuse"))
 			phy_data->check_efuse = true;
 		else
 			phy_data->check_efuse = false;
+
+		if (of_property_read_bool(dev->of_node, "use_default_parameter"))
+			phy_data->use_default_parameter = true;
+		else
+			phy_data->use_default_parameter = false;
+
 	}
 
 #if 0
@@ -765,7 +670,11 @@ err:
 
 static int rtk_usb_rle0599_phy_remove(struct platform_device *pdev)
 {
-//	struct rtk_usb_phy_s *rtk_usb_phy = platform_get_drvdata(pdev);
+	struct rtk_usb_phy_s *rtk_usb_phy = platform_get_drvdata(pdev);
+
+#ifdef CONFIG_DYNAMIC_DEBUG
+	debugfs_remove_recursive(rtk_usb_phy->debug_dir);
+#endif
 
 #if 0
 	/* Due to usb_add_phy only support one USB2_phy and one USB3_phy
@@ -778,7 +687,7 @@ static int rtk_usb_rle0599_phy_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id usb_phy_rle0599_rtk_dt_ids[] = {
-	{ .compatible = "Realtek,rtk119x-usb_phy_rle0599", },
+	{ .compatible = "Realtek,rtd119x-usb_phy_rle0599", },
 	{ .compatible = "Realtek,rtd129x-usb_phy_rle0599", },
 	{},
 };

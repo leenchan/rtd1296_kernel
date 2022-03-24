@@ -3,10 +3,10 @@
 #include <asm/asm-offsets.h>
 #include <asm/assembler.h>
 
-#ifdef CONFIG_ARCH_RTD129x
+#ifdef CONFIG_RTK_PLATFORM
 #define GICD_BASE 0xFF011000
 #define GICC_BASE 0xFF012000
-#endif /* CONFIG_ARCH_RTD129x */
+#endif /* CONFIG_RTK_PLATFORM */
 
 	.text
 /*
@@ -78,10 +78,9 @@ ENTRY(__cpu_suspend_enter)
 	str	x2, [x0, #SLEEP_STACK_DATA_SYSTEM_REGS + CPU_CTX_SP]
 
 	/* find the mpidr_hash */
-	ldr	x1, =sleep_save_stash
-	ldr	x1, [x1]
+	ldr_l	x1, sleep_save_stash
 	mrs	x7, mpidr_el1
-	ldr	x9, =mpidr_hash
+	adr_l	x9, mpidr_hash
 	ldr	x10, [x9, #MPIDR_HASH_MASK]
 	/*
 	 * Following code relies on the struct mpidr_hash
@@ -100,43 +99,17 @@ ENTRY(__cpu_suspend_enter)
 	mov	x0, #1
 	ret
 ENDPROC(__cpu_suspend_enter)
-	.ltorg
 
-/*
- * x0 must contain the sctlr value retrieved from restored context
- */
-ENTRY(cpu_resume_mmu)
-	ldr	x3, =cpu_resume_after_mmu
-	msr	sctlr_el1, x0		// restore sctlr_el1
-	isb
-
-	br	x3			// global jump to virtual address
-ENDPROC(cpu_resume_mmu)
-cpu_resume_after_mmu:
-#ifdef CONFIG_KASAN
-	mov	x0, sp
-	bl	kasan_unpoison_remaining_stack
-#endif
-	mov	x0, #0			// return zero on success
-	ldp	x19, x20, [sp, #16]
-	ldp	x21, x22, [sp, #32]
-	ldp	x23, x24, [sp, #48]
-	ldp	x25, x26, [sp, #64]
-	ldp	x27, x28, [sp, #80]
-	ldp	x29, lr, [sp], #96
-	ret
-ENDPROC(cpu_resume_after_mmu)
-
-#ifdef CONFIG_ARCH_RTD129x
+#ifdef CONFIG_RTK_PLATFORM
 ENTRY(gic_init_secure)
-	mov	w9, #0x3            /* EnableGrp0 | EnableGrp1 */
-	str	w9, [x0, 0x000]     /* Secure GICD_CTLR */
+	mov	w9, #0x3 /* EnableGrp0 | EnableGrp1 */
+	str	w9, [x0, 0x000] /* Secure GICD_CTLR */
 	ldr	w9, [x0, 0x004]
-	and	w10, w9, #0x1f      /* ITLinesNumber */
-	cbz	w10, 1f             /* No SPIs */
-	add	w10, w10, #0x1      /* Also add SGI/PPI to the counter */
+	and	w10, w9, #0x1f /* ITLinesNumber */
+	cbz	w10, 1f /* No SPIs */
+	add	w10, w10, #0x1 /* Also add SGI/PPI to the counter */
 	add	x11, x0, (0x080)
-	mov	w9, #~0             /* Config SGI/PPI/SPIs as Grp1 */
+	mov	w9, #~0 /* Config SGI/PPI/SPIs as Grp1 */
 0:
 	str	w9, [x11], #0x4
 	sub	w10, w10, #0x1
@@ -146,55 +119,53 @@ ENTRY(gic_init_secure)
 ENDPROC(gic_init_secure)
 
 ENTRY(gic_init_secure_percpu)
-	mov	w9, #~0             /* Config SGIs and PPIs as Grp1 */
-	str	w9, [x0, 0x080]     /* GICD_IGROUPR0 */
-	mov	w9, #0x1            /* Enable SGI 0 */
+	mov	w9, #~0			/* Config SGIs and PPIs as Grp1 */
+	str	w9, [x0, 0x080]		/* GICD_IGROUPR0 */
+	mov	w9, #0x1		/* Enable SGI 0 */
 	str	w9, [x0, 0x100]
-		                    /* Initialize Cpu Interface */
-	mov	w9, #0x1e7          /* Disable IRQ/FIQ Bypass & */
-		                    /* Enable Ack Group1 Interrupt & */
-		                    /* EnableGrp0 & EnableGrp1 */
-	str	w9, [x1, 0x000]     /* Secure GICC_CTLR */
-	mov	w9, #0xf8           /* Non-Secure access to GICC_PMR */
+					/* Initialize Cpu Interface */
+	mov	w9, #0x1e7		/* Disable IRQ/FIQ Bypass & */
+					/* Enable Ack Group1 Interrupt & */
+					/* EnableGrp0 & EnableGrp1 */
+	str	w9, [x1, 0x000]		/* Secure GICC_CTLR */
+	mov	w9, #0xf8		/* Non-Secure access to GICC_PMR */
 	str	w9, [x1, 0x004]
 	ret
 ENDPROC(gic_init_secure_percpu)
-#endif /* CONFIG_ARCH_RTD129x */
+#endif /* CONFIG_RTK_PLATFORM */
 
+	.pushsection ".idmap.text", "awx"
 ENTRY(cpu_resume)
-
 #ifdef CONFIG_ARCH_RTD129x
-	bl	dcache_disable
-
 	ldr	x0, =GICD_BASE
 	bl	gic_init_secure
-
 	ldr	x0, =GICD_BASE
 	ldr	x1, =GICC_BASE
 	bl	gic_init_secure_percpu
-
 	bl	armv8_switch_to_el2
 #endif /* CONFIG_ARCH_RTD129x */
 
 	bl	el2_setup		// if in EL2 drop to EL1 cleanly
+	bl	__cpu_setup
 	/* enable the MMU early - so we can access sleep_save_stash by va */
-	adr_l	lr, __enable_mmu	/* __cpu_setup will return here */
-	ldr	x27, =_cpu_resume	/* __enable_mmu will branch here */
-	adrp	x25, idmap_pg_dir
-	adrp	x26, swapper_pg_dir
-	b	__cpu_setup
+	bl	__enable_mmu
+	ldr	x8, =_cpu_resume
+	br	x8
 ENDPROC(cpu_resume)
+	.ltorg
+	.popsection
 
 ENTRY(_cpu_resume)
 	mrs	x1, mpidr_el1
-	adrp	x8, mpidr_hash
-	add x8, x8, #:lo12:mpidr_hash // x8 = struct mpidr_hash phys address
-        /* retrieve mpidr_hash members to compute the hash */
+	adr_l	x8, mpidr_hash		// x8 = struct mpidr_hash virt address
+
+	/* retrieve mpidr_hash members to compute the hash */
 	ldr	x2, [x8, #MPIDR_HASH_MASK]
 	ldp	w3, w4, [x8, #MPIDR_HASH_SHIFTS]
 	ldp	w5, w6, [x8, #(MPIDR_HASH_SHIFTS + 8)]
 	compute_mpidr_hash x7, x3, x4, x5, x6, x1, x2
-        /* x7 contains hash index, let's use it to grab context pointer */
+
+	/* x7 contains hash index, let's use it to grab context pointer */
 	ldr_l	x0, sleep_save_stash
 	ldr	x0, [x0, x7, lsl #3]
 	add	x29, x0, #SLEEP_STACK_DATA_CALLEE_REGS
@@ -202,9 +173,6 @@ ENTRY(_cpu_resume)
 	/* load sp from context */
 	ldr	x2, [x0, #CPU_CTX_SP]
 	mov	sp, x2
-	/* save thread_info */
-	and	x2, x2, #~(THREAD_SIZE - 1)
-	msr	sp_el0, x2
 	/*
 	 * cpu_do_resume expects x0 to contain context address pointer
 	 */
@@ -212,7 +180,7 @@ ENTRY(_cpu_resume)
 
 #ifdef CONFIG_KASAN
 	mov	x0, sp
-	bl	kasan_unpoison_remaining_stack
+	bl	kasan_unpoison_task_stack_below
 #endif
 
 	ldp	x19, x20, [x29, #16]

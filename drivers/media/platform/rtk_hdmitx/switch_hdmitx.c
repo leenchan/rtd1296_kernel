@@ -57,12 +57,6 @@ static struct task_struct *hdmitx_hpd_tsk;
 #define RX_SENSE_COUNT_MAX 2
 #endif
 
-static ssize_t hdmitx_switch_print_state(struct switch_dev *sdev, char *buffer)
-{
-	HDMI_DEBUG("hdmitx_switch_print_state");
-	return sprintf(buffer, "%d", s_data.state);
-}
-
 int hdmitx_switch_get_state(void)
 {
 	return s_data.state;
@@ -139,8 +133,10 @@ static int hdmitx_switch_thread(void *arg)
 			if (state == 1) {
 				hdmitx_get_sink_capability((asoc_hdmi_t *)hdmitx_get_drvdata(pdev));
 				rxsense_count = 0;
+				set_i2s_output(I2S_OUT_OFF);
 			} else {
 				hdmitx_reset_sink_capability((asoc_hdmi_t *)hdmitx_get_drvdata(pdev));
+				set_i2s_output(I2S_OUT_ON);
 			}
 
 			s_data.state = state;
@@ -162,7 +158,6 @@ static void hdmitx_switch_work_func(struct work_struct *work)
 	asoc_hdmi_t *drvdata = (asoc_hdmi_t *)hdmitx_get_drvdata(pdev);
 
 	state = gpio_get_value(s_data.pin);
-	s_data.state = state;
 
 	HDMI_INFO("%s:start", state?"plugged in":"pulled out");
 
@@ -176,7 +171,8 @@ static void hdmitx_switch_work_func(struct work_struct *work)
 
 	HDMI_INFO("%s:done", state?"plugged in":"pulled out");
 
-	if (s_data.state != switch_get_state(sdev)) {
+	if (state != switch_get_state(sdev)) {
+		s_data.state = state;
 		switch_set_state(sdev, s_data.state);
 		HDMI_INFO("Switch state to %u", s_data.state);
 
@@ -189,16 +185,22 @@ static void hdmitx_switch_work_func(struct work_struct *work)
 
 			if (hdmitx_edid_info.scdc_capable&SCDC_RR_CAPABLE)
 				enable_hdmitx_scdcrr(1);
+
+			set_i2s_output(I2S_OUT_OFF);
 		} else {
 			if (get_hpd_interlock())
 				Hdmi_SetHPD(0);/* Set HDMI RX HPD */
 
 			enable_hdmitx_scdcrr(0);
+			set_i2s_output(I2S_OUT_ON);
 		}
 	}
 
-}
+#if 1//def __LINUX_MEDIA_NAS__
+	wake_up_interruptible(&pdev->hpd_wait);
 #endif
+}
+#endif /* end of #if HDMI_RX_SENSE_SUPPORT */
 
 static irqreturn_t hdmitx_switch_isr(int irq, void *data)
 {
@@ -211,6 +213,7 @@ static irqreturn_t hdmitx_switch_isr(int irq, void *data)
 int register_hdmitx_switchdev(hdmitx_device_t *device)
 {
 	int ret;
+	int hpd_state;
 
 	HDMI_DEBUG("register_hdmitx_switch");
 
@@ -218,9 +221,7 @@ int register_hdmitx_switchdev(hdmitx_device_t *device)
 		return -ENOMEM;
 
 	sdev = &device->sdev;
-
 	sdev->name = HDMI_SWITCH_NAME;
-	sdev->print_state = hdmitx_switch_print_state;
 
 	ret = switch_dev_register(sdev);
 	if (ret < 0) {
@@ -230,13 +231,13 @@ int register_hdmitx_switchdev(hdmitx_device_t *device)
 
 	/* Get hotplug pin state */
 	s_data.pin  = device->hpd_gpio;
+	s_data.state = 0;
 	gpio_direction_input(s_data.pin);
 	gpio_set_debounce(s_data.pin, 30*1000); /* 30ms */
-	s_data.state = gpio_get_value(s_data.pin);
+	hpd_state = gpio_get_value(s_data.pin);
 
 #if HDMI_RX_SENSE_SUPPORT
 	/* Hotplug/Rxsense detect polling therad */
-	s_data.state = 0;
 	hdmitx_hpd_tsk = kthread_run(hdmitx_switch_thread, sdev, "hdmitx_hpd_thread");
 	if (IS_ERR(hdmitx_hpd_tsk)) {
 		HDMI_ERROR("Create hdmitx_hpd_tsk fail");
@@ -246,7 +247,7 @@ int register_hdmitx_switchdev(hdmitx_device_t *device)
 	/* Init hotplug work function and ISR */
 	INIT_WORK(&s_data.work, hdmitx_switch_work_func);
 
-	if (s_data.state)
+	if (hpd_state)
 		schedule_work(&s_data.work);
 
 	s_data.irq = device->hpd_irq;
@@ -269,7 +270,7 @@ EXPORT_SYMBOL(register_hdmitx_switchdev);
 
 void deregister_hdmitx_switchdev(hdmitx_device_t *device)
 {
-    return switch_dev_unregister(&device->sdev);
+	return switch_dev_unregister(&device->sdev);
 }
 EXPORT_SYMBOL(deregister_hdmitx_switchdev);
 
@@ -300,7 +301,7 @@ int rtk_hdmitx_switch_suspend(void)
 #else
 	disable_irq(s_data.irq);
 	free_irq(s_data.irq, &pdev->dev);
-	HDMI_DEBUG("%s free irq=%x", __func__, s_data.irq);
+	HDMI_DEBUG("%s free irq=%x ", __func__, s_data.irq);
 
 	/* Cancel work and wait for it to finish */
 	cancel_work_sync(&s_data.work);
@@ -351,7 +352,7 @@ int rtk_hdmitx_switch_resume(void)
 	irq_set_irq_type(s_data.irq, IRQ_TYPE_EDGE_BOTH);
 	ret = request_irq(s_data.irq, hdmitx_switch_isr, IRQF_SHARED, "switch_hdmitx", &pdev->dev);
 	if (ret)
-		HDMI_ERROR("cannot register IRQ %d", s_data.irq);
+		HDMI_ERROR("Cannot register IRQ %d", s_data.irq);
 #endif
 
 	return 0;

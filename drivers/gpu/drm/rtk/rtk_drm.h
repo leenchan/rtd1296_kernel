@@ -20,16 +20,12 @@
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_fb_helper.h>
 #include <linux/kthread.h>
+
 #include "rtk_drm_fb_ion.h"
 #include "../../../video/fbdev/rtk/rtk_fb.h"
 
 #include "../../../staging/android/ion/ion.h"
-#include "../../../staging/android/uapi/rtk_phoenix_ion.h"
-
-#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
-#include <linux/kds.h>
-#endif
-
+#include "../../../staging/android/uapi/ion_rtk.h"
 extern struct ion_device *rtk_phoenix_ion_device;
 
 #define DRIVER_AUTHOR    "Realtek"
@@ -76,9 +72,7 @@ extern struct ion_device *rtk_phoenix_ion_device;
 
 //#define RTK_USE_FBHELPER
 
-#ifndef CONFIG_DMA_SHARED_BUFFER_USES_KDS
 #define PAGE_FLIP_ALING_WITH_VBLANK
-#endif
 
 struct rtk_drm_plane {
     struct drm_plane base;
@@ -91,15 +85,6 @@ struct rtk_drm_plane_state {
 struct rtk_drm_planes {
     struct rtk_drm_plane *primary;
 };
-
-#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
-struct rtk_drm_flip_resource {
-    struct kds_resource_set *kds_res_set;
-    struct drm_framebuffer *fb;
-    struct drm_crtc *crtc;
-    struct drm_pending_vblank_event *event;
-};
-#endif
 
 struct rtk_drm_crtc {
     struct drm_crtc base;
@@ -114,8 +99,6 @@ struct rtk_drm_crtc {
     struct task_struct *  swap_thread;
     struct kthread_work   swap_work;
     struct kthread_worker swap_worker;
-
-    struct dc_buffer *last_buf;
 };
 
 struct rtk_drm_connector {
@@ -136,10 +119,6 @@ struct rtk_drm_private {
     struct drm_fbdev_ion *     fbhelper;
 #endif
     struct task_struct *       vblank_task;
-
-#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
-    struct kds_callback        kds_cb;
-#endif
 };
 
 #define RTK_CRTC_FROM_CRTC(x)               (container_of(x, struct rtk_drm_crtc, base))

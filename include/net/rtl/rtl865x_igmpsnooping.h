@@ -150,7 +150,7 @@ int32 rtl_getGroupNum(uint32 ipVersion);
 
 #ifdef CONFIG_PROC_FS
 int igmp_show(struct seq_file *s, void *v);
-int igmp_write(struct file *file, const char __user *buffer, size_t count,
+ssize_t igmp_write(struct file *file, const char __user *buffer, size_t count,
 	loff_t *data);
 #endif
 

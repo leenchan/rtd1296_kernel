@@ -153,7 +153,7 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 
                 if (map_data == rtk_cmd_keys[i].scancode) {
 
-			pr_debug("[getscancode] found! keycode=%d scancode=0x%x !\n", rtk_cmd_keys[i].keycode, rtk_cmd_keys[i].scancode);
+			pr_err("[getscancode] found! keycode=%d scancode=0x%x !\n", rtk_cmd_keys[i].keycode, rtk_cmd_keys[i].scancode);
 
 			if ( i == 0) {
 				trigger_cmd = 1;
@@ -178,7 +178,7 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
         }
 #else
         i = 0;
-        pr_debug("[getscancode] found! keycode=%d scancode=0x%x !\n", rtk_cmd_keys[i].keycode, rtk_cmd_keys[i].scancode);
+        pr_err("[getscancode] found! keycode=%d scancode=0x%x !\n", rtk_cmd_keys[i].keycode, rtk_cmd_keys[i].scancode);
         input_report_key(input, rtk_cmd_keys[i].keycode, 1);
         input_event(input, EV_SYN, SYN_REPORT, rtk_cmd_keys[i].rx);
 
@@ -370,7 +370,7 @@ static int gpio_keys_setup_key(struct platform_device *pdev,
                         return -EINVAL;
 			
 		}
-#endif
+
 		ldo_gpio = of_get_named_gpio(node, "5679_ldo", 0);
                 if (gpio_is_valid(ldo_gpio)) {
 
@@ -388,7 +388,8 @@ static int gpio_keys_setup_key(struct platform_device *pdev,
                         }
 
                 }
-
+#endif
+				
 		INIT_DELAYED_WORK(&bdata->work, gpio_keys_gpio_work_func);
 
 		isr = gpio_keys_gpio_isr;

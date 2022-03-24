@@ -35,13 +35,12 @@
 #define rd_reg(x)                       readl((volatile unsigned int*)(x))
 
 #define field_get(val, start, end) 		(((val) & field_mask(start, end)) >> (end))
-#define field_mask(start, end)    		(((1 << (start - end + 1)) - 1) << (end))
-#define setbits(base,offset, Mask) 		wr_reg( (base+offset), ( rd_reg(base+offset) | Mask))
-#define readbits(value, Mask) 			((value >> (Mask)) & 0x1)
-#define clearbits(base,offset, Mask)	wr_reg((base+offset),(rd_reg(base+offset) & ~(Mask)))
+#define field_mask(start, end)          (((1 << (start - end + 1)) - 1) << (end))
+#define setbits(base, offset, Mask)     wr_reg((base+offset), (rd_reg(base+offset) | Mask))
+#define readbits(value, Mask)           ((value >> (Mask)) & 0x1)
+#define clearbits(base, offset, Mask)	wr_reg((base+offset), (rd_reg(base+offset) & ~(Mask)))
 
-
-#define WR_REG_32(base, offset, val)    writel(val,(volatile unsigned int*)(base + offset))
+#define WR_REG_32(base, offset, val)    writel(val, (volatile unsigned int*)(base + offset))
 #define RD_REG_32(base, offset)         readl((volatile unsigned int*)(base + offset))
 
 #define FLD_GET(val, start, end) (((val) & FLD_MASK(start, end)) >> (end))
@@ -56,6 +55,7 @@
 
 #define MAX_3D_VIC	16
 #define MAX_SPEC_3D	18
+
 
 enum HDMI_MODE {
 	HDMI_MODE_UNDEF = 0,
@@ -117,7 +117,7 @@ struct Audio_desc {
 } __attribute__ ((packed));
 
 struct Audio_Data {
-	/*  Audio Data Block */
+	/* Audio Data Block */
 	char ADB_length;
 	struct Audio_desc ADB[10];
 	/* Speaker Allocation Data Block */
@@ -125,14 +125,9 @@ struct Audio_Data {
 	unsigned char SADB[3];
 } __attribute__ ((packed));
 
-/**
- * struct Specific_3D - Specific VIC 3D Information
- * @vic: video ID code
- * @format: 0:Frame packing, 6:Top-and-Bottom, 8:Side-by-Side(Half)
- */
 struct Specific_3D {
 	unsigned char vic;
-	unsigned char format;
+	unsigned char format;// 0:Frame packing, 6:Top-and-Bottom, 8:Side-by-Side(Half)
 } __attribute__ ((packed));
 
 struct Video_Display_Info {
@@ -155,7 +150,7 @@ struct sink_capabilities_t {
 
 	/* Vendor-Specific Data Block(VSDB) */
 	unsigned char cec_phy_addr[2];
-	bool support_AI;  /* needs info from ACP or ISRC packets */
+	bool support_AI; /* needs info from ACP or ISRC packets */
 	bool DC_Y444; /* 4:4:4 in deep color modes */
 	unsigned char color_space;
 	bool dvi_dual; /* DVI Dual Link Operation */
@@ -167,15 +162,15 @@ struct sink_capabilities_t {
 	/* 3D */
 	bool _3D_present;
 	__u16 structure_all;
-	unsigned char _3D_vic[16];
-	struct Specific_3D spec_3d[18];
+	unsigned char _3D_vic[MAX_3D_VIC];
+	struct Specific_3D spec_3d[MAX_SPEC_3D];
 
 	/* Video */
 	struct Video_Display_Info display_info;
-	__u64 vic; /* VIC 1~64, BIT0=VIC1 */
+	__u64 vic;/* VIC 1~64, BIT0=VIC1 */
 	unsigned char extended_vic;
-	__u64 vic2; /* VIC 65~128, BIT0=VIC65 */
-	__u64 vic2_420; /* YCbCr420 format, VIC 65~128, BIT0=VIC65 */
+	__u64 vic2;//VIC 65~128, BIT0=VIC65
+	__u64 vic2_420;//YCbCr420 format, VIC 65~128, BIT0=VIC65
 	struct VIDEO_RPC_VOUT_EDID_DATA vout_edid_data;
 } __attribute__ ((packed));
 
@@ -288,14 +283,27 @@ enum HDMI_VIDEO_ID_CODE {
 	VIC_4096X2160P60 = 102,
 };
 
+enum HDMI_COLOR_MODE {
+	COLOR_RGB = 0,
+	COLOR_YUV422 = 1,
+	COLOR_YUV444 = 2,
+	COLOR_YUV420 =3,
+};
+
 enum HDMI_3D_MODE {
 	FORMAT_3D_OFF = 0,
+	/* RTK player Frame Packing */
+	FORMAT_RTK_3D_FP = 1,
+	/* RTK player Side by side half */
+	FORMAT_RTK_3D_SS = 2,
+	/* RTK player Top and Buttom */
+	FORMAT_RTK_3D_TB = 3,
 	/* Frame Packing */
-	FORMAT_3D_FP = 1,
+	FORMAT_3D_FP = 4,
 	/* Side by side half */
-	FORMAT_3D_SS = 2,
+	FORMAT_3D_SS = 5,
 	/* Top and Buttom */
-	FORMAT_3D_TB = 3,
+	FORMAT_3D_TB = 6,
 };
 
 enum HDMI_HDR_MODE {
@@ -303,8 +311,9 @@ enum HDMI_HDR_MODE {
 	HDR_MODE_AUTO = 0,
 	/* Dolby Vision */
 	HDR_MODE_DV = 1,
+	/* HDR OFF */
 	HDR_MODE_SDR = 2,
-	HDR_MODE_GAMMA =3,
+	HDR_MODE_GAMMA = 3,
 	/* HDR10 */
 	HDR_MODE_HDR10 = 4,
 	/* reserved future */
@@ -319,6 +328,7 @@ enum HDMI_HDR_MODE {
 	HDR_MODE_DV_12B_RGB444 = 11,
 	/* Dolby Vision, RGB 8bit */
 	HDR_MODE_DV_ON_INPUT = 12,
+	HDR_MODE_DV_ON_LOW_LATENCY_12b422_INPUT = 13,
 };
 
 /**
@@ -326,7 +336,7 @@ enum HDMI_HDR_MODE {
  * @mode: 0-OFF; 1-DVI; 2-HDMI
  * @vic: Video ID code
  * @freq_shift: 0-No freq shift, 1-set freq shift
- * @color: 0-RGB444; 1-YUV422; 2-YUV444; 3-YUV420
+ * @color: enum HDMI_COLOR_MODE
  * @color_depth: 8-8bit, 10-10bit, 12-12bit
  * @_3d_format: enum HDMI_3D_MODE
  * @hdr: enum HDMI_HDR_MODE
@@ -366,7 +376,7 @@ struct ext_edid {
 };
 
 #define HDMI_IOCTL_MAGIC 0xf1
-#define HDMI_CHECK_LINK_STATUS			_IOR(HDMI_IOCTL_MAGIC, 2,  int)
+#define HDMI_CHECK_LINK_STATUS			_IOR(HDMI_IOCTL_MAGIC, 2, int)
 #define HDMI_CHECK_Rx_Sense				_IOR(HDMI_IOCTL_MAGIC, 11, int)
 #define HDMI_GET_EXT_BLK_COUNT			_IOR(HDMI_IOCTL_MAGIC, 12, int)
 #define HDMI_GET_EXTENDED_EDID			_IOWR(HDMI_IOCTL_MAGIC, 13, struct ext_edid)
@@ -375,6 +385,12 @@ struct ext_edid {
 #define HDMI_GET_EDID_SUPPORT_LIST		_IOWR(HDMI_IOCTL_MAGIC, 16, struct hdmi_support_list)
 #define HDMI_SET_OUTPUT_FORMAT			_IOWR(HDMI_IOCTL_MAGIC, 17, struct hdmi_format_setting)
 #define HDMI_GET_OUTPUT_FORMAT			_IOWR(HDMI_IOCTL_MAGIC, 18, struct hdmi_format_setting)
+#define HDMI_SET_VO_INTERFACE_TYPE		_IOW(HDMI_IOCTL_MAGIC, 19, int)
+#define HDMI_GET_CONFIG_TV_SYSTEM		_IOR(HDMI_IOCTL_MAGIC, 20, struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM)
+
+
+#define HDMI_HOTPLUG_DETECTION			_IOWR(HDMI_IOCTL_MAGIC,21, int)
+#define HDMI_WAIT_HOTPLUG				_IOWR(HDMI_IOCTL_MAGIC,22, int)
 
 
 /* HDMI ioctl */
@@ -411,6 +427,7 @@ enum HDMI_RX_SENSE_STATUS {
 #define USE_ION_AUDIO_HEAP
 
 /* switch_hdmitx */
+int hdmitx_switch_get_state(void);
 #if HDMI_RX_SENSE_SUPPORT
 int hdmitx_switch_get_hpd(void);
 #endif
@@ -423,9 +440,12 @@ unsigned char get_hpd_interlock(void);
 
 /* rtk_mute_gpio */
 void set_mute_gpio_pulse(void);
+#define I2S_OUT_ON 1
+#define I2S_OUT_OFF 0
+void set_i2s_output(int gpio_value);
 void setup_mute_gpio(struct device_node *dev);
 
-/* hdmitx_dbg */
+/* hdmitx_config */
 unsigned int gen_hdmi_format_support(struct hdmi_format_support *tx_support,
 	struct sink_capabilities_t *sink_cap,
 	struct edid_information *info);
@@ -433,13 +453,20 @@ int tv_system_to_hdmi_format(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *tv_system,
 	struct hdmi_format_setting *format);
 int set_hdmitx_format(struct hdmi_format_setting *format);
 int get_hdmitx_format(struct hdmi_format_setting *format);
+void set_vo_interface_type(int type);
 
-#ifdef CONFIG_HDMITX_DBG
+
+#ifndef CONFIG_RTK_HDCP_1x
 void register_config_tv_system_sysfs(struct device *dev);
 #else
 #define register_config_tv_system_sysfs(...) (void)0
 #endif
 
 void register_support_list_sysfs(struct device *dev);
+
+#ifdef CONFIG_RTK_HDCP_1x_TEE
+extern void ta_hdcp14_init(void);
+extern int ta_hdcp_fix480p(void);
+#endif
 
 #endif /* _HDMITX_H_ */

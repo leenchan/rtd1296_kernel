@@ -12,29 +12,18 @@
 #ifndef __DPTX_CORE_H__
 #define __DPTX_CORE_H__
 
-#include <linux/switch.h>
 #include <linux/miscdevice.h>
-#include <linux/io.h>
+#include <linux/switch.h>
 #include <linux/semaphore.h>
 
-#include "dptx_rpc.h"
 #include "dptx_hwapi.h"
 #include "dptx_edid.h"
+#include "dptx_rpc.h"
 
-#define DPTX_MAX_CLKS 3
-#define DPTX_MAX_RESET 4
+#define TX_SUPPORT_MAX 25
 
-#define RTK_DPTX_DEBUG 1
-
-#if RTK_DPTX_DEBUG
-#define DPTX_DEBUG(format, ...) printk(KERN_ERR "[DPTX_DBG] " format, ## __VA_ARGS__)
-#else
 #define DPTX_DEBUG(format, ...)
-#endif
-
 #define DPTX_ERR(format, ...) printk(KERN_ERR "[DPTX_ERR] " format, ## __VA_ARGS__)
-
-//#define SELF_TEST
 
 enum {
 	DPTX_GET_SINK_CAPABILITY,
@@ -48,40 +37,98 @@ enum {
 	DPTX_SEND_AUDIO_MUTE,
 	DPTX_SEND_AUDIO_VSDB_DATA,
 	DPTX_SEND_AUDIO_EDID2,
-	DPTX_CHECK_TMDS_SRC,	
+	DPTX_CHECK_TMDS_SRC,
+	// new added ioctl from kernel 4.9
+	DPTX_GET_EDID_SUPPORT_LIST,
+	DPTX_GET_OUTPUT_FORMAT,
+	DPTX_SET_OUTPUT_FORMAT,
+#if 1//def __LINUX_MEDIA_NAS__
+	DPTX_HOTPLUG_DETECTION = 50,
+	DPTX_WAIT_HOTPLUG = 51,
+#endif
+};
+
+enum DPTX_VIDEO_ID_CODE {
+	VIC_720X480P60 = 2,
+	VIC_1280X720P60 = 4,
+	VIC_1920X1080I60 = 5,
+	VIC_720X480I60 = 6,
+	VIC_1920X1080P60 = 16,
+	VIC_720X576P50 = 17,
+	VIC_1280X720P50 = 19,
+	VIC_1920X1080I50 = 20,
+	VIC_720X576I50 = 21,
+	VIC_1920X1080P50 = 31,
+	VIC_1920X1080P24 = 32,
+	VIC_1920X1080P25 = 33,
+	VIC_1920X1080P30 = 34,
+	VIC_3840X2160P24 = 93,
+	VIC_3840X2160P25 = 94,
+	VIC_3840X2160P30 = 95,
+	VIC_3840X2160P50 = 96,
+	VIC_3840X2160P60 = 97,
+	VIC_4096X2160P24 = 98,
+	VIC_4096X2160P25 = 99,
+	VIC_4096X2160P30 = 100,
+	VIC_4096X2160P50 = 101,
+	VIC_4096X2160P60 = 102,
+	VIC_1024X768P60 = 231,
+	VIC_1440X768P60 = 232,
+	VIC_1440X900P60 = 233,
+	VIC_1280X800P60 = 234,
+	VIC_960X544P60 = 235,
+};
+
+struct dptx_format_setting {
+	unsigned char mode;
+	unsigned char vic;
+	unsigned char display_mode; // same source, different source..
+	unsigned char reserved1;
+};
+
+struct dptx_format_support {
+	unsigned char vic;
+	unsigned char reserved1;
+	unsigned char reserved2;
+	unsigned char reserved3;
+};
+
+struct dptx_support_list {
+	struct dptx_format_support tx_support[TX_SUPPORT_MAX];
+	unsigned int tx_support_size;
 };
 
 struct rtk_dptx_switch {
 	struct switch_dev sw;
-
-	unsigned int hpd_irq;
-	unsigned int hpd_gpio;
-	unsigned int state;
-
 	struct delayed_work work;
+
+	int hpd_irq;
+	int hpd_gpio;
+	unsigned int state;
 };
 
 struct rtk_dptx_device {
-	struct rtk_dptx_hwinfo hwinfo;
-
-	struct clk *clks[DPTX_MAX_CLKS];
-	struct reset_control *rstc[DPTX_MAX_RESET];
-	
-	unsigned int dptx_irq;
-	unsigned int power_state;
-	unsigned int ignore_edid;
-
 	struct device *dev;
 	struct miscdevice miscdev;
-
 	struct rtk_dptx_switch swdev;
+	struct rtk_dptx_hwinfo hwinfo;
+	struct dptx_format_setting format;
+	struct dptx_support_list list;
 	struct ion_client *rpc_ion_client;
 
+	struct clk *tve_clk;
+	struct reset_control *lvds_rst;
 	asoc_dptx_t cap;
+	
+	unsigned int ignore_edid;
+	unsigned int dptx_irq;
+
+	unsigned int dptx_en;
+	unsigned int selftest;
+	unsigned int isr_signal;
+	wait_queue_head_t hpd_wait;
 };
 
-int register_dptx_switch(struct rtk_dptx_device *dptx_dev);
 int dptx_switch_get_state(struct rtk_dptx_switch *swdev);
-int rtk_dptx_switch_suspend(struct rtk_dptx_device *dptx_dev);
-int rtk_dptx_switch_resume(struct rtk_dptx_device *dptx_dev);
+int register_dptx_switch(struct rtk_dptx_device *dptx_dev);
 #endif  //__DPTX_CORE_H__

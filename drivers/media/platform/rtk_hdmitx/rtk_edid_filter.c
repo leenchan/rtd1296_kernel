@@ -12,6 +12,7 @@
 #include <drm/drm_edid.h>
 #include <drm/drm_crtc.h>
 #include <linux/types.h>
+#include <soc/realtek/rtk_chip.h>
 
 #include "hdmitx.h"
 #include "rtk_edid.h"
@@ -20,6 +21,7 @@
 struct edid_product_info_t {
 	unsigned char mfg_name[2];
 	unsigned char prod_code[2];
+	unsigned int serial;
 	__u64 vic_mask;/* VIC 1~64, BIT0=VIC1 */
 	__u64 vic2_mask;/* VIC 65~128, BIT0=VIC65 */
 	unsigned char extended_vic_mask;
@@ -27,48 +29,55 @@ struct edid_product_info_t {
 };
 
 
-#define PRODUCT_INFO_SIZE 4
+#define PRODUCT_INFO_SIZE 3
 
 static const struct edid_product_info_t product_info[] = {
-	/* ActivPanel AP4-55 doesn't support 4K */
 	{.mfg_name[0] = 0x2E, .mfg_name[1] = 0x83,
 	.prod_code[0] = 0x00, .prod_code[1] = 0x55,
+	.serial = 1,
 	.vic_mask = 0xFFFFFFFFFFFFFFFF,
 	.vic2_mask = 0x0,
 	.extended_vic_mask = 0x0,
 	.vic2_420_mask = 0x0},
-	/*DENON_AVR-2312CI doesn't support 4K */
+	/* DENON_AVR-2312CI */
 	{.mfg_name[0] = 0x11, .mfg_name[1] = 0xee,
 	.prod_code[0] = 0x28, .prod_code[1] = 0x00,
+	.serial = 0x01010101,
 	.vic_mask = 0xFFFFFFFFFFFFFFFF,
 	.vic2_mask = 0x0,
 	.extended_vic_mask = 0x0,
 	.vic2_420_mask = 0x0},
-	/* HiTV doesn't support 6G 4K */
-	{.mfg_name[0] = 0x22, .mfg_name[1] = 0x69,
-	.prod_code[0] = 0x01, .prod_code[1] = 0x00,
+	/* DENON_AVR-1610 */
+	{.mfg_name[0] = 0x11, .mfg_name[1] = 0xee,
+	.prod_code[0] = 0x14, .prod_code[1] = 0x00,
+	.serial = 0x01010101,
 	.vic_mask = 0xFFFFFFFFFFFFFFFF,
 	.vic2_mask = 0x0,
-	.extended_vic_mask = 0xFF,
-	.vic2_420_mask = 0xFFFFFFFFFFFFFFFF},
-	/* Optika doesn't support 6G 4K */
-	{.mfg_name[0] = 0x12, .mfg_name[1] = 0xCC,
-	.prod_code[0] = 0x96, .prod_code[1] = 0x40,
-	.vic_mask = 0xFFFFFFFFFFFFFFFF,
-	.vic2_mask = 0x0,
-	.extended_vic_mask = 0xFF,
-	.vic2_420_mask = 0xFFFFFFFFFFFFFFFF},
+	.extended_vic_mask = 0x0,
+	.vic2_420_mask = 0x0},
 };
 
 int rtk_filter_specific_profuct_vic(struct edid *edid, struct sink_capabilities_t *sink_cap)
 {
 	int i;
 
+	if (get_rtd_chip_id() == CHIP_ID_RTD1392) {
+		/* Filter 4K VIC */
+		sink_cap->vic2 = 0;
+		sink_cap->extended_vic = 0;
+		sink_cap->vic2_420 = 0;
+	} else if ((get_rtd_chip_id() == CHIP_ID_RTD1395) && (get_rtd_chip_revision() == RTD_CHIP_A02)) {
+		sink_cap->vic2 = 0;
+		sink_cap->extended_vic = 0;
+		sink_cap->vic2_420 = 0;
+	}
+
 	for (i = 0; i < PRODUCT_INFO_SIZE; i++) {
 		if ((edid->mfg_id[0] == product_info[i].mfg_name[0]) &&
 			(edid->mfg_id[1] == product_info[i].mfg_name[1]) &&
 			(edid->prod_code[0] == product_info[i].prod_code[0]) &&
-			(edid->prod_code[1] == product_info[i].prod_code[1])) {
+			(edid->prod_code[1] == product_info[i].prod_code[1]) &&
+			(edid->serial == product_info[i].serial)) {
 
 			sink_cap->vic = sink_cap->vic&product_info[i].vic_mask;
 			sink_cap->vic2 = sink_cap->vic2&product_info[i].vic2_mask;

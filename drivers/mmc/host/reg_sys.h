@@ -1,8 +1,8 @@
 /*
- * Realtek eMMC header file
+ * Realtek EMMC driver
  *
  * Authors:
- * Copyright (C) 2015 Realtek Ltd.
+ * Copyright (C) 2017 Realtek Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as

@@ -2796,10 +2796,17 @@ static int32 _rtl865x_setAclToAsic(int32 startIdx, rtl865x_AclRule_t *rule)
 
 l3l4_shared:
 		 entry.ruleType = rule->ruleType_;
+		 #if defined(CONFIG_RTD_1295_HWNAT)
+		 entry.is.L3L4.sIPP = htonl(rule->srcIpAddr_);
+		 entry.is.L3L4.sIPM = htonl(rule->srcIpAddrMask_);
+		 entry.is.L3L4.dIPP = htonl(rule->dstIpAddr_);
+		 entry.is.L3L4.dIPM = htonl(rule->dstIpAddrMask_);
+		 #else /* CONFIG_RTD_1295_HWNAT */
 		 entry.is.L3L4.sIPP = rule->srcIpAddr_;
 		 entry.is.L3L4.sIPM = rule->srcIpAddrMask_;
 		 entry.is.L3L4.dIPP = rule->dstIpAddr_;
 		 entry.is.L3L4.dIPM = rule->dstIpAddrMask_;
+		 #endif /* CONFIG_RTD_1295_HWNAT */
 		 break;
 
 	case RTL865X_ACL_SRCFILTER:		/* TCP Rule Type: 0x0008 */
@@ -4806,28 +4813,28 @@ int  rtl865x_add_pattern_acl_for_contentFilter(rtl865x_AclRule_t *rule,char *net
 	if(rule == NULL)
 		return FAILED;
 
-		rtl865x_add_acl(rule, netifName, RTL865X_ACL_SYSTEM_USED);
-		netif = _rtl865x_getNetifByName(netifName);
-		if(netif == NULL)
-			return FAILED;
-		vlan = _rtl8651_getVlanTableEntry(netif->vid);
-		if(vlan == NULL)
-			return FAILED;
+	rtl865x_add_acl(rule, netifName, RTL865X_ACL_SYSTEM_USED);
+	netif = _rtl865x_getNetifByName(netifName);
+	if(netif == NULL)
+		return FAILED;
+	vlan = _rtl8651_getVlanTableEntry(netif->vid);
+	if(vlan == NULL)
+		return FAILED;
 
-		u.pat[0]='T';
-		u.pat[1]='T';
-		u.pat[2]='P';
-		u.pat[3]='/';
-		for(i=0;i<RTL8651_PORT_NUMBER;i++)
-		{
-			if (vlan->memberPortMask & 1<<i) {
-				if(rtl8651_setAsicPortPatternMatch(i, u.pattern, 0xffffffff, 0x2)!=SUCCESS)
-					return FAILED;
-			}
-
+	u.pat[0]='T';
+	u.pat[1]='T';
+	u.pat[2]='P';
+	u.pat[3]='/';
+	for(i=0;i<RTL8651_PORT_NUMBER;i++)
+	{
+		if (vlan->memberPortMask & 1<<i) {
+			if(rtl8651_setAsicPortPatternMatch(i, u.pattern, 0xffffffff, 0x2)!=SUCCESS)
+				return FAILED;
 		}
 
-		return SUCCESS;
+	}
+
+	return SUCCESS;
 }
 
 int  rtl865x_del_pattern_acl_for_contentFilter(rtl865x_AclRule_t *rule,char *netifName)
@@ -6047,4 +6054,3 @@ uint8* rtl_get_netif_gmac(char *name)
 	return entry->macAddr.octet;
 }
 #endif
-

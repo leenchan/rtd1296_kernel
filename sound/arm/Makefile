@@ -1,10 +1,8 @@
 #
 # Makefile for ALSA
 #
-#ccflags-y := -std=gnu99 -Wno-declaration-after-statement
-ccflags-y += -I$(srctree)/drivers/soc/realtek/rtd129x/rpc
-#ccflags-y += -DAO_ON_SCPU
-#ccflags-y += -DRTK_TRACE_ALSA_EN
+
+ccflags-y += -I$(srctree)/drivers/soc/realtek/common/rpc
 ccflags-y += -Werror
 
 obj-$(CONFIG_SND_ARMAACI)	+= snd-aaci.o
@@ -20,7 +18,7 @@ snd-pxa2xx-lib-$(CONFIG_SND_PXA2XX_LIB_AC97)	+= pxa2xx-ac97-lib.o
 obj-$(CONFIG_SND_PXA2XX_AC97)	+= snd-pxa2xx-ac97.o
 snd-pxa2xx-ac97-objs		:= pxa2xx-ac97.o
 
-obj-$(CONFIG_SND_REALTEK)      += snd-realtek-driver.o
-snd-realtek-driver-objs     := snd-realtek.o snd-realtek-compress.o snd-realtek_RPC.o \
-   snd-realtek-notify.o 
+obj-$(CONFIG_SND_REALTEK)	+= snd-realtek-driver.o
+snd-realtek-driver-objs	:= snd-realtek.o snd-realtek-compress.o snd-realtek_RPC.o snd-realtek-notify.o
 
+obj-$(CONFIG_REALTEK_FL3236)	+= fl3236.o

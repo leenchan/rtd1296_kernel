@@ -114,7 +114,24 @@ void rtl_glueMutexUnlock(void);
 #include <linux/spinlock.h>
 extern int lock_owner_igmp;
 extern spinlock_t lock_igmp;
+extern int lock_owner_igmp_concurrent;
+extern spinlock_t lock_igmp_concurrent;
 
+#ifdef CONFIG_PREEMPT
+#define SMP_LOCK_IGMP(__x__)    \
+	do { \
+		get_cpu(); \
+		if (lock_owner_igmp != smp_processor_id()) { \
+			lock_owner_igmp = smp_processor_id(); \
+			put_cpu(); \
+			spin_lock_irqsave(&lock_igmp, (__x__)); \
+		} else {\
+			lock_owner_igmp = smp_processor_id();\
+			put_cpu(); \
+			rtlglue_printf("[%s %s %d] recursion detection in IGMP\n", __FILE__, __FUNCTION__, __LINE__); \
+		} \
+	} while (0)
+#else
 #define SMP_LOCK_IGMP(__x__)	\
 	do { \
 		if (lock_owner_igmp != smp_processor_id()) \
@@ -123,12 +140,17 @@ extern spinlock_t lock_igmp;
 			rtlglue_printf("[%s %s %d] recursion detection in IGMP\n", __FILE__, __FUNCTION__, __LINE__); \
 		lock_owner_igmp = smp_processor_id();\
 	} while (0)
+#endif
 
 #define SMP_UNLOCK_IGMP(__x__) \
 	do { \
 		lock_owner_igmp = -1; \
 		spin_unlock_irqrestore(&lock_igmp, (__x__)); \
 	} while (0)
+
+#define SMP_LOCK_IGMP_CONCURRENT(__x__)			spin_lock_irqsave(&lock_igmp_concurrent, (__x__))
+#define SMP_UNLOCK_IGMP_CONCURRENT(__x__) 		spin_unlock_irqrestore(&lock_igmp_concurrent, (__x__))
+
 #else
 #define SMP_LOCK_IGMP(__x__)
 #define SMP_UNLOCK_IGMP(__x__)

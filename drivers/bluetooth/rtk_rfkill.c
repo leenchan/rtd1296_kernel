@@ -25,6 +25,7 @@
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
 
+
 static struct rfkill *bt_rfk;
 static const char bt_name[] = "bluetooth";
 static  int bt_reset;
@@ -47,7 +48,8 @@ static struct rfkill_ops rfkill_bluetooth_ops = {
 
 static void rfkill_gpio_init(struct device_node *rtk119x_bt_node)
 {
-	/*get gpio number from device tree*/
+	/*initial gpios*/
+	/* get gpio number from device tree*/
 	bt_reset = of_get_gpio_flags(rtk119x_bt_node, 0, NULL);
 
 	if (bt_reset < 0)
@@ -111,7 +113,7 @@ static int rfkill_bluetooth_remove(struct platform_device *dev)
 	return 0;
 }
 static const struct of_device_id rtk119x_bt_ids[] = {
-	{ .compatible = "Realtek,rfkill" },
+	{ .compatible = "realtek,rfkill" },
 	{ /* Sentinel */ },
 };
 static struct platform_driver rfkill_bluetooth_driver = {

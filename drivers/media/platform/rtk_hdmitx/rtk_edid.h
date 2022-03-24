@@ -37,6 +37,7 @@ void print_color_space(u8 var);
 void hdmi_print_raw_edid(unsigned char *edid);
 
 /* rtk_edid_filter.c */
-int rtk_filter_specific_profuct_vic(struct edid *edid, struct sink_capabilities_t *sink_cap);
+int rtk_filter_specific_profuct_vic(struct edid *edid,
+	struct sink_capabilities_t *sink_cap);
 
 #endif /* _RTK_EDID_H_*/

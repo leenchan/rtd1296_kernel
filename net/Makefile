@@ -34,6 +34,8 @@ obj-$(CONFIG_IRDA)		+= irda/
 obj-$(CONFIG_BT)		+= bluetooth/
 obj-$(CONFIG_SUNRPC)		+= sunrpc/
 obj-$(CONFIG_AF_RXRPC)		+= rxrpc/
+obj-$(CONFIG_AF_KCM)		+= kcm/
+obj-$(CONFIG_STREAM_PARSER)	+= strparser/
 obj-$(CONFIG_ATM)		+= atm/
 obj-$(CONFIG_L2TP)		+= l2tp/
 obj-$(CONFIG_DECNET)		+= decnet/
@@ -77,9 +79,13 @@ endif
 ifeq ($(CONFIG_RTL_IPTABLES_FAST_PATH),y)
 obj-$(CONFIG_RTL_IPTABLES_FAST_PATH) += rtl/fastpath/
 endif
+ifneq ($(CONFIG_NET_L3_MASTER_DEV),)
+obj-y				+= l3mdev/
+endif
 ifeq ($(CONFIG_NET),y)
 ifeq ($(CONFIG_RTL_819X),y)
 obj-$(CONFIG_RTL_819X) += rtl/features/
 endif
 endif
-obj-$(CONFIG_NET_ACTIVITY_STATS)		+= activity_stats.o
+obj-$(CONFIG_QRTR)		+= qrtr/
+obj-$(CONFIG_NET_NCSI)		+= ncsi/

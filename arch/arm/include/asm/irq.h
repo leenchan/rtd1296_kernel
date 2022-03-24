@@ -3,10 +3,15 @@
 
 #define NR_IRQS_LEGACY	16
 
+
+#ifdef CONFIG_ARCH_RTD119X
+#include <mach/irqs.h>
+#else
 #ifndef CONFIG_SPARSE_IRQ
 #include <mach/irqs.h>
 #else
 #define NR_IRQS NR_IRQS_LEGACY
+#endif
 #endif
 
 #ifndef irq_canonicalize
@@ -35,8 +40,16 @@ extern void (*handle_arch_irq)(struct pt_regs *);
 extern void set_handle_irq(void (*handle_irq)(struct pt_regs *));
 #endif
 
-void arch_trigger_all_cpu_backtrace(bool);
-#define arch_trigger_all_cpu_backtrace arch_trigger_all_cpu_backtrace
+#ifdef CONFIG_SMP
+extern void arch_trigger_cpumask_backtrace(const cpumask_t *mask,
+					   bool exclude_self);
+#define arch_trigger_cpumask_backtrace arch_trigger_cpumask_backtrace
+#endif
+
+static inline int nr_legacy_irqs(void)
+{
+	return NR_IRQS_LEGACY;
+}
 
 #endif
 

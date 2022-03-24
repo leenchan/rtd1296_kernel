@@ -29,7 +29,9 @@
 #define RTL819X_PRIV_IOCTL_ENABLE 1	/* mark_add */
 #define CONFIG_RTL_PHY_PATCH		1
 #define RTK_QUE			1
-#if defined(CONFIG_NET_WIRELESS_AGN) || defined(CONFIG_RTL8192SE) || defined(CONFIG_RTL8192CD) || defined(CONFIG_RTL8192CD_MODULE)
+#if defined(CONFIG_NET_WIRELESS_AGN) || defined(CONFIG_RTL8192SE) ||\
+	defined(CONFIG_RTL8192CD) || defined(CONFIG_RTL8192CD_MODULE) ||\
+	(defined(CONFIG_RTD_1295_HWNAT) && defined(CONFIG_RTL_BR_SHORTCUT))
 
 #if !defined(CONFIG_RTL_NO_BR_SHORTCUT)
 #if !defined(CONFIG_RTL_FASTBRIDGE)	/* &&!defined(CONFIG_RPS) */
@@ -38,11 +40,17 @@
 #endif
 
 #endif
+#if defined(CONFIG_RTD_1295_HWNAT) && defined(CONFIG_RTL_BR_SHORTCUT)
+#define CONFIG_WIRELESS_LAN_MODULE
+#endif /* CONFIG_RTD_1295_HWNAT && CONFIG_RTL_BR_SHORTCUT */
+
 /*
 *#define	CONFIG_RTL_MULTI_LAN_DEV	1
 */
 
+#if defined(CONFIG_RTL_TSO)
 #define CONFIG_RTL_ETH_NAPI_SUPPORT 1
+#endif /* CONFIG_RTL_TSO */
 
 #if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
 #define CONFIG_RTL_ETH_NAPI_GRO_SUPPORT 1
@@ -251,6 +259,11 @@ struct lan_dev_bind_mask_drv {
 #define	RTL_LANVLANID_4		RTL_LANVLANID
 #define 	RTL_LANVLANID_5		RTL_LANVLANID
 #else
+#if defined(CONFIG_RTD_1295_HWNAT)
+#if defined(CONFIG_RTL_CPU_TAG)
+#define	RTL_LANVLANID_0		14
+#endif /* CONFIG_RTL_CPU_TAG */
+#endif /* CONFIG_RTD_1295_HWNAT */
 #define	RTL_LANVLANID_1		9
 #define	RTL_LANVLANID_2		10
 #define	RTL_LANVLANID_3		11
@@ -358,6 +371,9 @@ typedef struct _ps_drv_netif_mapping_s {
 
 int32 rtl865x_changeOpMode(int mode);
 
+int rtl819x_retore_hw_ip(void);
+int get_dev_ip_mask(const char *name, unsigned int *ip, unsigned int *mask);
+
 #if defined(CONFIG_RTL_ETH_PRIV_SKB)
 __MIPS16 __IRAM_FWD int is_rtl865x_eth_priv_buf(unsigned char *head);
 void free_rtl865x_eth_priv_buf(unsigned char *head);
@@ -405,12 +421,18 @@ extern int rtl_hw_vlan_ignore_tagged_mc;
 #define RTL_DROP_OUT_OF_BR_SUBNET_FRAME 1
 
 #if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-struct iphdr *rtl_get_pppoe_ipv4_hdr(unsigned char *data, int check_from_mac,
-	unsigned short protocol);
-int rtl_is_pppoe_igmp_bridge_frame(struct sk_buff *skb, int check_from_mac,
-	unsigned char *dest);
+struct iphdr * rtl_get_pppoe_ipv4_hdr(unsigned char *data, int check_from_mac, unsigned short protocol);
+#if defined(CONFIG_RTL_MLD_SNOOPING)
+struct ipv6hdr * rtl_get_pppoe_ipv6_hdr(unsigned char *data, int check_from_mac, unsigned short protocol);
+#endif
+int rtl_is_pppoe_igmp_bridge_frame(struct sk_buff *skb, int check_from_mac, unsigned char *dest);
 #define PPPOE_IGMP  1
 #define PPPOE_UDP   2
 #define PPPOE_TCP   3
+#if defined(CONFIG_RTL_MLD_SNOOPING)
+#define PPPOE_ICMPV6  4
+#define PPPOE_UDPV6  5
+#define PPPOE_TCPV6  6
+#endif
 #endif
 #endif

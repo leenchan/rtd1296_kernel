@@ -41,8 +41,8 @@
 										( RtkHomeGatewayChipRevisionID >= RTL865X_CHIP_REV_B		/* REV */ ))	|| \
 										( RtkHomeGatewayChipNameID == RTL865X_CHIP_VER_RTL8196B		/* CHIP */ ) ||\
 										( RtkHomeGatewayChipNameID == RTL865X_CHIP_VER_RTL8196C		/* CHIP */ ))
-										
-#endif	
 
-#endif	
+#endif
+
+#endif
 

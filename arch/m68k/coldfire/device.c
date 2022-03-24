@@ -89,7 +89,7 @@ static struct platform_device mcf_uart = {
 	.dev.platform_data	= mcf_uart_platform_data,
 };
 
-#ifdef CONFIG_FEC
+#if IS_ENABLED(CONFIG_FEC)
 
 #ifdef CONFIG_M5441x
 #define FEC_NAME	"enet-fec"
@@ -135,7 +135,11 @@ static struct platform_device mcf_fec0 = {
 	.id			= 0,
 	.num_resources		= ARRAY_SIZE(mcf_fec0_resources),
 	.resource		= mcf_fec0_resources,
-	.dev.platform_data	= FEC_PDATA,
+	.dev = {
+		.dma_mask		= &mcf_fec0.dev.coherent_dma_mask,
+		.coherent_dma_mask	= DMA_BIT_MASK(32),
+		.platform_data		= FEC_PDATA,
+	}
 };
 
 #ifdef MCFFEC_BASE1
@@ -167,7 +171,11 @@ static struct platform_device mcf_fec1 = {
 	.id			= 1,
 	.num_resources		= ARRAY_SIZE(mcf_fec1_resources),
 	.resource		= mcf_fec1_resources,
-	.dev.platform_data	= FEC_PDATA,
+	.dev = {
+		.dma_mask		= &mcf_fec1.dev.coherent_dma_mask,
+		.coherent_dma_mask	= DMA_BIT_MASK(32),
+		.platform_data		= FEC_PDATA,
+	}
 };
 #endif /* MCFFEC_BASE1 */
 #endif /* CONFIG_FEC */
@@ -329,7 +337,7 @@ static struct platform_device mcf_qspi = {
 
 static struct platform_device *mcf_devices[] __initdata = {
 	&mcf_uart,
-#ifdef CONFIG_FEC
+#if IS_ENABLED(CONFIG_FEC)
 	&mcf_fec0,
 #ifdef MCFFEC_BASE1
 	&mcf_fec1,

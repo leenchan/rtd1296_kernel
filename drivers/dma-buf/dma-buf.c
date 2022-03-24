@@ -29,13 +29,13 @@
 #include <linux/anon_inodes.h>
 #include <linux/export.h>
 #include <linux/debugfs.h>
+#include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/poll.h>
 #include <linux/reservation.h>
-#ifdef CONFIG_KDS
-#include <linux/poll.h>
-#include <linux/sched.h>
-#endif
+#include <linux/mm.h>
+
+#include <uapi/linux/dma-buf.h>
 
 static inline int is_dma_buf_file(struct file *);
 
@@ -75,10 +75,8 @@ static int dma_buf_release(struct inode *inode, struct file *file)
 
 	if (dmabuf->resv == (struct reservation_object *)&dmabuf[1])
 		reservation_object_fini(dmabuf->resv);
-#ifdef CONFIG_KDS
-    kds_callback_term(&dmabuf->kds_cb);
-    kds_resource_term(&dmabuf->kds);
-#endif
+
+	module_put(dmabuf->owner);
 	kfree(dmabuf);
 	return 0;
 }
@@ -93,45 +91,12 @@ static int dma_buf_mmap_internal(struct file *file, struct vm_area_struct *vma)
 	dmabuf = file->private_data;
 
 	/* check for overflowing the buffer's size */
-	if (vma->vm_pgoff + ((vma->vm_end - vma->vm_start) >> PAGE_SHIFT) >
+	if (vma->vm_pgoff + vma_pages(vma) >
 	    dmabuf->size >> PAGE_SHIFT)
 		return -EINVAL;
 
 	return dmabuf->ops->mmap(dmabuf, vma);
 }
-
-#ifdef CONFIG_KDS
-static void dma_buf_kds_cb_fn(void *param1, void *param2)
-{
-   struct kds_resource_set **rset_ptr = param1;
-   struct kds_resource_set *rset = *rset_ptr;
-   wait_queue_head_t *wait_queue = param2;
-
-   kfree(rset_ptr);
-   kds_resource_set_release(&rset);
-   wake_up(wait_queue);
-}
-
-static int dma_buf_kds_check(struct kds_resource *kds,
-        long unsigned int exclusive, int *poll_ret)
-{
-    /* Synchronous wait with 0 timeout - poll availability */
-    struct kds_resource_set *rset = kds_waitall(1,&exclusive,&kds,0);
-
-    if (IS_ERR(rset))
-        return POLLERR;
-
-    if (rset){
-        kds_resource_set_release(&rset);
-        *poll_ret = POLLIN | POLLRDNORM;
-        if (exclusive)
-            *poll_ret |=  POLLOUT | POLLWRNORM;
-        return 1;
-    } else{
-        return 0;
-    }
-}
-#endif
 
 static loff_t dma_buf_llseek(struct file *file, loff_t offset, int whence)
 {
@@ -170,7 +135,6 @@ static void dma_buf_poll_cb(struct fence *fence, struct fence_cb *cb)
 	spin_unlock_irqrestore(&dcb->poll->lock, flags);
 }
 
-#ifndef CONFIG_KDS
 static unsigned int dma_buf_poll(struct file *file, poll_table *poll)
 {
 	struct dma_buf *dmabuf;
@@ -191,6 +155,7 @@ static unsigned int dma_buf_poll(struct file *file, poll_table *poll)
 	events = poll_requested_events(poll) & (POLLIN | POLLOUT);
 	if (!events)
 		return 0;
+
 retry:
 	seq = read_seqcount_begin(&resv->seq);
 	rcu_read_lock();
@@ -288,63 +253,59 @@ out:
 	rcu_read_unlock();
 	return events;
 }
-#else
-static unsigned int dma_buf_poll(struct file *file,
-                                 struct poll_table_struct *wait)
+
+static long dma_buf_ioctl(struct file *file,
+			  unsigned int cmd, unsigned long arg)
 {
 	struct dma_buf *dmabuf;
-	struct kds_resource *kds;
-	unsigned int ret = 0;
+	struct dma_buf_sync sync;
+	enum dma_data_direction direction;
+	int ret;
 
-	if (!is_dma_buf_file(file)) {
-        printk(KERN_ALERT "[%s %d]\n", __FUNCTION__, __LINE__);
-		return POLLERR;
-    }
 	dmabuf = file->private_data;
-	kds    = &dmabuf->kds;
 
-	if (poll_does_not_wait(wait)){
-		/* Check for exclusive access (superset of shared) first */
-		if(!dma_buf_kds_check(kds, 1ul, &ret))
-			dma_buf_kds_check(kds, 0ul, &ret);
-	}else{
-		int events = poll_requested_events(wait);
-		unsigned long exclusive;
-		wait_queue_head_t *wq;
-		struct kds_resource_set **rset_ptr = kmalloc(sizeof(*rset_ptr), GFP_KERNEL);
+	switch (cmd) {
+	case DMA_BUF_IOCTL_SYNC:
+		if (copy_from_user(&sync, (void __user *) arg, sizeof(sync)))
+			return -EFAULT;
 
-		if (!rset_ptr) {
-            printk(KERN_ALERT "[%s %d]\n", __FUNCTION__, __LINE__);
-			return POLL_ERR;
-        }
-		if (events & POLLOUT){
-			wq = &dmabuf->wq_exclusive;
-			exclusive = 1;
-		}else{
-			wq = &dmabuf->wq_shared;
-			exclusive = 0;
+		if (sync.flags & ~DMA_BUF_SYNC_VALID_FLAGS_MASK)
+			return -EINVAL;
+
+		switch (sync.flags & DMA_BUF_SYNC_RW) {
+		case DMA_BUF_SYNC_READ:
+			direction = DMA_FROM_DEVICE;
+			break;
+		case DMA_BUF_SYNC_WRITE:
+			direction = DMA_TO_DEVICE;
+			break;
+		case DMA_BUF_SYNC_RW:
+			direction = DMA_BIDIRECTIONAL;
+			break;
+		default:
+			return -EINVAL;
 		}
-		poll_wait(file, wq, wait);
-		ret = kds_async_waitall(rset_ptr/*, KDS_FLAG_LOCKED_WAIT*/, &dmabuf->kds_cb,
-		                        rset_ptr, wq, 1, &exclusive, &kds);
 
-		if (IS_ERR_VALUE(ret)){
-			ret = POLL_ERR;
-			kfree(rset_ptr);
-		}else{
-			/* Can't allow access until callback */
-			ret = 0;
-		}
+		if (sync.flags & DMA_BUF_SYNC_END)
+			ret = dma_buf_end_cpu_access(dmabuf, direction);
+		else
+			ret = dma_buf_begin_cpu_access(dmabuf, direction);
+
+		return ret;
+	default:
+		return -ENOTTY;
 	}
-	return ret;
 }
-#endif
 
 static const struct file_operations dma_buf_fops = {
 	.release	= dma_buf_release,
 	.mmap		= dma_buf_mmap_internal,
 	.llseek		= dma_buf_llseek,
 	.poll		= dma_buf_poll,
+	.unlocked_ioctl	= dma_buf_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= dma_buf_ioctl,
+#endif
 };
 
 /*
@@ -376,6 +337,8 @@ struct dma_buf *dma_buf_export(const struct dma_buf_export_info *exp_info)
 	struct reservation_object *resv = exp_info->resv;
 	struct file *file;
 	size_t alloc_size = sizeof(struct dma_buf);
+	int ret;
+
 	if (!exp_info->resv)
 		alloc_size += sizeof(struct reservation_object);
 	else
@@ -393,14 +356,20 @@ struct dma_buf *dma_buf_export(const struct dma_buf_export_info *exp_info)
 		return ERR_PTR(-EINVAL);
 	}
 
+	if (!try_module_get(exp_info->owner))
+		return ERR_PTR(-ENOENT);
+
 	dmabuf = kzalloc(alloc_size, GFP_KERNEL);
-	if (dmabuf == NULL)
-		return ERR_PTR(-ENOMEM);
+	if (!dmabuf) {
+		ret = -ENOMEM;
+		goto err_module;
+	}
 
 	dmabuf->priv = exp_info->priv;
 	dmabuf->ops = exp_info->ops;
 	dmabuf->size = exp_info->size;
 	dmabuf->exp_name = exp_info->exp_name;
+	dmabuf->owner = exp_info->owner;
 	init_waitqueue_head(&dmabuf->poll);
 	dmabuf->cb_excl.poll = dmabuf->cb_shared.poll = &dmabuf->poll;
 	dmabuf->cb_excl.active = dmabuf->cb_shared.active = 0;
@@ -414,8 +383,8 @@ struct dma_buf *dma_buf_export(const struct dma_buf_export_info *exp_info)
 	file = anon_inode_getfile("dmabuf", &dma_buf_fops, dmabuf,
 					exp_info->flags);
 	if (IS_ERR(file)) {
-		kfree(dmabuf);
-		return ERR_CAST(file);
+		ret = PTR_ERR(file);
+		goto err_dmabuf;
 	}
 
 	file->f_mode |= FMODE_LSEEK;
@@ -423,17 +392,18 @@ struct dma_buf *dma_buf_export(const struct dma_buf_export_info *exp_info)
 
 	mutex_init(&dmabuf->lock);
 	INIT_LIST_HEAD(&dmabuf->attachments);
-#ifdef CONFIG_KDS
-    init_waitqueue_head(&dmabuf->wq_exclusive);
-    init_waitqueue_head(&dmabuf->wq_shared);
-    kds_resource_init(&dmabuf->kds);
-    kds_callback_init(&dmabuf->kds_cb, 1, dma_buf_kds_cb_fn);
-#endif
+
 	mutex_lock(&db_list.lock);
 	list_add(&dmabuf->list_node, &db_list.head);
 	mutex_unlock(&db_list.lock);
 
 	return dmabuf;
+
+err_dmabuf:
+	kfree(dmabuf);
+err_module:
+	module_put(exp_info->owner);
+	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_GPL(dma_buf_export);
 
@@ -581,7 +551,7 @@ EXPORT_SYMBOL_GPL(dma_buf_detach);
 struct sg_table *dma_buf_map_attachment(struct dma_buf_attachment *attach,
 					enum dma_data_direction direction)
 {
-	struct sg_table *sg_table = ERR_PTR(-EINVAL);
+	struct sg_table *sg_table;
 
 	might_sleep();
 
@@ -619,6 +589,22 @@ void dma_buf_unmap_attachment(struct dma_buf_attachment *attach,
 }
 EXPORT_SYMBOL_GPL(dma_buf_unmap_attachment);
 
+static int __dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
+				      enum dma_data_direction direction)
+{
+	bool write = (direction == DMA_BIDIRECTIONAL ||
+		      direction == DMA_TO_DEVICE);
+	struct reservation_object *resv = dmabuf->resv;
+	long ret;
+
+	/* Wait on any implicit rendering fences */
+	ret = reservation_object_wait_timeout_rcu(resv, write, true,
+						  MAX_SCHEDULE_TIMEOUT);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
 
 /**
  * dma_buf_begin_cpu_access - Must be called before accessing a dma_buf from the
@@ -626,13 +612,11 @@ EXPORT_SYMBOL_GPL(dma_buf_unmap_attachment);
  * preparations. Coherency is only guaranteed in the specified range for the
  * specified access direction.
  * @dmabuf:	[in]	buffer to prepare cpu access for.
- * @start:	[in]	start of range for cpu access.
- * @len:	[in]	length of range for cpu access.
  * @direction:	[in]	length of range for cpu access.
  *
  * Can return negative error values, returns 0 on success.
  */
-int dma_buf_begin_cpu_access(struct dma_buf *dmabuf, size_t start, size_t len,
+int dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
 			     enum dma_data_direction direction)
 {
 	int ret = 0;
@@ -641,7 +625,14 @@ int dma_buf_begin_cpu_access(struct dma_buf *dmabuf, size_t start, size_t len,
 		return -EINVAL;
 
 	if (dmabuf->ops->begin_cpu_access)
-		ret = dmabuf->ops->begin_cpu_access(dmabuf, start, len, direction);
+		ret = dmabuf->ops->begin_cpu_access(dmabuf, direction);
+
+	/* Ensure that all fences are waited upon - but we first allow
+	 * the native handler the chance to do so more efficiently if it
+	 * chooses. A double invocation here will be reasonably cheap no-op.
+	 */
+	if (ret == 0)
+		ret = __dma_buf_begin_cpu_access(dmabuf, direction);
 
 	return ret;
 }
@@ -653,19 +644,21 @@ EXPORT_SYMBOL_GPL(dma_buf_begin_cpu_access);
  * actions. Coherency is only guaranteed in the specified range for the
  * specified access direction.
  * @dmabuf:	[in]	buffer to complete cpu access for.
- * @start:	[in]	start of range for cpu access.
- * @len:	[in]	length of range for cpu access.
  * @direction:	[in]	length of range for cpu access.
  *
- * This call must always succeed.
+ * Can return negative error values, returns 0 on success.
  */
-void dma_buf_end_cpu_access(struct dma_buf *dmabuf, size_t start, size_t len,
-			    enum dma_data_direction direction)
+int dma_buf_end_cpu_access(struct dma_buf *dmabuf,
+			   enum dma_data_direction direction)
 {
+	int ret = 0;
+
 	WARN_ON(!dmabuf);
 
 	if (dmabuf->ops->end_cpu_access)
-		dmabuf->ops->end_cpu_access(dmabuf, start, len, direction);
+		ret = dmabuf->ops->end_cpu_access(dmabuf, direction);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(dma_buf_end_cpu_access);
 
@@ -745,7 +738,7 @@ EXPORT_SYMBOL_GPL(dma_buf_kunmap);
  * @dmabuf:	[in]	buffer that should back the vma
  * @vma:	[in]	vma for the mmap
  * @pgoff:	[in]	offset in pages where this mmap should start within the
- * 			dma-buf buffer.
+ *			dma-buf buffer.
  *
  * This function adjusts the passed in vma so that it points at the file of the
  * dma_buf operation. It also adjusts the starting pgoff and does bounds
@@ -764,11 +757,11 @@ int dma_buf_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma,
 		return -EINVAL;
 
 	/* check for offset overflow */
-	if (pgoff + ((vma->vm_end - vma->vm_start) >> PAGE_SHIFT) < pgoff)
+	if (pgoff + vma_pages(vma) < pgoff)
 		return -EOVERFLOW;
 
 	/* check for overflowing the buffer's size */
-	if (pgoff + ((vma->vm_end - vma->vm_start) >> PAGE_SHIFT) >
+	if (pgoff + vma_pages(vma) >
 	    dmabuf->size >> PAGE_SHIFT)
 		return -EINVAL;
 
@@ -864,7 +857,7 @@ void dma_buf_vunmap(struct dma_buf *dmabuf, void *vaddr)
 EXPORT_SYMBOL_GPL(dma_buf_vunmap);
 
 #ifdef CONFIG_DEBUG_FS
-static int dma_buf_describe(struct seq_file *s)
+static int dma_buf_debug_show(struct seq_file *s, void *unused)
 {
 	int ret;
 	struct dma_buf *buf_obj;
@@ -919,16 +912,9 @@ static int dma_buf_describe(struct seq_file *s)
 	return 0;
 }
 
-static int dma_buf_show(struct seq_file *s, void *unused)
-{
-	void (*func)(struct seq_file *) = s->private;
-	func(s);
-	return 0;
-}
-
 static int dma_buf_debug_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, dma_buf_show, inode->i_private);
+	return single_open(file, dma_buf_debug_show, NULL);
 }
 
 static const struct file_operations dma_buf_debug_fops = {
@@ -942,18 +928,23 @@ static struct dentry *dma_buf_debugfs_dir;
 
 static int dma_buf_init_debugfs(void)
 {
+	struct dentry *d;
 	int err = 0;
-	dma_buf_debugfs_dir = debugfs_create_dir("dma_buf", NULL);
-	if (IS_ERR(dma_buf_debugfs_dir)) {
-		err = PTR_ERR(dma_buf_debugfs_dir);
-		dma_buf_debugfs_dir = NULL;
-		return err;
-	}
 
-	err = dma_buf_debugfs_create_file("bufinfo", dma_buf_describe);
+	d = debugfs_create_dir("dma_buf", NULL);
+	if (IS_ERR(d))
+		return PTR_ERR(d);
 
-	if (err)
+	dma_buf_debugfs_dir = d;
+
+	d = debugfs_create_file("bufinfo", S_IRUGO, dma_buf_debugfs_dir,
+				NULL, &dma_buf_debug_fops);
+	if (IS_ERR(d)) {
 		pr_debug("dma_buf: debugfs: failed to create node bufinfo\n");
+		debugfs_remove_recursive(dma_buf_debugfs_dir);
+		dma_buf_debugfs_dir = NULL;
+		err = PTR_ERR(d);
+	}
 
 	return err;
 }
@@ -962,17 +953,6 @@ static void dma_buf_uninit_debugfs(void)
 {
 	if (dma_buf_debugfs_dir)
 		debugfs_remove_recursive(dma_buf_debugfs_dir);
-}
-
-int dma_buf_debugfs_create_file(const char *name,
-				int (*write)(struct seq_file *))
-{
-	struct dentry *d;
-
-	d = debugfs_create_file(name, S_IRUGO, dma_buf_debugfs_dir,
-			write, &dma_buf_debug_fops);
-
-	return PTR_ERR_OR_ZERO(d);
 }
 #else
 static inline int dma_buf_init_debugfs(void)

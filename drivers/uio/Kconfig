@@ -14,21 +14,14 @@ if UIO
 
 config UIO_ASSIGN_MINOR
 	bool "UIO supports assigning minor number"
-	default n
 
-config UIO_RTK_RBUS
-	bool "Memory mapping RBUS area to userspace"
-	default n
-	select UIO_ASSIGN_MINOR
+config UIO_RTK
+	bool "Realtek Generic UIO Driver"
+	default y
 	help
-	  Memory mapping RBUS area to userspace
+	  Realtek Generic UIO Driver
 
-config UIO_RTK_REFCLK
-	bool "Memory mapping Reference Clock area to userspace"
-	default n
-	select UIO_ASSIGN_MINOR
-	help
-	  Memory mapping Reference Clock area to userspace
+	  If you don't know what to do here, say Y.
 
 config UIO_RTK_SE
 	bool "Streaming Engine driver use UIO mode"
@@ -38,7 +31,7 @@ config UIO_RTK_SE
 	select CONFIG_UIO_DMEM_GENIRQ
 	help
 	  Realtek Streaming Engine driver using UIO mode
-	  
+
 config UIO_RTK_MD
 	bool "Moving Data Engine driver use UIO mode"
 	default n
@@ -47,15 +40,6 @@ config UIO_RTK_MD
 	select CONFIG_UIO_DMEM_GENIRQ
 	help
 	  Realtek Moving Data Engine driver using UIO mode
-
-config UIO_RTK_TP
-	bool "Userspace I/O platform driver for Realtek TP"
-	default n
-	select UIO_ASSIGN_MINOR
-	help
-	  Userspace I/O platform driver for Realtek TP.
-
-	  If you don't know what to do here, say N.
 
 config UIO_CIF
 	tristate "generic Hilscher CIF Card driver"
@@ -171,8 +155,8 @@ config UIO_FSL_ELBC_GPCM_NETX5152
 
 config UIO_PRUSS
 	tristate "Texas Instruments PRUSS driver"
-	depends on ARCH_DAVINCI_DA850
 	select GENERIC_ALLOCATOR
+	depends on HAS_IOMEM && HAS_DMA
 	help
 	  PRUSS driver for OMAPL138/DA850/AM18XX devices
 	  PRUSS driver requires user space components, examples and user space

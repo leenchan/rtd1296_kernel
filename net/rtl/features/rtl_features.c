@@ -1,12 +1,3 @@
-/*
- * Copyright (C) 2017 Realtek Semiconductor Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include <linux/types.h>
 #include <linux/netfilter.h>
 #include <linux/module.h>
@@ -546,8 +537,10 @@ int rtl_hwnat_timer_update(struct nf_conn *ct)
 	elasped = rtl865x_handle_nat(ct, 2, NULL);
 	if (elasped >= 0 && (elasped * HZ) < expires) {
 		/* update ct expires time */
-		ct->timeout.expires = now + (expires - (elasped * HZ));
-		rtl_check_for_acc(ct, ct->timeout.expires);
+		// ct->timeout.expires = now + (expires - (elasped * HZ));
+		ct->timeout = now + (expires - (elasped * HZ));
+		// rtl_check_for_acc(ct, ct->timeout.expires);
+		rtl_check_for_acc(ct, ct->timeout);
 		return SUCCESS;
 	} else {
 		return FAILED;
@@ -556,33 +549,33 @@ int rtl_hwnat_timer_update(struct nf_conn *ct)
 }
 #endif
 
-int get_dev_ip_mask(const char *name, unsigned int *ip, unsigned int *mask)
-{
-	struct in_device *in_dev;
-	struct net_device *landev;
-	struct in_ifaddr *ifap = NULL;
-
-	if ((name == NULL) || (ip == NULL) || (mask == NULL)) {
-		return -1;
-	}
-
-	if ((landev = __dev_get_by_name(&init_net, name)) != NULL) {
-		in_dev = (struct in_device *)(landev->ip_ptr);
-		if (in_dev != NULL) {
-			for (ifap = in_dev->ifa_list; ifap != NULL;
-				ifap = ifap->ifa_next) {
-				if (strcmp(name, ifap->ifa_label) == 0) {
-					*ip = ifap->ifa_address;
-					*mask = ifap->ifa_mask;
-					return 0;
-				}
-			}
-
-		}
-	}
-
-	return -1;
-}
+extern int get_dev_ip_mask(const char *name, unsigned int *ip, unsigned int *mask);
+// {
+// 	struct in_device *in_dev;
+// 	struct net_device *landev;
+// 	struct in_ifaddr *ifap = NULL;
+//
+// 	if ((name == NULL) || (ip == NULL) || (mask == NULL)) {
+// 		return -1;
+// 	}
+//
+// 	if ((landev = __dev_get_by_name(&init_net, name)) != NULL) {
+// 		in_dev = (struct in_device *)(landev->ip_ptr);
+// 		if (in_dev != NULL) {
+// 			for (ifap = in_dev->ifa_list; ifap != NULL;
+// 				ifap = ifap->ifa_next) {
+// 				if (strcmp(name, ifap->ifa_label) == 0) {
+// 					*ip = ifap->ifa_address;
+// 					*mask = ifap->ifa_mask;
+// 					return 0;
+// 				}
+// 			}
+//
+// 		}
+// 	}
+//
+// 	return -1;
+// }
 
 #if defined(CONFIG_RTL_IPTABLES_FAST_PATH) || defined(CONFIG_RTL_HARDWARE_NAT) || defined(CONFIG_RTL_WLAN_DOS_FILTER) || defined(CONFIG_RTL_BATTLENET_ALG) || defined(CONFIG_RTL_USB_IP_HOST_SPEEDUP) || defined(CONFIG_HTTP_FILE_SERVER_SUPPORT) || defined(CONFIG_RTL_USB_UWIFI_HOST_SPEEDUP)
 unsigned int _br0_ip;
@@ -704,7 +697,7 @@ void rtl_delConnCache(struct nf_conn *ct)
 	#endif /* version >= 3.10.0 */
 }
 
-void rtl_check_for_acc(struct nf_conn *ct, unsigned long expires)
+void rtl_check_for_acc(struct nf_conn *ct, unsigned int expires)
 {
 	#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
 	int newstate;
@@ -739,6 +732,8 @@ void rtl_check_for_acc(struct nf_conn *ct, unsigned long expires)
 	#endif /* CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW */
 }
 
+struct timer_list ct_timeout;
+
 int32 rtl_connCache_timer_update(struct nf_conn *ct)
 {
 	#if defined(CONFIG_RTD_1295_HWNAT)
@@ -746,11 +741,13 @@ int32 rtl_connCache_timer_update(struct nf_conn *ct)
 	#else /* !CONFIG_RTD_1295_HWNAT */
 	spin_lock_bh(&nf_conntrack_lock);
 	#endif /* CONFIG_RTD_1295_HWNAT */
-	if (time_after_eq(jiffies, ct->timeout.expires)) {
+	// if (time_after_eq(jiffies, ct->timeout.expires)) {
+	if (time_after_eq(jiffies, ct->timeout)) {
 		#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
 		if ((fast_nat_fw)
 			&& (SUCCESS == rtl_fpTimer_update((void *)ct))) {
-			add_timer(&ct->timeout);
+			ct_timeout.expires = ct->timeout;
+			add_timer(&ct_timeout);
 			#if defined(CONFIG_RTD_1295_HWNAT)
 			local_bh_enable();
 			#else /* !CONFIG_RTD_1295_HWNAT */
@@ -762,7 +759,8 @@ int32 rtl_connCache_timer_update(struct nf_conn *ct)
 
 		#if defined(CONFIG_RTL_HARDWARE_NAT)
 		if ((gHwNatEnabled) && (SUCCESS == rtl_hwnat_timer_update(ct))) {
-			add_timer(&ct->timeout);
+			// add_timer(&ct->timeout);
+			add_timer(&ct_timeout);
 			#if defined(CONFIG_RTD_1295_HWNAT)
 			local_bh_enable();
 			#else /* !CONFIG_RTD_1295_HWNAT */
@@ -788,10 +786,12 @@ int rtl_V6_connCache_timer_update(struct nf_conn *ct)
 	#else /* !CONFIG_RTD_1295_HWNAT */
 	spin_lock_bh(&nf_conntrack_lock);
 	#endif /* CONFIG_RTD_1295_HWNAT */
-	if (time_after_eq(jiffies, ct->timeout.expires)) {
+	// if (time_after_eq(jiffies, ct->timeout.expires)) {
+	if (time_after_eq(jiffies, ct->timeout)) {
 		#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
 		if (SUCCESS == rtl_V6_Cache_Timer_update((void *)ct)) {
-			add_timer(&ct->timeout);
+			ct_timeout.expires = ct->timeout;
+			add_timer(&ct_timeout);
 			#if defined(CONFIG_RTD_1295_HWNAT)
 			local_bh_enable();
 			#else /* !CONFIG_RTD_1295_HWNAT */
@@ -835,6 +835,13 @@ static inline int32 rtl_addConnCheck(struct nf_conn *ct, struct iphdr *iph,
 	sip = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip;
 	dip = ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip;
 	create_conn = FALSE;
+
+	#if defined(CONFIG_RTD_1295_HWNAT)
+	if (skb_mac_header(skb)[6] & 0x02) {
+		/* skip MAC address with locally-administered bit */
+		return create_conn;
+	}
+	#endif /* CONFIG_RTD_1295_HWNAT */
 
 	if (((ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip
 			 == ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip) ||
@@ -1407,6 +1414,14 @@ void rtl_addConnCache(struct nf_conn *ct, struct sk_buff *skb)
 		create_conn = 0;
 	}
 	#endif /* CONFIG_RTL_HW_NAT_BYPASS_PKT */
+
+	#if defined(CONFIG_RTD_1295_HWNAT)
+	if ((assured || create_conn) && skb_mac_header(skb)[6] & 0x02) {
+		/* skip MAC address with locally-administered bit */
+		assured = 0;
+		create_conn = 0;
+	}
+	#endif /* CONFIG_RTD_1295_HWNAT */
 
 	#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
 	/* 1.add "!(ct->helper)" to fix ftp-cmd type packet
@@ -2752,7 +2767,6 @@ int syn_asic_arp(struct neighbour *n, int add)
 		/* Skip if it is not root network namespace */
 		return 0;
 	}
-
 	#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
 	{
 		int rc;
@@ -2904,7 +2918,7 @@ static int rtl_get_masquerade_netif(struct xt_table_info *private,
 	} else {
 		#if defined(CONFIG_RTD_1295_HWNAT)
 		smp_read_barrier_depends();
-		table_base = private->entries[raw_smp_processor_id()];
+		table_base = private->entries;
 		#else /* CONFIG_RTD_1295_HWNAT */
 		table_base = private->entries[smp_processor_id()];
 		#endif /* CONFIG_RTD_1295_HWNAT */
@@ -3076,19 +3090,20 @@ int rtl_flush_extern_ip(void)
 }
 
 #if defined(CONFIG_RTL_HARDWARE_NAT)
-int rtl819x_retore_hw_ip(void) {
-	int i;
-
-	//found masq entry
-	for (i = 0; i < RTL_MULTIPLE_WAN_NUM; i++) {
-		if (rtl_masq_info[i].valid == 1 && rtl_masq_info[i].ipAddr) {
-			rtl865x_addIp(0, htonl(rtl_masq_info[i].ipAddr),
-				IP_TYPE_NAPT);
-		}
-	}
-
-	return SUCCESS;
-}
+extern int rtl819x_retore_hw_ip(void);
+// {
+// 	int i;
+//
+// 	//found masq entry
+// 	for (i = 0; i < RTL_MULTIPLE_WAN_NUM; i++) {
+// 		if (rtl_masq_info[i].valid == 1 && rtl_masq_info[i].ipAddr) {
+// 			rtl865x_addIp(0, htonl(rtl_masq_info[i].ipAddr),
+// 				IP_TYPE_NAPT);
+// 		}
+// 	}
+//
+// 	return SUCCESS;
+// }
 #endif /* CONFIG_RTL_HARDWARE_NAT */
 
 #if defined(CONFIG_RTL_REDIRECT_ACL_SUPPORT_FOR_ISP_MULTI_WAN)
@@ -3230,7 +3245,6 @@ int32 rtl_fn_delete(struct fib_table *tb, struct fib_config *cfg)
 			/* Skip if it is not root network namespace */
 			return SUCCESS;
 		}
-
 		#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0)
 		if (!ipDst || (!ipv4_is_multicast(ipDst)
 				&& !ipv4_is_loopback(ipDst)
@@ -3755,7 +3769,8 @@ int32 rtl8198c_ipv6_router_del(struct rt6_info *rt)
 	};
 
 	if (tb6_id == RT6_TABLE_MAIN) {
-		if (rt->dst.dev != NULL && !net_eq(dev_net(rt->dst.dev), &init_net)) {
+		if (rt->dst.dev != NULL
+			&& !net_eq(dev_net(rt->dst.dev), &init_net)) {
 			/* Skip if it is not root network namespace */
 			return SUCCESS;
 		}
@@ -4313,9 +4328,8 @@ int32 rtl_qosGetSkbMarkByNaptEntry(rtl865x_napt_entry * naptEntry,
 
 	lanDev = rtl865x_getLanDev();
 	wanDev = rtl865x_getWanDev();
-	memset(&state, 0, sizeof(struct nf_hook_state));
-	state.in = lanDev;
-	state.out = wanDev;
+	nf_hook_state_init(&state, NULL, NF_IP_PRE_ROUTING, INT_MIN,
+		PF_INET, lanDev, wanDev, NULL, dev_net(lanDev), NULL);
 	proto = ntohs(pskb->protocol);
 	iph = ip_hdr(pskb);
 	if (iph == NULL) {
@@ -4382,10 +4396,11 @@ int32 rtl_qosGetSkbMarkByNaptEntry(rtl865x_napt_entry * naptEntry,
 	#endif /* CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY */
 
 	if (proto == ETH_P_IP) {
+		state.hook = NF_IP_PRE_ROUTING;
+		state.net = dev_net(lanDev);
 		state.in = lanDev;
 		state.out = wanDev;
-		(list_empty(&nf_hooks[PF_INET][NF_IP_PRE_ROUTING]))?: \
-			ipt_do_table(pskb, NF_IP_PRE_ROUTING, &state,\
+		ipt_do_table(pskb, &state,
 			dev_net(lanDev)->ipv4.iptable_mangle);
 	}
 
@@ -4427,10 +4442,11 @@ int32 rtl_qosGetSkbMarkByNaptEntry(rtl865x_napt_entry * naptEntry,
 	#endif /* CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY */
 
 	if (proto == ETH_P_IP) {
+		state.hook = NF_IP_POST_ROUTING;
+		state.net = dev_net(wanDev);
 		state.in = lanDev;
 		state.out = wanDev;
-		(list_empty(&nf_hooks[PF_INET][NF_IP_POST_ROUTING]))?: \
-			ipt_do_table(pskb, NF_IP_POST_ROUTING, &state,\
+		ipt_do_table(pskb, &state,
 			dev_net(wanDev)->ipv4.iptable_mangle);
 	}
 	DEBUGP_API("[%s][%d]:[%s][%s][%s][%s][%d]\n", __FUNCTION__,
@@ -4494,10 +4510,11 @@ int32 rtl_qosGetSkbMarkByNaptEntry(rtl865x_napt_entry * naptEntry,
 	memset(pskb->mark_ext, 0, sizeof(pskb->mark_ext));
 	#endif /* CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY */
 	if (proto == ETH_P_IP) {
+		state.hook = NF_IP_PRE_ROUTING;
+		state.net = dev_net(wanDev);
 		state.in = wanDev;
 		state.out = lanDev;
-		(list_empty(&nf_hooks[PF_INET][NF_IP_PRE_ROUTING]))?: \
-			ipt_do_table(pskb, NF_IP_PRE_ROUTING, &state,\
+		ipt_do_table(pskb, &state,
 			dev_net(wanDev)->ipv4.iptable_mangle);
 	}
 	DEBUGP_API("[%s][%d]:[%s][%s][%s][%s][%d]\n", __FUNCTION__,
@@ -4535,10 +4552,11 @@ int32 rtl_qosGetSkbMarkByNaptEntry(rtl865x_napt_entry * naptEntry,
 	#endif /* CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY */
 
 	if (proto == ETH_P_IP) {
+		state.hook = NF_IP_POST_ROUTING;
+		state.net = dev_net(lanDev);
 		state.in = wanDev;
 		state.out = lanDev;
-		(list_empty(&nf_hooks[PF_INET][NF_IP_POST_ROUTING]))?: \
-			ipt_do_table(pskb, NF_IP_POST_ROUTING, &state,\
+		ipt_do_table(pskb, &state,
 			dev_net(lanDev)->ipv4.iptable_mangle);
 	}
 	DEBUGP_API("[%s][%d]:[%s][%s][%s][%s][%d]\n", __FUNCTION__,

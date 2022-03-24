@@ -30,11 +30,15 @@
 #define 	RTL865X_MULTICAST_EXTIP_SET				0x02
 #define 	RTL865X_MULTICAST_UPLOADONLY				0x04
 
-#define 	MAX_MCAST_FWD_DESCRIPTOR_CNT			256
-#define	    MAX_MCAST_TABLE_ENTRY_CNT				128
+//#define 	MAX_MCAST_FWD_DESCRIPTOR_CNT			256
+#define 	MAX_MCAST_FWD_DESCRIPTOR_CNT			(RTL8651_MULTICASTTBL_SIZE<<2)
+//#define	    MAX_MCAST_TABLE_ENTRY_CNT				128
+#define	    MAX_MCAST_TABLE_ENTRY_CNT			(RTL8651_MULTICASTTBL_SIZE<<1)
 #if defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
-#define 	MAX_MCASTV6_FWD_DESCRIPTOR_CNT			256
-#define     MAX_MCASTV6_TABLE_ENTRY_CNT				256
+//#define 	MAX_MCASTV6_FWD_DESCRIPTOR_CNT			256
+//#define     MAX_MCASTV6_TABLE_ENTRY_CNT				256
+#define 	MAX_MCASTV6_FWD_DESCRIPTOR_CNT			(RTL8651_MULTICASTTBL_SIZE<<2)
+#define     MAX_MCASTV6_TABLE_ENTRY_CNT				(RTL8651_MULTICASTTBL_SIZE<<1)
 #endif
 
 /*
@@ -329,16 +333,16 @@ typedef struct rtl865x_tblDrv_mCast_s {
 #if  defined(CONFIG_RTL8196C_REVISION_B) || defined (CONFIG_RTL8198_REVISION_B) || defined(CONFIG_RTL_819XD) || defined(CONFIG_RTL_8196E)
 	unsigned short liveTime;
 #endif
-#if defined(CONFIG_RTL_819XD) || defined(CONFIG_RTL_8196E)
+//#if defined(CONFIG_RTL_819XD) || defined(CONFIG_RTL_8196E)
 	unsigned int hashIndex;
-#endif
+//#endif
 #if defined(CONFIG_RTL_MULTICAST_PORT_MAPPING)
 	unsigned int mapPortMbr;
 #endif
 	TAILQ_ENTRY(rtl865x_tblDrv_mCast_s) nextMCast;
 
 } rtl865x_tblDrv_mCast_t;
-
+TAILQ_HEAD(MCast_hash_head, rtl865x_tblDrv_mCast_s);
 struct rtl865x_multicastTable{
 
 	struct freeList_s {
@@ -427,9 +431,9 @@ typedef struct rtl8198c_tblDrv_mCastv6_s {
 	unsigned short liveTime;
 #endif
 
-#if defined(CONFIG_RTL_819XD) || defined(CONFIG_RTL_8196E)
+//#if defined(CONFIG_RTL_819XD) || defined(CONFIG_RTL_8196E)
 	unsigned int hashIndex;
-#endif
+//#endif
 
 #if defined CONFIG_RTL_MULTICAST_PORT_MAPPING
 	unsigned int mapPortMbr;
@@ -437,7 +441,7 @@ typedef struct rtl8198c_tblDrv_mCastv6_s {
 
 	TAILQ_ENTRY(rtl8198c_tblDrv_mCastv6_s) nextMCast;
 } rtl8198c_tblDrv_mCastv6_t;
-
+TAILQ_HEAD( MCast6_hash_head, rtl8198c_tblDrv_mCastv6_s);
 struct rtl8198c_multicastv6Table{
 	struct freeList6_s {
 

@@ -30,12 +30,6 @@
 #include <sound/info.h>
 #include <sound/control.h>
 
-#ifdef RTK_TRACE_ALSA_EN
-#define RTK_TRACE_ALSA(format, ...) printk(KERN_ALERT format, ##__VA_ARGS__);
-#else
-#define RTK_TRACE_ALSA(format, ...)
-#endif
-
 /* max number of user-defined controls */
 #define MAX_USER_CONTROLS	32
 #define MAX_CONTROL_COUNT	1028
@@ -813,6 +807,36 @@ static int snd_ctl_elem_list(struct snd_card *card,
 	return 0;
 }
 
+static bool validate_element_member_dimension(struct snd_ctl_elem_info *info)
+{
+	unsigned int members;
+	unsigned int i;
+
+	if (info->dimen.d[0] == 0)
+		return true;
+
+	members = 1;
+	for (i = 0; i < ARRAY_SIZE(info->dimen.d); ++i) {
+		if (info->dimen.d[i] == 0)
+			break;
+		members *= info->dimen.d[i];
+
+		/*
+		 * info->count should be validated in advance, to guarantee
+		 * calculation soundness.
+		 */
+		if (members > info->count)
+			return false;
+	}
+
+	for (++i; i < ARRAY_SIZE(info->dimen.d); ++i) {
+		if (info->dimen.d[i] > 0)
+			return false;
+	}
+
+	return members == info->count;
+}
+
 static int snd_ctl_elem_info(struct snd_ctl_file *ctl,
 			     struct snd_ctl_elem_info *info)
 {
@@ -1132,7 +1156,7 @@ static int snd_ctl_elem_user_tlv(struct snd_kcontrol *kcontrol,
 		mutex_lock(&ue->card->user_ctl_lock);
 		change = ue->tlv_data_size != size;
 		if (!change)
-			change = memcmp(ue->tlv_data, new_data, size);
+			change = memcmp(ue->tlv_data, new_data, size) != 0;
 		kfree(ue->tlv_data);
 		ue->tlv_data = new_data;
 		ue->tlv_data_size = size;
@@ -1279,6 +1303,8 @@ static int snd_ctl_elem_add(struct snd_ctl_file *file,
 		return -EINVAL;
 	if (info->count < 1 ||
 	    info->count > max_value_counts[info->type])
+		return -EINVAL;
+	if (!validate_element_member_dimension(info))
 		return -EINVAL;
 	private_size = value_sizes[info->type] * info->count;
 
@@ -1614,7 +1640,6 @@ static int _snd_ctl_register_ioctl(snd_kctl_ioctl_func_t fcn, struct list_head *
 {
 	struct snd_kctl_ioctl *pn;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pn = kzalloc(sizeof(struct snd_kctl_ioctl), GFP_KERNEL);
 	if (pn == NULL)
 		return -ENOMEM;
@@ -1622,7 +1647,6 @@ static int _snd_ctl_register_ioctl(snd_kctl_ioctl_func_t fcn, struct list_head *
 	down_write(&snd_ioctl_rwsem);
 	list_add_tail(&pn->list, lists);
 	up_write(&snd_ioctl_rwsem);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 	return 0;
 }
 
@@ -1634,11 +1658,7 @@ static int _snd_ctl_register_ioctl(snd_kctl_ioctl_func_t fcn, struct list_head *
  */
 int snd_ctl_register_ioctl(snd_kctl_ioctl_func_t fcn)
 {
-    int ret;
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
-	ret = _snd_ctl_register_ioctl(fcn, &snd_control_ioctls);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
-    return ret;
+	return _snd_ctl_register_ioctl(fcn, &snd_control_ioctls);
 }
 EXPORT_SYMBOL(snd_ctl_register_ioctl);
 
@@ -1650,11 +1670,7 @@ EXPORT_SYMBOL(snd_ctl_register_ioctl);
  */
 int snd_ctl_register_ioctl_compat(snd_kctl_ioctl_func_t fcn)
 {
-    int ret;
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
-	ret = _snd_ctl_register_ioctl(fcn, &snd_control_compat_ioctls);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
-    return ret;
+	return _snd_ctl_register_ioctl(fcn, &snd_control_compat_ioctls);
 }
 EXPORT_SYMBOL(snd_ctl_register_ioctl_compat);
 #endif

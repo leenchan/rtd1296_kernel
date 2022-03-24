@@ -12,9 +12,13 @@
 #ifndef __DPTX_HWAPI_H__
 #define __DPTX_HWAPI_H__
 
+#include <linux/fs.h>
+#include <linux/io.h>
 #include "dptx_reg.h"
 
-typedef enum
+#include <soc/realtek/rtk_chip.h>
+
+enum
 {
 	DP_FORMAT_720P_60 = 0,
 	DP_FORMAT_1024_768,
@@ -22,172 +26,212 @@ typedef enum
 	DP_FORMAT_2160P_30,
 	DP_FORMAT_2160P_60,
 	DP_FORMAT_1440_768,
-	DP_FORMAT_1280_800,
 	DP_FORMAT_1440_900,
+	DP_FORMAT_1280_800,
 	DP_FORMAT_960_544,
-} EnumDPTxOuputType;
+};
 
-typedef enum
+enum
 {
 	_DP_ONE_LANE = 1,
 	_DP_TWO_LANE = 2,
 	_DP_FOUR_LANE = 4,
-} EnumDPTxLaneNumber;
+};
 
-typedef enum
-{
-    _SEC_PACKET_TYPE_AUDIO_TIMESTAMP = 0x01,
-    _SEC_PACKET_TYPE_AUDIO_STREAM = 0x02,
-    _SEC_PACKET_TYPE_VSC = 0x07,
-    _SEC_PACKET_TYPE_INFOFRAME_AVI = 0x0A,
-    _SEC_PACKET_TYPE_INFOFRAME_AUDIO = 0x0C,
-    _SEC_PACKET_TYPE_INFOFRAME_MPEG = 0x0D,
-    _SEC_PACKET_TYPE_INFOFRAME_RSV = 0x0F,
-} EnumDPTxSecDataPacketType;
-
-typedef enum
+enum
 {
 	_DP_TX_LEVEL_0 = 0x00,
 	_DP_TX_LEVEL_1,
 	_DP_TX_LEVEL_2,
 	_DP_TX_LEVEL_3,
-} EnumDpTxSignalLevel;
+};
 
-typedef enum
+enum
 {
 	_DP_TX_LANE_0 = 0x00,
 	_DP_TX_LANE_1,
 	_DP_TX_LANE_2,
 	_DP_TX_LANE_3,
-} EnumDpTxLane;
+};
 
-typedef enum
+enum
 {
 	_DP_TP_NONE = 0x00,
 	_DP_TP_1,
 	_DP_TP_2,
 	_DP_TP_3,
-} EnumDpTxTrainPattern;
+};
 
-typedef enum
+enum
 {
-	_DP_TX_TRAINING_PATTERN1 = 0x00,
-	_DP_TX_TRAINING_PATTERN2,
-	_DP_TX_TRAINING_PATTERN_END ,
-} EnumDPTxLTStatus;
+	_DP_TX_TP1 = 0x00,
+	_DP_TX_TP2,
+	_DP_TX_TP_END,
+};
 
-typedef enum
+enum
 {
 	_DP_TX_TRAINING_NO_RESULT = 0x00,
-	_DP_TX_TRAINING_PATTERN1_FAIL,
-	_DP_TX_TRAINING_PATTERN2_FAIL,
-	_DP_TX_TRAINING_PATTERN1_ADJUST_FAIL,
-	_DP_TX_TRAINING_PATTERN2_ADJUST_FAIL,
-	_DP_TX_TRAINING_PATTERN1_PASS,
-	_DP_TX_TRAINING_PATTERN2_PASS,
+	_DP_TX_TP1_FAIL,
+	_DP_TX_TP2_FAIL,
+	_DP_TX_TP1_ADJUST_FAIL,
+	_DP_TX_TP2_ADJUST_FAIL,
+	_DP_TX_TP1_PASS,
+	_DP_TX_TP2_PASS,
 	_DP_TX_TRAINING_PASS,
 	_DP_TX_TRAINING_FAIL,
-} EnumDPTxLTResult;
+};
 
-typedef enum
+enum
 {
 	_DP_LANE0_MAX_POST_CURSOR2_REACHED = _BIT2,
 	_DP_LANE1_MAX_POST_CURSOR2_REACHED = _BIT6,
 	_DP_LANE2_MAX_POST_CURSOR2_REACHED = _BIT2,
 	_DP_LANE3_MAX_POST_CURSOR2_REACHED = _BIT6,
 	_DP_SCRAMBLING_DISABLE = _BIT5,
-} EnumDpTxLinkTrainAdditionalInfo;
+};
 
-typedef struct
+enum
 {
-    unsigned char ucDPCDRev;
-    unsigned char b3PeerDeviceType : 3;
-    unsigned char ucLinkRate;
-    unsigned char b3LaneNum : 3;
-    unsigned char b1MSGCapStatus : 1;
-    unsigned char b1DPPlugStatus : 1;
-    unsigned char b1DPPlugChange : 1;
-    unsigned char b1LegacyPlugStatus : 1;
-    unsigned char b1EnhanceFraming : 1;
-    unsigned char b1AlternateSrCapable : 1;
-    unsigned char b1FramingChangeCapable : 1;
-    unsigned char b1SSCSupport : 1;
-    unsigned char b1TP3Support : 1;
-    unsigned char b1NumberOfSDP : 1;
-    unsigned char b1NumberOfSDPSink : 1;
-    unsigned char ucMaxLinkRate;
-    unsigned char b1DownStreamInfoReady : 1;
-    unsigned char b1UpRequestCap : 1;
-} StructDownStreamInfo;
+	_SEC_PACKET_TYPE_AUDIO_TIMESTAMP = 0x01,
+	_SEC_PACKET_TYPE_AUDIO_STREAM = 0x02,
+	_SEC_PACKET_TYPE_VSC = 0x07,
+	_SEC_PACKET_TYPE_INFOFRAME_AVI = 0x0A,
+	_SEC_PACKET_TYPE_INFOFRAME_AUDIO = 0x0C,
+	_SEC_PACKET_TYPE_INFOFRAME_MPEG = 0x0D,
+	_SEC_PACKET_TYPE_INFOFRAME_RSV = 0x0F,
+};
 
-typedef struct
+enum
 {
-    unsigned char b3ColorDepth : 3;
-    unsigned char b3ColorSpace : 3;
-    unsigned char b1AudioReadyToPlay : 1;
-    unsigned char ucCurrnetAudioFrequency;
-    unsigned char b3AudioChannelCount : 3;
-    unsigned short usInputPixelClk;
-    unsigned char b1InterlaceMode : 1;
-    unsigned char b1InterlaceVTotalNumber : 1;
-    unsigned short usHorizontalDataEnablePeriod;
-} StructDPTxInputInfo;
+	_DP_HDCP_STATE_IDLE = 0,
+	_DP_HDCP_STATE_AUTH_1,
+	_DP_HDCP_STATE_AUTH_1_COMPARE_R0,
+	_DP_HDCP_STATE_AUTH_2,
+	_DP_HDCP_STATE_AUTH_PASS,
+};
 
-typedef struct
+enum
 {
-	unsigned char b2LinkTrainingState : 2;
-	unsigned char b4LinkTrainingResult : 4;
-	unsigned char b3TP1Lane0SameVolCnt : 3;
-	unsigned char b3TP1Lane1SameVolCnt : 3;
-	unsigned char b3TP1Lane2SameVolCnt : 3;
-	unsigned char b3TP1Lane3SameVolCnt : 3;
-	unsigned char b3TP1count : 3;
-	unsigned char b3TP2count : 3;
-	unsigned char ucLinkPBNPerTimeSlot;
-	unsigned char ucLane0Adjust;
-	unsigned char ucLane1Adjust;
-	unsigned char ucLane2Adjust;
-	unsigned char ucLane3Adjust;
-	unsigned char ucLane01LTStatus;
-	unsigned char ucLane23LTStatus;
-	unsigned char ucLaneAlignStatus;
-	unsigned char ucAdjustReqLane01;
-	unsigned char ucAdjustReqLane23;
-} StructDPTxLTInfo;
+	_DP_IRQ_HDCP_NONE = 0,
+	_DP_IRQ_HDCP_V_READY = _BIT0,
+	_DP_IRQ_HDCP_R0_AVAILABLE = _BIT1,
+	_DP_IRQ_HDCP_LINK_INTEGRITY_FAIL = _BIT2,
+	_DP_IRQ_HDCP_REAUTH_REQUEST = _BIT3,
+};
+
+enum
+{
+	_DP_HDCP_AUTH_EVENT_NONE = 0,
+	_DP_HDCP_AUTH_EVENT_LINK_INTEGRITY_FAIL,
+	_DP_HDCP_AUTH_EVENT_REAUTH,
+	_DP_HDCP_AUTH_EVENT_MSG_QUERY_REAUTH,
+	_DP_HDCP_AUTH_EVENT_PLUG_CHANGED,
+	_DP_HDCP_AUTH_EVENT_PASS,
+	_DP_HDCP_AUTH_EVENT_DEVICE_DEPTH_MAX,
+};
+
+struct DPTxDownStreamInfo
+{
+	unsigned char DPCDRev;
+	unsigned char PeerDeviceType : 3;
+	unsigned char LinkRate;
+	unsigned char LaneNum : 3;
+	unsigned char MSGCapStatus : 1;
+	unsigned char DPPlugStatus : 1;
+	unsigned char DPPlugChange : 1;
+	unsigned char LegacyPlugStatus : 1;
+	unsigned char EnhanceFraming : 1;
+	unsigned char AlternateSrCapable : 1;
+	unsigned char FramingChangeCapable : 1;
+	unsigned char SSCSupport : 1;
+	unsigned char TP3Support : 1;
+	unsigned char NumberOfSDP : 1;
+	unsigned char NumberOfSDPSink : 1;
+	unsigned char MaxLinkRate;
+	unsigned char DownStreamInfoReady : 1;
+	unsigned char UpRequestCap : 1;
+};
+
+struct DPTxInputInfo
+{
+	unsigned char ColorDepth : 3;
+	unsigned char ColorSpace : 3;
+	unsigned char AudioReadyToPlay : 1;
+	unsigned char AudioFrequency;
+	unsigned char AudioChannelCount : 3;
+	unsigned short InputPixelClk;
+	unsigned char InterlaceMode : 1;
+	unsigned char InterlaceVTotalNumber : 1;
+	unsigned short HorizontalDataEnablePeriod;
+};
+
+struct DPTxLTInfo
+{
+	unsigned char LTState : 2;
+	unsigned char LTResult : 4;
+	unsigned char TP1LaneSameVolCnt[4];
+	unsigned char TP1Cnt : 3;
+	unsigned char TP2Cnt : 3;
+	unsigned char LinkPBNPerTimeSlot;
+	unsigned char LaneAdj[4];
+	unsigned char Lane01LTStatus;
+	unsigned char Lane23LTStatus;
+	unsigned char LaneAlignStatus;
+	unsigned char AdjReqLane01;
+	unsigned char AdjReqLane23;
+};
+
+struct DPTxHDCPAuthInfo
+{
+	unsigned int AuthState : 4;
+	unsigned int AuthStateChange : 1;
+	unsigned int AuthDownstreamEvent;
+	unsigned int IsHDCPSupported : 1;
+	unsigned int IsDownstreamRepeater : 1;
+	unsigned int BInfoDevice;
+	unsigned int BInfoDepth;
+	unsigned int R0Timeout : 1;
+	unsigned int VReadyTimeout : 1;
+	unsigned int PollingVReady : 1;
+	unsigned int VReadyBit : 1;
+	unsigned int AuthStart : 1;
+	unsigned int AuthHold : 1;
+};
+
+#define HDCP_DEVICE_COUNT_MAX		127
 
 struct rtk_dptx_hwinfo {
+	enum rtd_chip_id chip_id;
+	enum rtd_chip_revision chip_revision;
+
 	void __iomem *reg_base;
 	void __iomem *pll_base;
 	void __iomem *lvds_base;
 	void __iomem *vo_base;
+	
+	struct DPTxDownStreamInfo DownStreamInfo;
+	struct DPTxInputInfo InputInfo;
+	struct DPTxLTInfo LTInfo;
+	struct DPTxHDCPAuthInfo HDCPInfo;
 
+	unsigned char ksvfifo[HDCP_DEVICE_COUNT_MAX * 5];
 	int out_type;
 	int aux_status;
 	struct semaphore sem;
-	StructDownStreamInfo DownStreamInfo;
-	StructDPTxInputInfo TxInputInfo;
-	StructDPTxLTInfo TxLTInfo;
+
+	int vo_en;
 };
 
-int link_training(struct rtk_dptx_hwinfo *hwinfo);
-int DpTxLinkTraining(struct rtk_dptx_hwinfo *hwinfo);
-
-void DpTxPixelPLLSetting(struct rtk_dptx_hwinfo *hwinfo);
-void DpTxDpPLLSetting(struct rtk_dptx_hwinfo *hwinfo);
-void DpTxInitial(struct rtk_dptx_hwinfo *hwinfo);
-
-void DpTxIRQHandle(struct rtk_dptx_hwinfo *hwinfo);
-void Set_1080p_2lane(struct rtk_dptx_hwinfo *hwinfo);
-void Set_2160p30_4lane(struct rtk_dptx_hwinfo *hwinfo);
-void Set_2160p60_4lane(struct rtk_dptx_hwinfo *hwinfo);
-void Set_720p_1lane(struct rtk_dptx_hwinfo *hwinfo);
-void Set_1280_800_2lane(struct rtk_dptx_hwinfo *hwinfo);
-void Set_1440_768_2lane(struct rtk_dptx_hwinfo *hwinfo);
-void Set_1440_900_2lane(struct rtk_dptx_hwinfo *hwinfo);
-int dptx_config_tv_system(struct rtk_dptx_hwinfo *hwinfo);
+void dptx_pixelpll_setting(struct rtk_dptx_hwinfo *hwinfo);
+void dptx_dppll_setting(struct rtk_dptx_hwinfo *hwinfo);
+void dptx_initial(struct rtk_dptx_hwinfo *hwinfo);
 
 void dptx_lvdsint_en(struct rtk_dptx_hwinfo *hwinfo, int en);
 void dptx_close_phy(struct rtk_dptx_hwinfo *hwinfo);
 void dptx_close_pll(struct rtk_dptx_hwinfo *hwinfo);
-int ReadEDID(struct rtk_dptx_hwinfo *hwinfo, unsigned char *ptr, int lentgh);
+
+int dptx_read_edid(struct rtk_dptx_hwinfo *hwinfo,
+		unsigned char *ptr, int length);
+bool dptx_config_tv_system(struct rtk_dptx_hwinfo *hwinfo);
 #endif  //__DPTX_HWAPI_H__

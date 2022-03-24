@@ -1,7 +1,7 @@
 /*
  *  Driver for the NXP SAA7164 PCIe bridge
  *
- *  Copyright (c) 2010 Steven Toth <stoth@kernellabs.com>
+ *  Copyright (c) 2010-2015 Steven Toth <stoth@kernellabs.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -430,7 +430,8 @@ int saa7164_downloadfirmware(struct saa7164_dev *dev)
 			__func__, fw->size);
 
 		if (fw->size != fwlength) {
-			printk(KERN_ERR "xc5000: firmware incorrect size\n");
+			printk(KERN_ERR "saa7164: firmware incorrect size %zu != %u\n",
+				fw->size, fwlength);
 			ret = -ENOMEM;
 			goto out;
 		}

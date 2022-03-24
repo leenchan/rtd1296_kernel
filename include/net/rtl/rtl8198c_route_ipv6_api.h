@@ -1,10 +1,10 @@
 /*
- * * Copyright c                  Realtek Semiconductor Corporation, 2013  
+ * * Copyright c                  Realtek Semiconductor Corporation, 2013
  * * All rights reserved.
- * * 
+ * *
  * * Program : route table driver
- * * Abstract : 
- * * Author : Jia Wenjian (wenjain_jai@realsil.com.cn)  
+ * * Abstract :
+ * * Author : Jia Wenjian (wenjain_jai@realsil.com.cn)
  * *
  * * This program is free software; you can redistribute it and/or modify
  * * it under the terms of the GNU General Public License as published by

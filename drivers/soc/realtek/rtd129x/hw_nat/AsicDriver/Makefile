@@ -34,17 +34,18 @@ obj-y := \
 	endif
 
 	ifdef CONFIG_RTL_LAYERED_ASIC_DRIVER_L4
-		obj-y += rtl865x_asicL4.o 
+		obj-y += rtl865x_asicL4.o
 	endif
 
 	ifdef CONFIG_RTD_1295_HWNAT
-		obj-y += rtd129x_clk.o 
+		obj-y += rtd129x_clk.o
 	endif
 
 #obj-$(CONFIG_RTL865X_CLE) += rtl8651_tblAsicDrv_cmd.o
 
-		
-EXTRA_CFLAGS += -O1 -DRTL_TBLDRV -D__linux__ -DRTL865X_OVER_KERNEL -DRTL865X_OVER_LINUX -Werror
+
+EXTRA_CFLAGS += -O1 -DRTL_TBLDRV -D__linux__ -DRTL865X_OVER_KERNEL -DRTL865X_OVER_LINUX
+#-Werror
 #EXTRA_CFLAGS += -I$(DIR_RTLASIC)/AsicDriver
 #EXTRA_CFLAGS += -I$(DIR_RTLASIC)/l2Driver
 #EXTRA_CFLAGS += -I$(DIR_RTLASIC)/common
@@ -52,11 +53,11 @@ EXTRA_CFLAGS += -O1 -DRTL_TBLDRV -D__linux__ -DRTL865X_OVER_KERNEL -DRTL865X_OVE
 #EXTRA_CFLAGS += -I$(DIR_RTLASIC)
 
 ifeq ($(CONFIG_RTL865X_MODULE_ROMEDRV),y)
-	EXTRA_CFLAGS += -D__KERNEL__ 
+	EXTRA_CFLAGS += -D__KERNEL__
 	EXTRA_CFLAGS += -G 0 asdfasdfasdfasdfasdfasdfasdfasdfasdf
 	EXTRA_CFLAGS += -DMODULE asdfasdf
 	EXTRA_CFLAGS += -mlong-calls
-	EXTRA_CFLAGS += -DEXPORT_SYMTAB 
+	EXTRA_CFLAGS += -DEXPORT_SYMTAB
 	EXTRA_CFLAGS += -DCONFIG_RTL865X_MODULE_INTERNAL
 endif
 

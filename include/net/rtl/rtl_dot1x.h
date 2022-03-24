@@ -72,12 +72,12 @@ typedef struct __rtl802Dot1xPortMode
 {
 		uint8           port_enable;
 		/* auth_dir:
-		0= BOTH direction. (control for the packets that 
-		"incoming from" or "expect outgoing from" this port .) 
-		1= IN direction. (control for the packets that "incoming from" this port .) 			
+		0= BOTH direction. (control for the packets that
+		"incoming from" or "expect outgoing from" this port .)
+		1= IN direction. (control for the packets that "incoming from" this port .)
 		*/
 		uint8 			auth_dir;
-		uint8		    auth_mode; 
+		uint8		    auth_mode;
 }rtl802Dot1xPortMode;
 
 typedef	struct __rtl802Dot1xConfig
@@ -89,13 +89,13 @@ typedef	struct __rtl802Dot1xConfig
 	  * 0:authenticator response EAP packet's destination MAC address as multicast
 	  * 1:authenticator response EAP packet's destination MAC address as unicast
 	  */
-	uint8       enable_unicastresp; 
+	uint8       enable_unicastresp;
     /*mode
     	  *1:snooping mode-->transparent forward eapol packets
-    	  *2:repeater mode -->normal 1x auth flow client<->DUT(auth deamon) <->server 
+    	  *2:repeater mode -->normal 1x auth flow client<->DUT(auth deamon) <->server
     	  *3:client mode-->act as supplicant
     	  */
-	rtl802Dot1xPortMode	mode[RTL8651_PORT_NUMBER]; 	
+	rtl802Dot1xPortMode	mode[RTL8651_PORT_NUMBER];
 }rtl802Dot1xConfig;
 #if 0
 typedef struct __rtl802Dot1xPortBasedInfo
@@ -105,7 +105,7 @@ typedef struct __rtl802Dot1xPortBasedInfo
     uint8 authState;
     uint8 authOpdir;
     uint8 macaddr[ETH_ALEN];
-    struct timer_list expire_timer; 
+    struct timer_list expire_timer;
 }rtl802Dot1xPortBasedInfo;
 #endif
 
@@ -116,7 +116,7 @@ typedef struct __rtl802Dot1xCacheEntry
 	uint8  rx_port_num;
     uint8 auth_state;
     uint8 mac_addr[ETH_ALEN];
-	uint8 valid; 
+	uint8 valid;
 	CTAILQ_ENTRY(__rtl802Dot1xCacheEntry) cache_link;
 	CTAILQ_ENTRY(__rtl802Dot1xCacheEntry) tqe_link;
 }rtl802Dot1xCacheEntry;

@@ -1,11 +1,11 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2009  
+* Copyright c                  Realtek Semiconductor Corporation, 2009
 * All rights reserved.
-* 
+*
 * Program : Switch table Layer4 napt driver,following features are included:
 *	napt
 * Abstract :
-* Author : hyking (hyking_liu@realsil.com.cn)  
+* Author : hyking (hyking_liu@realsil.com.cn)
 *
 * This program is free software; you can redistribute it and/or modify
 * it under the terms of the GNU General Public License as published by
@@ -29,7 +29,7 @@
 #define RTL8651_NAPT_OUTBOUND_FLOW				(1<<2) 	//exact value in ASIC
 #define RTL8651_NAPT_INBOUND_FLOW				(0<<2)	//exact value in ASIC
 #define RTL8651_NAPT_UNIDIRECTIONAL_FLOW		(2<<2)	//exact value in ASIC
-#define RTL8651_NAPT_SYNFIN_QUIET				(4<<2)	//exact value in ASIC 
+#define RTL8651_NAPT_SYNFIN_QUIET				(4<<2)	//exact value in ASIC
 #define RTL8651_NAPT_CHKAUTOLEARN				(1<<5)
 //In RTL8651, TCPFlag field records current state of entry
 #define RTL8651_TCPNAPT_WAIT4FIN			(0x4 <<2) //exact value in ASIC
@@ -92,7 +92,7 @@ typedef struct {
     uint32          priValid	   :1;
     uint32		  priority	   :3;
 #if defined(CONFIG_RTL_8197F)
-    uint32          NHIDXValid  : 1; 
+    uint32          NHIDXValid  : 1;
     uint32          NHIDX       : 5;
     uint32          reserv2     : 2;
 #else
@@ -133,7 +133,7 @@ typedef struct rtl865x_tblAsicDrv_naptTcpUdpParam_s {
 #else
 			priority:3;
 #endif
-			
+
 } rtl865x_tblAsicDrv_naptTcpUdpParam_t;
 
 

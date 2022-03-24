@@ -17,12 +17,12 @@
 #define DPTX_EDID_DEBUG 1
 
 #if DPTX_EDID_DEBUG
-#define DPTX_EDID_DBG(format, ...) printk(KERN_ERR "[DPTX_EDID_DBG] " format, ## __VA_ARGS__)
+#define DPTX_EDID_DBG(format, ...) pr_info("[DPTX_EDID_DBG] " format, ## __VA_ARGS__)
 #else
 #define DPTX_EDID_DBG(format, ...)
 #endif
 
-#define DPTX_EDID_ERR(format, ...) printk(KERN_ERR "[DPTX_EDID_ERR] " format, ## __VA_ARGS__)
+#define DPTX_EDID_ERR(format, ...) pr_err("[DPTX_EDID_ERR] " format, ## __VA_ARGS__)
 
 #define EDID_EST_TIMINGS 16
 #define EDID_DETAILED_TIMINGS 4

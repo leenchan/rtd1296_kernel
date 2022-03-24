@@ -1034,6 +1034,9 @@ static int tw_chrdev_open(struct inode *inode, struct file *file)
 
 	dprintk(KERN_WARNING "3w-xxxx: tw_ioctl_open()\n");
 
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
 	minor_number = iminor(inode);
 	if (minor_number >= tw_device_extension_count)
 		return -ENODEV;
@@ -1045,6 +1048,9 @@ static int tw_chrdev_open(struct inode *inode, struct file *file)
 static const struct file_operations tw_fops = {
 	.owner		= THIS_MODULE,
 	.unlocked_ioctl	= tw_chrdev_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl   = tw_chrdev_ioctl,
+#endif
 	.open		= tw_chrdev_open,
 	.release	= NULL,
 	.llseek		= noop_llseek,

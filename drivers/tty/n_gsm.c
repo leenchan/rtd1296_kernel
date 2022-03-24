@@ -137,6 +137,9 @@ struct gsm_dlci {
 	struct mutex mutex;
 
 	/* Link layer */
+	int mode;
+#define DLCI_MODE_ABM		0	/* Normal Asynchronous Balanced Mode */
+#define DLCI_MODE_ADM		1	/* Asynchronous Disconnected Mode */
 	spinlock_t lock;	/* Protects the internal state */
 	struct timer_list t1;	/* Retransmit timer for SABM and UA */
 	int retries;
@@ -161,7 +164,7 @@ struct gsm_dlci {
 	struct net_device *net; /* network interface, if created */
 };
 
-/* DLCI 0, 62/63 are special or reseved see gsmtty_open */
+/* DLCI 0, 62/63 are special or reserved see gsmtty_open */
 
 #define NUM_DLCI		64
 
@@ -1066,7 +1069,7 @@ static void gsm_process_modem(struct tty_struct *tty, struct gsm_dlci *dlci,
 	/* Carrier drop -> hangup */
 	if (tty) {
 		if ((mlines & TIOCM_CD) == 0 && (dlci->modem_rx & TIOCM_CD))
-			if (!(tty->termios.c_cflag & CLOCAL))
+			if (!C_CLOCAL(tty))
 				tty_hangup(tty);
 	}
 	if (brk & 0x01)
@@ -1380,7 +1383,13 @@ retry:
 	ctrl->data = data;
 	ctrl->len = clen;
 	gsm->pending_cmd = ctrl;
-	gsm->cretries = gsm->n2;
+
+	/* If DLCI0 is in ADM mode skip retries, it won't respond */
+	if (gsm->dlci[0]->mode == DLCI_MODE_ADM)
+		gsm->cretries = 1;
+	else
+		gsm->cretries = gsm->n2;
+
 	mod_timer(&gsm->t2_timer, jiffies + gsm->t2 * HZ / 100);
 	gsm_control_transmit(gsm, ctrl);
 	spin_unlock_irqrestore(&gsm->control_lock, flags);
@@ -1467,6 +1476,10 @@ static void gsm_dlci_open(struct gsm_dlci *dlci)
  *	in which case an opening port goes back to closed and a closing port
  *	is simply put into closed state (any further frames from the other
  *	end will get a DM response)
+ *
+ *	Some control dlci can stay in ADM mode with other dlci working just
+ *	fine. In that case we can just keep the control dlci open after the
+ *	DLCI_OPENING retries time out.
  */
 
 static void gsm_dlci_t1(unsigned long data)
@@ -1480,8 +1493,16 @@ static void gsm_dlci_t1(unsigned long data)
 		if (dlci->retries) {
 			gsm_command(dlci->gsm, dlci->addr, SABM|PF);
 			mod_timer(&dlci->t1, jiffies + gsm->t1 * HZ / 100);
-		} else
+		} else if (!dlci->addr && gsm->control == (DM | PF)) {
+			if (debug & 8)
+				pr_info("DLCI %d opening in ADM mode.\n",
+					dlci->addr);
+			dlci->mode = DLCI_MODE_ADM;
+			gsm_dlci_open(dlci);
+		} else {
 			gsm_dlci_close(dlci);
+		}
+
 		break;
 	case DLCI_CLOSING:
 		dlci->retries--;
@@ -1499,8 +1520,8 @@ static void gsm_dlci_t1(unsigned long data)
  *	@dlci: DLCI to open
  *
  *	Commence opening a DLCI from the Linux side. We issue SABM messages
- *	to the modem which should then reply with a UA, at which point we
- *	will move into open state. Opening is done asynchronously with retry
+ *	to the modem which should then reply with a UA or ADM, at which point
+ *	we will move into open state. Opening is done asynchronously with retry
  *	running off timers and the responses.
  */
 
@@ -2276,7 +2297,6 @@ static void gsmld_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 	const unsigned char *dp;
 	char *f;
 	int i;
-	char buf[64];
 	char flags = TTY_NORMAL;
 
 	if (debug & 4)
@@ -2298,27 +2318,12 @@ static void gsmld_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 			break;
 		default:
 			WARN_ONCE(1, "%s: unknown flag %d\n",
-			       tty_name(tty, buf), flags);
+			       tty_name(tty), flags);
 			break;
 		}
 	}
 	/* FASYNC if needed ? */
 	/* If clogged call tty_throttle(tty); */
-}
-
-/**
- *	gsmld_chars_in_buffer	-	report available bytes
- *	@tty: tty device
- *
- *	Report the number of characters buffered to be delivered to user
- *	at this instant in time.
- *
- *	Locking: gsm lock
- */
-
-static ssize_t gsmld_chars_in_buffer(struct tty_struct *tty)
-{
-	return 0;
 }
 
 /**
@@ -2680,7 +2685,7 @@ static int gsm_mux_net_start_xmit(struct sk_buff *skb,
 	STATS(net).tx_bytes += skb->len;
 	gsm_dlci_data_kick(dlci);
 	/* And tell the kernel when the last transmit started. */
-	net->trans_start = jiffies;
+	netif_trans_update(net);
 	muxnet_put(mux_net);
 	return NETDEV_TX_OK;
 }
@@ -2715,7 +2720,7 @@ static void gsm_mux_rx_netchar(struct gsm_dlci *dlci,
 	memcpy(skb_put(skb, size), in_buf, size);
 
 	skb->dev = net;
-	skb->protocol = __constant_htons(ETH_P_IP);
+	skb->protocol = htons(ETH_P_IP);
 
 	/* Ship it off to the kernel */
 	netif_rx(skb);
@@ -2833,7 +2838,6 @@ static struct tty_ldisc_ops tty_ldisc_packet = {
 	.open            = gsmld_open,
 	.close           = gsmld_close,
 	.flush_buffer    = gsmld_flush_buffer,
-	.chars_in_buffer = gsmld_chars_in_buffer,
 	.read            = gsmld_read,
 	.write           = gsmld_write,
 	.ioctl           = gsmld_ioctl,
@@ -2871,11 +2875,22 @@ static int gsmtty_modem_update(struct gsm_dlci *dlci, u8 brk)
 static int gsm_carrier_raised(struct tty_port *port)
 {
 	struct gsm_dlci *dlci = container_of(port, struct gsm_dlci, port);
+	struct gsm_mux *gsm = dlci->gsm;
+
 	/* Not yet open so no carrier info */
 	if (dlci->state != DLCI_OPEN)
 		return 0;
 	if (debug & 2)
 		return 1;
+
+	/*
+	 * Basic mode with control channel in ADM mode may not respond
+	 * to CMD_MSC at all and modem_rx is empty.
+	 */
+	if (gsm->encoding == 0 && gsm->dlci[0]->mode == DLCI_MODE_ADM &&
+	    !dlci->modem_rx)
+		return 1;
+
 	return dlci->modem_rx & TIOCM_CD;
 }
 
@@ -2966,7 +2981,7 @@ static int gsmtty_open(struct tty_struct *tty, struct file *filp)
 	dlci->modem_rx = 0;
 	/* We could in theory open and close before we wait - eg if we get
 	   a DM straight back. This is ok as that will have caused a hangup */
-	set_bit(ASYNCB_INITIALIZED, &port->flags);
+	tty_port_set_initialized(port, 1);
 	/* Start sending off SABM messages */
 	gsm_dlci_begin_open(dlci);
 	/* And wait for virtual carrier */
@@ -2989,10 +3004,8 @@ static void gsmtty_close(struct tty_struct *tty, struct file *filp)
 	if (tty_port_close_start(&dlci->port, tty, filp) == 0)
 		return;
 	gsm_dlci_begin_close(dlci);
-	if (test_bit(ASYNCB_INITIALIZED, &dlci->port.flags)) {
-		if (C_HUPCL(tty))
-			tty_port_lower_dtr_rts(&dlci->port);
-	}
+	if (tty_port_initialized(&dlci->port) && C_HUPCL(tty))
+		tty_port_lower_dtr_rts(&dlci->port);
 	tty_port_close_end(&dlci->port, tty);
 	tty_port_tty_set(&dlci->port, NULL);
 	return;
@@ -3135,7 +3148,7 @@ static void gsmtty_throttle(struct tty_struct *tty)
 	struct gsm_dlci *dlci = tty->driver_data;
 	if (dlci->state == DLCI_CLOSED)
 		return;
-	if (tty->termios.c_cflag & CRTSCTS)
+	if (C_CRTSCTS(tty))
 		dlci->modem_tx &= ~TIOCM_DTR;
 	dlci->throttled = 1;
 	/* Send an MSC with DTR cleared */
@@ -3147,7 +3160,7 @@ static void gsmtty_unthrottle(struct tty_struct *tty)
 	struct gsm_dlci *dlci = tty->driver_data;
 	if (dlci->state == DLCI_CLOSED)
 		return;
-	if (tty->termios.c_cflag & CRTSCTS)
+	if (C_CRTSCTS(tty))
 		dlci->modem_tx |= TIOCM_DTR;
 	dlci->throttled = 0;
 	/* Send an MSC with DTR set */

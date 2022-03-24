@@ -90,7 +90,7 @@ clear_CP3_counter:
 
 /* set counter controls:  0   	 1 	2 	3
 ** counter0 cycles	  (0x08) (0x08) (0x08) (0x08)
-** counter1 ifetches 	  (0x01) (0x01) (0x01)	
+** counter1 ifetches 	  (0x01) (0x01) (0x01)
 ** counter1 dmiss busy			       (0x0b)
 ** counter2 ld+stores 	  (0x06)	       (0x06)
 ** counter2 icache misses	 (0x02) (0x02)
@@ -187,4 +187,4 @@ save_counter:
 	jr ra
 	nop
 	.end save_counter
-	
+

@@ -95,7 +95,7 @@ struct rtk_drm_encoder *rtk_encoder_create(struct drm_device *dev,
 	}
 
 	//drm_encoder_init(dev, &rtk_encoder->encoder, &encoder_funcs, DRM_MODE_ENCODER_DAC);
-	drm_encoder_init(dev, &rtk_encoder->base, &encoder_funcs, DRM_MODE_ENCODER_TMDS);
+	drm_encoder_init(dev, &rtk_encoder->base, &encoder_funcs, DRM_MODE_ENCODER_TMDS, NULL);
 
 	drm_encoder_helper_add(&rtk_encoder->base, &encoder_helper_funcs);
 

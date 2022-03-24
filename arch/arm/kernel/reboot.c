@@ -51,7 +51,7 @@ static void __soft_restart(void *addr)
 	flush_cache_all();
 
 	/* Switch to the identity mapping. */
-	phys_reset = (phys_reset_t)(unsigned long)virt_to_phys(cpu_reset);
+	phys_reset = (phys_reset_t)virt_to_idmap(cpu_reset);
 	phys_reset((unsigned long)addr);
 
 	/* Should never get here. */
@@ -93,16 +93,6 @@ void soft_restart(unsigned long addr)
  */
 void machine_shutdown(void)
 {
-#ifdef CONFIG_SMP
-	/*
-	 * Disable preemption so we're guaranteed to
-	 * run to power off or reboot and prevent
-	 * the possibility of switching to another
-	 * thread that might wind up blocking on
-	 * one of the stopped CPUs.
-	 */
-	preempt_disable();
-#endif
 	disable_nonboot_cpus();
 }
 
@@ -115,8 +105,6 @@ void machine_halt(void)
 {
 	local_irq_disable();
 	smp_send_stop();
-
-	local_irq_disable();
 	while (1);
 }
 
@@ -190,6 +178,5 @@ void machine_restart(char *cmd)
 
 	/* Whoops - the platform was unable to reboot. Tell the user! */
 	printk("Reboot failed -- System halted\n");
-	local_irq_disable();
 	while (1);
 }

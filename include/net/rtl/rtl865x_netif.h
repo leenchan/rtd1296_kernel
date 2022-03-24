@@ -503,11 +503,11 @@ typedef struct _rtl865x_AclRule_s
 
 #define RTL_DEV_NAME_NUM(name,num)	name#num
 
-#define RTL_BR_NAME "br-lan"
+#define RTL_BR_NAME "br0"
 #define RTL_WLAN_NAME "wlan"
 //flowing name in driver DO NOT duplicate
 #if defined(CONFIG_BRIDGE)
-#define RTL_DRV_LAN_NETIF_NAME "br-lan"
+#define RTL_DRV_LAN_NETIF_NAME "br0"
 #else
 #if defined(CONFIG_RTD_1295_HWNAT)
 #define RTL_DRV_LAN_NETIF_NAME "eth1"
@@ -524,7 +524,11 @@ typedef struct _rtl865x_AclRule_s
 
 #if defined(CONFIG_RTD_1295_HWNAT)
 #define RTL_WAN_IDX			0
+#if defined(CONFIG_RTL_WAN_MAC5)
+#define RTL_LAN_IDX			0
+#else /* CONFIG_RTL_WAN_MAC5 */
 #define RTL_LAN_IDX			1
+#endif /* CONFIG_RTL_WAN_MAC5 */
 #define RTL_DRV_WAN0_NETIF_NAME	 "eth0"
 #else
 #define RTL_WAN_IDX			1
@@ -535,17 +539,43 @@ typedef struct _rtl865x_AclRule_s
 #if defined(CONFIG_RTL_MULTIPLE_WAN)
 #define RTL_DRV_WAN1_NETIF_NAME "eth6"
 #endif
-#define RTL_DRV_PPP_NETIF_NAME "pppoe-wan"
+#define RTL_DRV_PPP_NETIF_NAME "ppp0"
 #define RTL_DRV_DSLT_NETIF_NAME "dslt"
 #define RTL_DRV_6RD_NETIF_NAME "6rd"
 
 #if defined(CONFIG_RTD_1295_HWNAT)
+#if defined(CONFIG_RTL_MULTI_LAN_DEV)
+#if defined(CONFIG_RTL_CPU_TAG)
+#define RTL_DRV_LAN_P0_NETIF_NAME "eth4"
+#define RTL_DRV_LAN_P1_NETIF_NAME RTL_DRV_LAN_NETIF_NAME
+#define RTL_DRV_LAN_P2_NETIF_NAME "eth2"
+#define RTL_DRV_LAN_P3_NETIF_NAME "eth3"
+#define RTL_DRV_LAN_P5_NETIF_NAME RTL_DRV_WAN0_NETIF_NAME
+#else /* CONFIG_RTL_CPU_TAG */
 #define RTL_DRV_LAN_P0_NETIF_NAME "eth2"
 #define RTL_DRV_LAN_P1_NETIF_NAME "eth_none2"
 #define RTL_DRV_LAN_P2_NETIF_NAME "eth_none3"
 #define RTL_DRV_LAN_P3_NETIF_NAME "eth_none4"
+
 #define RTL_DRV_LAN_P4_NETIF_NAME RTL_DRV_WAN0_NETIF_NAME
+#if defined(CONFIG_RTL_WAN_MAC5)
+#define RTL_DRV_LAN_P5_NETIF_NAME RTL_DRV_WAN0_NETIF_NAME
+#else /* CONFIG_RTL_WAN_MAC5 */
 #define RTL_DRV_LAN_P5_NETIF_NAME RTL_DRV_LAN_NETIF_NAME
+#endif /* CONFIG_RTL_WAN_MAC5 */
+#endif /* CONFIG_RTL_CPU_TAG */
+
+#else /* CONFIG_RTL_MULTI_LAN_DEV */
+
+#if defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)
+#define RTL_DRV_LAN_P5_NETIF_NAME RTL_DRV_WAN0_NETIF_NAME
+#else /* CONFIG_RTL_2_RGMII_PORTS_ONLY */
+#define RTL_DRV_LAN_P4_NETIF_NAME RTL_DRV_WAN0_NETIF_NAME
+#endif /* CONFIG_RTL_2_RGMII_PORTS_ONLY */
+/* Ohter LAN ports use RTL_DRV_LAN_NETIF_NAME */
+
+#endif /* CONFIG_RTL_MULTI_LAN_DEV */
+
 #else //defined(CONFIG_RTD_1295_HWNAT)
 #define RTL_DRV_LAN_P0_NETIF_NAME RTL_DRV_LAN_NETIF_NAME
 #define RTL_DRV_LAN_P1_NETIF_NAME "eth2"
@@ -659,11 +689,38 @@ int32 rtl865x_netif_is_master(char *ifName);
 #endif
 
 #if defined(CONFIG_RTD_1295_HWNAT)
+#if defined(CONFIG_RTL_MULTI_LAN_DEV)
+#if defined(CONFIG_RTL_CPU_TAG)
+//#define RTL_LANPORT_MASK_0		0x01	//port 0
+#define RTL_LANPORT_MASK_1		0x02	//port 1
+#define RTL_LANPORT_MASK_2		0x04	//port 2
+//#define RTL_LANPORT_MASK_3		0x08	//port 3
+
+#define RTL_WANPORT_MASK		0x20	//port 5
+#define RTL_DEF_LANPORT_MASK		0x106
+
+#else /* CONFIG_RTL_CPU_TAG */
 #define RTL_LANPORT_MASK_1		0x01	//port 0
 #define RTL_LANPORT_MASK_5		0x20	//port 5
 
 #define	RTL_WANPORT_MASK		0x10
+#if defined(CONFIG_RTL_WAN_MAC5)
+#define	RTL_DEF_LANPORT_MASK		0x120
+#else /* CONFIG_RTL_WAN_MAC5 */
 #define	RTL_DEF_LANPORT_MASK		0x121
+#endif /* CONFIG_RTL_WAN_MAC5 */
+#endif /* CONFIG_RTL_CPU_TAG */
+
+#else /* CONFIG_RTL_MULTI_LAN_DEV */
+#if defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)
+#define RTL_WANPORT_MASK		0x20	//port 5
+#define RTL_DEF_LANPORT_MASK		0x101
+#else /* CONFIG_RTL_2_RGMII_PORTS_ONLY */
+#define RTL_WANPORT_MASK		0x10
+#define RTL_DEF_LANPORT_MASK		0x121
+#endif /* CONFIG_RTL_2_RGMII_PORTS_ONLY */
+#endif /* CONFIG_RTL_MULTI_LAN_DEV */
+
 #else //defined(CONFIG_RTD_1295_HWNAT)
 #if defined(CONFIG_RTL8196_RTL8366)
 	#define	RTL_WANPORT_MASK		0x1C1
@@ -807,7 +864,20 @@ int32 rtl865x_netif_is_master(char *ifName);
 #endif //defined(CONFIG_RTD_1295_HWNAT)
 
 #if defined(CONFIG_RTD_1295_HWNAT)
+#if defined(CONFIG_RTL_MULTI_LAN_DEV)
+#if defined(CONFIG_RTL_CPU_TAG)
 #define ETH_INTF_NUM	6
+#else /* CONFIG_RTL_CPU_TAG */
+#if defined(CONFIG_RTL_WAN_MAC5)
+#define ETH_INTF_NUM	4
+#else /* CONFIG_RTL_WAN_MAC5 */
+#define ETH_INTF_NUM	6
+#endif /* CONFIG_RTL_WAN_MAC5 */
+#endif /* CONFIG_RTL_CPU_TAG */
+#else /* CONFIG_RTL_MULTI_LAN_DEV */
+#define ETH_INTF_NUM	5
+#endif /* CONFIG_RTL_MULTI_LAN_DEV */
+
 #else //defined(CONFIG_RTD_1295_HWNAT)
 #if defined(CONFIG_RTK_VLAN_SUPPORT) || defined (CONFIG_RTL_MULTI_LAN_DEV)
 #if defined(CONFIG_8198_PORT5_GMII)

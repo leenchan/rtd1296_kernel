@@ -276,7 +276,7 @@ void scd_drv_shutdown(struct device * dev)
  *         
  * Retn : 0 for success, others failed
  *------------------------------------------------------------------*/
-int scd_drv_suspend(struct device * dev, pm_message_t state, u32 level)
+int scd_drv_suspend(struct device * dev, pm_message_t state)
 {
     scd_device* p_dev = to_scd_device(dev);    
     scd_driver*  p_drv = to_scd_driver(dev->driver);    
@@ -296,7 +296,7 @@ int scd_drv_suspend(struct device * dev, pm_message_t state, u32 level)
  *         
  * Retn : 0 for success, others failed
  *------------------------------------------------------------------*/
-int scd_drv_resume(struct device * dev, u32 level)
+int scd_drv_resume(struct device * dev)
 {
     scd_device* p_dev = to_scd_device(dev);    
     scd_driver*  p_drv = to_scd_driver(dev->driver);    

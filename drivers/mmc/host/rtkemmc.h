@@ -24,29 +24,29 @@
 #endif
 
 /* cmd1 sector mode */
-#define MMC_SECTOR_ADDR         0x40000000
+#define MMC_SECTOR_ADDR		0x40000000
 /*
  * Clock rates
  */
-#define RTKSD_CLOCKRATE_MAX			48000000
-#define RTKSD_BASE_DIV_MAX			0x100
+#define RTKSD_CLOCKRATE_MAX	48000000
+#define RTKSD_BASE_DIV_MAX	0x100
 
 /*
  * pad driving
  * */
-#define MMC_IOS_GET_PAD_DRV     0x1
-#define MMC_IOS_SET_PAD_DRV     0x2
-#define MMC_IOS_RESTORE_PAD_DRV 0x4
-#define CLEAR_CR_CARD_STATUS(reg_addr)      \
-do {                                \
-    writel(0xffffffff, reg_addr);    \
-} while (0)
+#define MMC_IOS_GET_PAD_DRV	0x1
+#define MMC_IOS_SET_PAD_DRV	0x2
+#define MMC_IOS_RESTORE_PAD_DRV	0x4
+#define CLEAR_CR_CARD_STATUS(reg_addr)           \
+	do {                                     \
+		writel(0xffffffff, reg_addr);    \
+	} while (0)
 
 #define CLEAR_ALL_CR_CARD_STATUS(io_base)        \
 do {                                \
-    int i = 0;  \
-    for(i=0; i<5; i++)  \
-        CLEAR_CR_CARD_STATUS(io_base+20+ (i*4));  \
+	int i = 0;  \
+	for(i=0; i<5; i++)  \
+	CLEAR_CR_CARD_STATUS(io_base+20+ (i*4));  \
 } while (0)
 
 /* MMC configure2, for SD_CONFIGURE2, response type */
@@ -78,145 +78,175 @@ do {                                \
 
 
 struct rtkemmc_host {
-    struct mmc_host     *mmc;           /* MMC structure */
-    u32                 rtflags;        /* Driver states */
-    u8                  ins_event;
-    u8                  cmd_opcode;
+	struct mmc_host     *mmc;           /* MMC structure */
+	u32                 rtflags;        /* Driver states */
+	u8                  ins_event;
+	u8                  cmd_opcode;
 
 #define EVENT_NON		    0x00
 #define EVENT_INSER		    0x01
 #define EVENT_REMOV		    0x02
 #define EVENT_USER		    0x10
 
-    u8                  reset_event;
-    struct mmc_request  *mrq;            /* Current request */
-    u8                  wp;
-    struct rtk_host_ops *ops;
-    struct semaphore	sem;
-    struct semaphore	sem_op_end;
+	u8                  reset_event;
+	struct mmc_request  *mrq;            /* Current request */
+	u8                  wp;
+	struct rtk_host_ops *ops;
+	struct semaphore	sem;
+	struct semaphore	sem_op_end;
 
-    volatile void __iomem	*emmc_membase;
-    volatile void __iomem	*crt_membase;
-    volatile void __iomem	*sb2_membase;	
+	volatile void __iomem	*emmc_membase;
+	volatile void __iomem	*crt_membase;
+	volatile void __iomem	*sb2_membase;	
 	volatile void __iomem	*misc_membase;
-
-    spinlock_t          lock;
-    unsigned int        ns_per_clk;
-    struct delayed_work cmd_work;
-    struct tasklet_struct req_end_tasklet;
-
-    struct timer_list   timer;
-    struct timer_list   plug_timer;
-    struct completion   *int_waiting;
-    struct device       *dev;
-    struct resource     *res;
-    int                 irq;
-    u8                  *tmp_buf;
-    dma_addr_t          tmp_buf_phy_addr;
-    dma_addr_t          dma_paddr;
-    dma_addr_t          desc_paddr;
-#ifdef MONI_MEM_TRASH
-    u8                  *cmp_buf;
-    dma_addr_t          phy_addr;
+	volatile void __iomem   *sb2_debug_membase;
+	volatile void __iomem   *hw_semaphore;
+#if defined(CONFIG_ARCH_RTD139x)
+	volatile void __iomem   *iso_muxpad;
+#elif defined(CONFIG_ARCH_RTD16xx)
+	volatile void __iomem   *m2tmx;
 #endif
-    u32                 test_count;
-    u32                 tmout;
-    u32					rintsts; //2044
-	u32 				mintsts; //2040
-	u32				    status;  //2048
-	u32				    idsts;	 //208c
-	u32				    dma_isr; //2424
-	u32				    int_stat;
-	u32				    idinten; //2090
-	u32				    intmask; //2024
-	u8					rpmb_cmd; // it is rpmb cmd flag. When receiving CMD23, set to 1
-	u8					tx_tuning; //flag  that tx tuning need to be performed
-	u8					rx_tuning; //flag  that rx tuning need to be performed
-	u8				dqs_tuning;
+	spinlock_t          lock;
+	unsigned int        ns_per_clk;
+	struct delayed_work cmd_work;
+	struct tasklet_struct req_end_tasklet;
 
-#define INT_STAT_CD			0x00000001	  //cmd done
+	struct timer_list   timer;
+	struct timer_list   plug_timer;
+	struct completion   *int_waiting;
+	struct device       *dev;
+	struct resource     *res;
+	int                 irq;
+	u8                  *tmp_buf;
+	dma_addr_t          tmp_buf_phy_addr;
+	dma_addr_t          dma_paddr;
+	dma_addr_t          desc_paddr;
+#ifdef MONI_MEM_TRASH
+	u8                  *cmp_buf;
+	dma_addr_t          phy_addr;
+#endif
+	u32		test_count;
+	u32		tmout;
+	u32		rintsts; //2044
+	u32 		mintsts; //2040
+	u32		status;  //2048
+	u32		idsts;	 //208c
+	u32		dma_isr; //2424
+	u32		int_stat;
+	u32		idinten; //2090
+	u32		intmask; //2024
+	u8		rpmb_cmd; // it is rpmb cmd flag. When receiving CMD23, set to 1
+	u8		tx_tuning; //flag  that tx tuning need to be performed
+	u8		rx_tuning; //flag  that rx tuning need to be performed
+	u8		dqs_tuning;
+	u8		tx_user_defined;
+	u8		rx_user_defined;
+	u8		tx_reference_phase;
+	u8		rx_reference_phase;
+	u32		emmc_tuning_addr;
+#define INT_STAT_CD		0x00000001	  //cmd done
 #define INT_STAT_DTO		0x00000002	  //data trans over
 #define INT_STAT_ACD		0x00000004    //r/w multiple blk
 #define INT_STAT_DMA_DONE	0x00000008	  //rd dma done
 #define INT_STAT_DATA_DONE	0x00000010 	  //wr data done
 #define ClrINTState(host)      		    \
 	do {                                \
-    	   host->int_stat = 0x00000000;     \
+		host->int_stat = 0x00000000;     \
 	} while (0)
 #define SetINTState(host, val)  	    \
 	do {                                \
-    	   host->int_stat |= val;     \
+		host->int_stat |= val;     \
 	} while (0)
 #define GetINTState(host, val)  	    (host->int_stat & val)
 
 };
 
 struct rtk_host_ops {
-    irqreturn_t (*func_irq)(int irq, void *dev);
-    int (*re_init_proc)(struct mmc_card *card);
-    int (*card_det)(struct rtkemmc_host *emmc_port);
-    void (*card_power)(struct rtkemmc_host *emmc_port,u8 status);
-    void (*chk_card_insert)(struct rtkemmc_host *rtkhost);
-    void (*set_crt_muxpad)(struct rtkemmc_host *rtkhost);
-    void (*set_clk)(struct rtkemmc_host *rtkhost,u32 mmc_clk);
-    void (*reset_card)(struct rtkemmc_host *rtkhost);
-    void (*reset_host)(struct rtkemmc_host *rtkhost);
-    void (*bus_speed_down)(struct rtkemmc_host *emmc_port);
-    u32 (*get_cmdcode)(u32 opcode );
-    u32 (*get_r1_type)(u32 opcode );
-    u32 (*chk_cmdcode)(struct mmc_command* cmd);
-    u32 (*chk_r1_type)(struct mmc_command* cmd);
-    u32 (*backup_regs)(struct rtkemmc_host *emmc_port);
-    u32 (*restore_regs)(struct rtkemmc_host *emmc_port);
+	irqreturn_t (*func_irq)(int irq, void *dev);
+	int (*re_init_proc)(struct mmc_card *card);
+	int (*card_det)(struct rtkemmc_host *emmc_port);
+	void (*card_power)(struct rtkemmc_host *emmc_port,u8 status);
+	void (*chk_card_insert)(struct rtkemmc_host *rtkhost);
+	void (*set_crt_muxpad)(struct rtkemmc_host *rtkhost);
+	void (*set_clk)(struct rtkemmc_host *rtkhost,u32 mmc_clk);
+	void (*reset_card)(struct rtkemmc_host *rtkhost);
+	void (*reset_host)(struct rtkemmc_host *rtkhost);
+	void (*bus_speed_down)(struct rtkemmc_host *emmc_port);
+	u32 (*get_cmdcode)(u32 opcode );
+	u32 (*get_r1_type)(u32 opcode );
+	u32 (*chk_cmdcode)(struct mmc_command* cmd);
+	u32 (*chk_r1_type)(struct mmc_command* cmd);
+	void (*backup_regs)(struct rtkemmc_host *emmc_port);
+	void (*restore_regs)(struct rtkemmc_host *emmc_port);
 };
 
 struct ms_cmd_pkt {
-    struct rtkemmc_host   *emmc_port;
-    struct ms_command   *mscmd;
-    struct mmc_data     *data;
+	struct rtkemmc_host   *emmc_port;
+	struct ms_command   *mscmd;
+	struct mmc_data     *data;
 
-    unsigned char       *dma_buffer;    //data transfer address
-    u16                 cmdcode;        //rtk ms operation code
-    u16                 trans_bytes;    //register transfer bytes
-    u16                 block_count;    //data block transfer count
+	unsigned char       *dma_buffer;    //data transfer address
+	u16                 cmdcode;        //rtk ms operation code
+	u16                 trans_bytes;    //register transfer bytes
+	u16                 block_count;    //data block transfer count
 };
 
 struct sd_cmd_pkt {
-    struct mmc_host     *mmc;       /* MMC structure */
-    struct rtkemmc_host   *emmc_port;
-    struct mmc_command  *cmd;    /* cmd->opcode; cmd->arg; cmd->resp; cmd->data */
-    struct mmc_data     *data;
-    unsigned char       *dma_buffer;
-    u16                 byte_count;
-    u16                 block_count;
+	struct mmc_host     *mmc;       /* MMC structure */
+	struct rtkemmc_host   *emmc_port;
+	struct mmc_command  *cmd;    /* cmd->opcode; cmd->arg; cmd->resp; cmd->data */
+	struct mmc_data     *data;
+	unsigned char       *dma_buffer;
+	u16                 byte_count;
+	u16                 block_count;
 
-    u32                 flags;
-    u32			cmd_para;
-    u8                  rsp_len;
-    u32                 timeout;
+	u32                 flags;
+	u32			cmd_para;
+	u8                  rsp_len;
+	u32                 timeout;
 };
 
 struct backupRegs {
-    u32			emmc_mux_pad0;
-    u32			emmc_mux_pad1;
-    u32			emmc_mux_pad2;
-    u32			emmc_pfunc_nf1;
-    u32			emmc_pfunc_cr;
-    u32			emmc_pdrive_nf1;
-    u32			emmc_pdrive_nf2;
-    u32			emmc_pdrive_nf3;
+#if defined(CONFIG_ARCH_RTD129x)
+	u32			emmc_mux_pad0;
+	u32			emmc_mux_pad1;
+	u32			emmc_pfunc_nf1;
+	u32			emmc_pfunc_cr;
+	u32			emmc_pdrive_nf1;
+	u32			emmc_pdrive_nf2;
+	u32			emmc_pdrive_nf3;
 	u32			emmc_pdrive_nf4;
+//139x and 16xx does not need to restore the pad mux part, only 129x needs to take this action
+/*
+#elif defined(CONFIG_ARCH_RTD139x)
+	u32                     iso_muxpad4;
+	u32			Pfunc_emmc0;
+	u32                     Pfunc_emmc1;
+	u32                     Pfunc_emmc2;
+	u32                     Pfunc_emmc3;
+	u32                     Pfunc_emmc4;
+	u32                     Pfunc_emmc5;
+*/
+#endif
+
+#ifdef CONFIG_ARCH_RTD129x	//129x emmc reset will have impact on SD & SDIO
 	u32			emmc_pdrive_cr0;
 	u32			emmc_pdrive_cr1;
 	u32			emmc_pdrive_sdio;
 	u32			emmc_pdrive_sdio1;
-    u32			emmc_ctype;
-    u32			emmc_uhsreg;
-    u32			emmc_ddr_reg;
-    u32			emmc_card_thr_ctl;
-    u32			emmc_clk_div;
-    u32			emmc_ckgen_ctl;
-    u32			emmc_dqs_ctrl1;
+#endif
+	u32			emmc_ctype;
+	u32			emmc_uhsreg;
+	u32			emmc_ddr_reg;
+	u32			emmc_card_thr_ctl;
+	u32			emmc_clk_div;
+	u32			emmc_ckgen_ctl;
+	u32			emmc_dqs_ctrl1;
+	u32			emmc_clken;
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+	u32			emmc_drto_mask_ori;
+	u32			emmc_other1;
+#endif
 };
 
 /* *** Realtek CRT register &&& */
@@ -227,38 +257,39 @@ struct backupRegs {
 
 
 static const char *const clk_tlb_B[8] = {
-    "12MHz",
-    "16MHz",
-    "20MHz",
-    "25MHz",
-    "33MHz",
-    "49MHz"
+	"12MHz",
+	"16MHz",
+	"20MHz",
+	"25MHz",
+	"33MHz",
+	"49MHz"
 };
 
 /* Magellan_ISO_arch_spec.doc; PMM_Magellan_PinMux.doc */
 // iso gpio pinmux map
 static const u8 st_gpio_map[36] ={
-    0x34,0x34,0x34,0x34,0x30,0x30,0x30,0x30,    //0:7
-    0x2c,0x2c,0x2c,0x2c,0x28,0x28,0xff,0xff,    //8:15
-    0xff,0xff,0xff,0xff,0xff,0x28,0x28,0x24,    //16:23
-    0xff,0xff,0x24,0x24,0x24,0xff,0xff,0xff,    //24:31
-    0xff,0xff,0xff,0x20                         //32:35
+	0x34,0x34,0x34,0x34,0x30,0x30,0x30,0x30,    //0:7
+	0x2c,0x2c,0x2c,0x2c,0x28,0x28,0xff,0xff,    //8:15
+	0xff,0xff,0xff,0xff,0xff,0x28,0x28,0x24,    //16:23
+	0xff,0xff,0x24,0x24,0x24,0xff,0xff,0xff,    //24:31
+	0xff,0xff,0xff,0x20                         //32:35
 };
 
 // iso gpio pinmux bit operation map
 static const u8 st_gpio_bit_map[36] ={
-    0x04,0x0C,0x14,0x1C,0x04,0x0C,0x14,0x1C,    //0:7
-    0x04,0x0C,0x14,0x1C,0x04,0x0C,0xff,0xff,    //8:15
-    0xff,0xff,0xff,0xff,0xff,0x14,0x1C,0x04,    //16:23
-    0xff,0xff,0x0C,0x14,0x1C,0xff,0xff,0xff,    //24:31
-    0xff,0xff,0xff,0x04                         //32:35
+	0x04,0x0C,0x14,0x1C,0x04,0x0C,0x14,0x1C,    //0:7
+	0x04,0x0C,0x14,0x1C,0x04,0x0C,0xff,0xff,    //8:15
+	0xff,0xff,0xff,0xff,0xff,0x14,0x1C,0x04,    //16:23
+	0xff,0xff,0x0C,0x14,0x1C,0xff,0xff,0xff,    //24:31
+	0xff,0xff,0xff,0x04                         //32:35
 };
 
 #define MAX_CMD_RETRY_COUNT 4
 #define MAX_ISO_GPIO_CNT 35
 #define MAX_MIS_GPIO_CNT 169
+
 static const u8 mis_gpio_bit_map[4] ={
-    0x1C,0x14,0x0C,0x04    //0:3
+	0x1C,0x14,0x0C,0x04    //0:3
 };
 
 #define CARD_SWITCHCLOCK_25MHZ_B    (0x00UL)    //(0x05)
@@ -270,11 +301,9 @@ static const u8 mis_gpio_bit_map[4] ={
 #define CLOCK_SPEED_GAP          CARD_SWITCHCLOCK_50MHZ_B
 #define LOW_SPEED_LMT               CARD_SWITCHCLOCK_33MHZ_B
 
-static const u32 map_clk_to_reg[6] =
-{0x05,0x06,0x00,0x01,0x02,0x03};
+static const u32 map_clk_to_reg[6] = {0x05,0x06,0x00,0x01,0x02,0x03};
 
-static const u32 map_reg_to_clk[8] =
-{0x02,0x03,0x04,0x05,0xFF,0x00,0x01,0xFF};
+static const u32 map_reg_to_clk[8] = {0x02,0x03,0x04,0x05,0xFF,0x00,0x01,0xFF};
 
 #define CARD_SWITCHCLOCK_60MHZ  (0x00UL)      //(0x00<<12)
 #define CARD_SWITCHCLOCK_80MHZ  (0x01UL)      //(0x01<<12)
@@ -383,121 +412,127 @@ static const u32 map_reg_to_clk[8] =
 #define POW_CHECK 0
 #define POW_FORCE 1
 
-#define rtkemmc_get_int_sta(rintsts, mintsts, isr)                           \
-            do {                                                         \
-                    *(u32 *)rintsts = readl(emmc_port->emmc_membase+EMMC_RINTSTS);   \
-                    *(u32 *)mintsts = readl(emmc_port->emmc_membase+EMMC_MINTSTS); \
-                    *(u32 *)isr = readl(emmc_port->emmc_membase+EMMC_ISR); \
+#define rtkemmc_get_int_sta(rintsts, mintsts, isr)	\
+	do {	\
+		*(u32 *)rintsts = readl(emmc_port->emmc_membase+EMMC_RINTSTS);   \
+		*(u32 *)mintsts = readl(emmc_port->emmc_membase+EMMC_MINTSTS); \
+		*(u32 *)isr = readl(emmc_port->emmc_membase+EMMC_ISR); \
             } while (0)
 
 #define rtkemmc_get_sta(status,idsts)       \
-            do {                                                             \
-                    *(u32 *)status = readl(emmc_port->emmc_membase+EMMC_STATUS);     \
-                    *(u32 *)idsts  = readl(emmc_port->emmc_membase+EMMC_IDSTS);     \
-            } while (0)
+	do {	\
+		*(u32 *)status = readl(emmc_port->emmc_membase+EMMC_STATUS);     \
+		*(u32 *)idsts  = readl(emmc_port->emmc_membase+EMMC_IDSTS);     \
+	} while (0)
 
 #define rtkemmc_get_mask(idinten,intmask)       \
-						do {															 \
-								*(u32 *)idinten = readl(emmc_port->emmc_membase+EMMC_IDINTEN);	   \
-								*(u32 *)intmask  = readl(emmc_port->emmc_membase+EMMC_INTMASK); 	\
-						} while (0)
-
+	do {	\
+		*(u32 *)idinten = readl(emmc_port->emmc_membase+EMMC_IDINTEN);	   \
+		*(u32 *)intmask  = readl(emmc_port->emmc_membase+EMMC_INTMASK); 	\
+	} while (0)
 
 #define rtkemmc_clr_int_sta()                                                                              \
-            do {                                                                                                \
-			writel(ISR_DMA_DONE_INT, emmc_port->emmc_membase+EMMC_ISR); \
-			writel(readl(emmc_port->emmc_membase+EMMC_RINTSTS)&0x0000fffe, emmc_port->emmc_membase+EMMC_RINTSTS); \
-            } while(0)
+	do {                                                                                                \
+		writel(ISR_DMA_DONE_INT, emmc_port->emmc_membase+EMMC_ISR); \
+		writel(readl(emmc_port->emmc_membase+EMMC_RINTSTS)&0x0000fffe, emmc_port->emmc_membase+EMMC_RINTSTS); \
+	} while(0)
 
 //mask all emmc interrupts
 #define rtkemmc_hold_int_dec()    \
-            do {      \
-			writel((ISR_WRITE_DATA|ISR_DMA_INT_MASK|ISR_DESC_INT_MASK|ISR_IP_INT_MASK), emmc_port->emmc_membase+EMMC_ISR); \
-		    writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)&0xffff0000), emmc_port->emmc_membase+EMMC_INTMASK); \
-            } while(0)
+	do {      \
+		writel((ISR_WRITE_DATA|ISR_DMA_INT_MASK|ISR_DESC_INT_MASK|ISR_IP_INT_MASK), emmc_port->emmc_membase+EMMC_ISR); \
+		writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)&0xffff0000), emmc_port->emmc_membase+EMMC_INTMASK); \
+	} while(0)
+
 //unmask all emmc interrupt			
 #define rtkemmc_en_int()  \
-			do {        \ 
-			writel(ISR_DMA_INT_MASK|ISR_DESC_INT_MASK|ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \
-			writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|0x0000fffe), emmc_port->emmc_membase+EMMC_INTMASK); \
-            } while(0)   
+	do { \
+		writel(ISR_DMA_INT_MASK|ISR_DESC_INT_MASK|ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \
+		writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|0x0000fffe), emmc_port->emmc_membase+EMMC_INTMASK); \
+	} while(0)
+
 //used for wr case
 #define rtkemmc_en_wr_int()  \
-            do {  \
-			writel(ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \	
-		    writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|INT_STS_ERRORS|INT_STS_DTO), emmc_port->emmc_membase+EMMC_INTMASK); \
-            } while(0)
+	do {  \
+		writel(ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \
+		writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|INT_STS_ERRORS|INT_STS_DTO), emmc_port->emmc_membase+EMMC_INTMASK); \
+	} while(0)
+
 //used for rd case
 #define rtkemmc_en_rd_int()  \
-            do {  \
-		    writel(ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \
-		    writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|INT_STS_ERRORS|INT_STS_DTO), emmc_port->emmc_membase+EMMC_INTMASK); \
+	do { \
+		writel(ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \
+		writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|INT_STS_ERRORS|INT_STS_DTO), emmc_port->emmc_membase+EMMC_INTMASK); \
             } while(0)
+
 //used for none-stream case (cmd w/wo/ resp)
 #define rtkemmc_en_cd_int()  \
-            do {    \
-			writel(ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \		
-		    writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|INT_STS_ERRORS|INT_STS_CD), emmc_port->emmc_membase+EMMC_INTMASK); \
-            } while(0)	
+	do {    \
+		writel(ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \
+		writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|INT_STS_ERRORS|INT_STS_CD), emmc_port->emmc_membase+EMMC_INTMASK); \
+	} while(0)	
 
 //used for cm6 case (cmd w/wo/ resp), ignore Response timeout(INT_STS_RTO_BAR)
 #define rtkemmc_en_cd6_int()  \
-            do {    \
-			writel(ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \		
-		    writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|INT_STS_ERRORS2|INT_STS_CD), emmc_port->emmc_membase+EMMC_INTMASK); \
-            } while(0)			
+	do {    \
+		writel(ISR_IP_INT_MASK, emmc_port->emmc_membase+EMMC_ISR); \
+		writel((readl(emmc_port->emmc_membase+EMMC_INTMASK)|INT_STS_ERRORS2|INT_STS_CD), emmc_port->emmc_membase+EMMC_INTMASK); \
+	} while(0)			
 
 #define  rtkemmc_mdelay(x)  \
-            set_current_state(TASK_INTERRUPTIBLE); \
-            schedule_timeout(msecs_to_jiffies(x))
+	do {    \
+		set_current_state(TASK_INTERRUPTIBLE); \
+		schedule_timeout(msecs_to_jiffies(x))  \
+	} while(0)
 
 #define rtkemmc_writel(val, addr) \
+	do {    \
 		sync(emmc_port);					\
-		writel(val, addr);					
+		writel(val, addr);					\
+	} while(0)
 		
-
 #define INT_BLOCK_R_GAP 0x200
 #define INT_BLOCK_W_GAP 5
 
 static const char *const state_tlb[9] = {
-    "STATE_IDLE",
-    "STATE_READY",
-    "STATE_IDENT",
-    "STATE_STBY",
-    "STATE_TRAN",
-    "STATE_DATA",
-    "STATE_RCV",
-    "STATE_PRG",
-    "STATE_DIS"
+	"STATE_IDLE",
+	"STATE_READY",
+	"STATE_IDENT",
+	"STATE_STBY",
+	"STATE_TRAN",
+	"STATE_DATA",
+	"STATE_RCV",
+	"STATE_PRG",
+	"STATE_DIS"
 };
 
 static const char *const bit_tlb[4] = {
-    "1bit",
-    "4bits",
-    "8bits",
-    "unknow"
+	"1bit",
+	"4bits",
+	"8bits",
+	"unknow"
 };
 
 static const char *const clk_tlb[8] = {
-    "30MHz",
-    "40MHz",
-    "49MHz",
-    "49MHz",
-    "15MHz",
-    "20MHz",
-    "24MHz",
-    "24MHz"
+	"30MHz",
+	"40MHz",
+	"49MHz",
+	"49MHz",
+	"15MHz",
+	"20MHz",
+	"24MHz",
+	"24MHz"
 };
 
 static const u32 const clk_2_hz[8] = {
-    10000000,
-    12000000,
-    15000000,
-    20000000,
-    24000000,
-    30000000,
-    40000000,
-    48000000
+	10000000,
+	12000000,
+	15000000,
+	20000000,
+	24000000,
+	30000000,
+	40000000,
+	48000000
 };
 
 /* data read cmd */
@@ -516,44 +551,44 @@ static const u8 const opcode_d_type[16] = {
 };
 
 static const char *const cmdcode_tlb[16] = {
-    "N_W",      /* 0 */
-    "AW3",      /* 1 */
-    "AW4",      /* 2 */
-    "UNK",      /* 3 */
-    "UNK",      /* 4 */
-    "AR3",      /* 5 */
-    "AR4",      /* 6 */
-    "UNK",      /* 7 */
-    "SGR",      /* 8 */
-    "AW1",      /* 9 */
-    "AW2",      /* 10 */
-    "UNK",      /* 11 */
-    "N_R",      /* 12 */
-    "AR1",      /* 13 */
-    "AR2",      /* 14 */
-    "UNK",      /* 15 */
+	"N_W",      /* 0 */
+	"AW3",      /* 1 */
+	"AW4",      /* 2 */
+	"UNK",      /* 3 */
+	"UNK",      /* 4 */
+	"AR3",      /* 5 */
+	"AR4",      /* 6 */
+	"UNK",      /* 7 */
+	"SGR",      /* 8 */
+	"AW1",      /* 9 */
+	"AW2",      /* 10 */
+	"UNK",      /* 11 */
+	"N_R",      /* 12 */
+	"AR1",      /* 13 */
+	"AR2",      /* 14 */
+	"UNK",      /* 15 */
 };
 
 #define card_sta_err_mask ((1<<31)|(1<<30)|(1<<29)|(1<<28)|(1<<27)|(1<<26)|(1<<24)|(1<<23)|(1<<22)|(1<<21)|(1<<20)|(1<<19)|(1<<18)|(1<<17)|(1<<16)|(1<<15)|(1<<13)|(1<<7))
 
 /* Only ADTC type cmd use */
 static const unsigned char rtk_sd_cmdcode[64][2] = {
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //0~3
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //4~7
-    {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_AUTOREAD1  ,SD_R1 }, //8~11
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //12~15
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_AUTOREAD2  ,SD_R1 }, {EMMC_AUTOREAD1  ,SD_R1 }, {EMMC_NORMALWRITE,SD_R1 }, //16~19
-    {EMMC_AUTOWRITE1 ,SD_R1 }, {EMMC_TUNING     ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //20~23
-    {EMMC_AUTOWRITE2 ,SD_R1 }, {EMMC_AUTOWRITE1 ,SD_R1 }, {EMMC_NORMALWRITE,SD_R1 }, {EMMC_NORMALWRITE,SD_R1 }, //24~27
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_NORMALREAD ,SD_R1 }, //28~31
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //32~35
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //36~39
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //40~43
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //44~47
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, //48~51
-    {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //52~55
-    {EMMC_AUTOREAD2  ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //56~59
-    {EMMC_AUTOWRITE2 ,SD_R1 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }  //60~63 
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //0~3
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //4~7
+	{EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_AUTOREAD1  ,SD_R1 }, //8~11
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //12~15
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_AUTOREAD2  ,SD_R1 }, {EMMC_AUTOREAD1  ,SD_R1 }, {EMMC_NORMALWRITE,SD_R1 }, //16~19
+	{EMMC_AUTOWRITE1 ,SD_R1 }, {EMMC_TUNING     ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //20~23
+	{EMMC_AUTOWRITE2 ,SD_R1 }, {EMMC_AUTOWRITE1 ,SD_R1 }, {EMMC_NORMALWRITE,SD_R1 }, {EMMC_NORMALWRITE,SD_R1 }, //24~27
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_NORMALREAD ,SD_R1 }, //28~31
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //32~35
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //36~39
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //40~43
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //44~47
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_NORMALREAD ,SD_R1 }, //48~51
+	{EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //52~55
+	{EMMC_AUTOREAD2  ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }, //56~59
+	{EMMC_AUTOWRITE2 ,SD_R1 }, {EMMC_NORMALREAD ,SD_R1 }, {EMMC_CMD_UNKNOW ,SD_R0 }, {EMMC_CMD_UNKNOW ,SD_R0 }  //60~63 
 };
 
 /* remove from c file &&& */
@@ -564,15 +599,15 @@ static const unsigned char rtk_sd_cmdcode[64][2] = {
 
 /* rtk function definition */
 int error_handling(struct rtkemmc_host *emmc_port, unsigned int cmd_idx, unsigned int bIgnore);
-int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int,unsigned long,int);
-int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port,int,unsigned long,int);
+int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int,unsigned long, int,int*);
+int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port,int,unsigned long);
 int rtkemmc_send_cmd24(struct rtkemmc_host *emmc_port);
 int rtkemmc_send_cmd17(struct rtkemmc_host *emmc_port);
 
 
 //int rtkemmc_send_cmd8(struct rtkemmc_host *emmc_port,unsigned int bIgnore);
 int rtkemmc_send_cmd8(struct rtkemmc_host *emmc_port, unsigned int bIgnore);
-int polling_to_tran_state(struct rtkemmc_host *emmc_port, int cmd_idx, int bIgnore);
+int polling_to_tran_state(struct rtkemmc_host *emmc_port,int cmd_idx, int bIgnore);
 void host_card_stop(struct rtkemmc_host *emmc_port);
 void host_card_stop2(struct rtkemmc_host *emmc_port);
 int rtkemmc_switch(struct mmc_card *card, u8 acc_mod, u8 index, u8 value, u8 cmd_set);

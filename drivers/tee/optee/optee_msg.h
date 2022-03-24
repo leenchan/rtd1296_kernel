@@ -56,7 +56,7 @@
 #define OPTEE_MSG_ATTR_TYPE_TMEM_OUTPUT		0xa
 #define OPTEE_MSG_ATTR_TYPE_TMEM_INOUT		0xb
 
-#define OPTEE_MSG_ATTR_TYPE_MASK		0xff
+#define OPTEE_MSG_ATTR_TYPE_MASK		GENMASK(7, 0)
 
 /*
  * Meta parameter to be absorbed by the Secure OS and not passed
@@ -67,11 +67,32 @@
 #define OPTEE_MSG_ATTR_META			BIT(8)
 
 /*
- * The temporary shared memory object is not physically contigous and this
- * temp memref is followed by another fragment until the last temp memref
- * that doesn't have this bit set.
+ * Pointer to a list of pages used to register user-defined SHM buffer.
+ * Used with OPTEE_MSG_ATTR_TYPE_TMEM_*.
+ * buf_ptr should point to the beginning of the buffer. Buffer will contain
+ * list of page addresses. OP-TEE core can reconstruct contiguous buffer from
+ * that page addresses list. Page addresses are stored as 64 bit values.
+ * Last entry on a page should point to the next page of buffer.
+ * Every entry in buffer should point to a 4k page beginning (12 least
+ * significant bits must be equal to zero).
+ *
+ * 12 least significant bints of optee_msg_param.u.tmem.buf_ptr should hold page
+ * offset of the user buffer.
+ *
+ * So, entries should be placed like members of this structure:
+ *
+ * struct page_data {
+ *   uint64_t pages_array[OPTEE_MSG_NONCONTIG_PAGE_SIZE/sizeof(uint64_t) - 1];
+ *   uint64_t next_page_data;
+ * };
+ *
+ * Structure is designed to exactly fit into the page size
+ * OPTEE_MSG_NONCONTIG_PAGE_SIZE which is a standard 4KB page.
+ *
+ * The size of 4KB is chosen because this is the smallest page size for ARM
+ * architectures. If REE uses larger pages, it should divide them to 4KB ones.
  */
-#define OPTEE_MSG_ATTR_FRAGMENT			BIT(9)
+#define OPTEE_MSG_ATTR_NONCONTIG		BIT(9)
 
 /*
  * Memory attributes for caching passed with temp memrefs. The actual value
@@ -81,7 +102,7 @@
  * bearer of this protocol OPTEE_SMC_SHM_* is used for values.
  */
 #define OPTEE_MSG_ATTR_CACHE_SHIFT		16
-#define OPTEE_MSG_ATTR_CACHE_MASK		0x7
+#define OPTEE_MSG_ATTR_CACHE_MASK		GENMASK(2, 0)
 #define OPTEE_MSG_ATTR_CACHE_PREDEFINED		0
 
 /*
@@ -94,8 +115,13 @@
 #define OPTEE_MSG_LOGIN_APPLICATION_USER	0x00000005
 #define OPTEE_MSG_LOGIN_APPLICATION_GROUP	0x00000006
 
+/*
+ * Page size used in non-contiguous buffer entries
+ */
+#define OPTEE_MSG_NONCONTIG_PAGE_SIZE		4096
+
 /**
- * struct optee_msg_param_tmem - temporary memory reference
+ * struct optee_msg_param_tmem - temporary memory reference parameter
  * @buf_ptr:	Address of the buffer
  * @size:	Size of the buffer
  * @shm_ref:	Temporary shared memory reference, pointer to a struct tee_shm
@@ -114,7 +140,7 @@ struct optee_msg_param_tmem {
 };
 
 /**
- * struct optee_msg_param_rmem - registered memory reference
+ * struct optee_msg_param_rmem - registered memory reference parameter
  * @offs:	Offset into shared memory reference
  * @size:	Size of the buffer
  * @shm_ref:	Shared memory reference, pointer to a struct tee_shm
@@ -126,10 +152,9 @@ struct optee_msg_param_rmem {
 };
 
 /**
- * struct optee_msg_param_value - values
- * @a: first value
- * @b: second value
- * @c: third value
+ * struct optee_msg_param_value - opaque value parameter
+ *
+ * Value parameters are passed unchecked between normal and secure world.
  */
 struct optee_msg_param_value {
 	u64 a;
@@ -138,15 +163,16 @@ struct optee_msg_param_value {
 };
 
 /**
- * struct optee_msg_param - parameter
- * @attr: attributes
- * @memref: a memory reference
- * @value: a value
+ * struct optee_msg_param - parameter used together with struct optee_msg_arg
+ * @attr:	attributes
+ * @tmem:	parameter by temporary memory reference
+ * @rmem:	parameter by registered memory reference
+ * @value:	parameter by opaque value
  *
  * @attr & OPTEE_MSG_ATTR_TYPE_MASK indicates if tmem, rmem or value is used in
  * the union. OPTEE_MSG_ATTR_TYPE_VALUE_* indicates value,
- * OPTEE_MSG_ATTR_TYPE_TMEM_* indicates tmem and
- * OPTEE_MSG_ATTR_TYPE_RMEM_* indicates rmem.
+ * OPTEE_MSG_ATTR_TYPE_TMEM_* indicates @tmem and
+ * OPTEE_MSG_ATTR_TYPE_RMEM_* indicates @rmem,
  * OPTEE_MSG_ATTR_TYPE_NONE indicates that none of the members are used.
  */
 struct optee_msg_param {
@@ -194,29 +220,9 @@ struct optee_msg_arg {
 	u32 ret_origin;
 	u32 num_params;
 
-	/*
-	 * this struct is 8 byte aligned since the 'struct optee_msg_param'
-	 * which follows requires 8 byte alignment.
-	 *
-	 * Commented out element used to visualize the layout dynamic part
-	 * of the struct. This field is not available at all if
-	 * num_params == 0.
-	 *
-	 * params is accessed through the macro OPTEE_MSG_GET_PARAMS
-	 *
-	 * struct optee_msg_param params[num_params];
-	 */
-} __aligned(8);
-
-/**
- * OPTEE_MSG_GET_PARAMS - return pointer to struct optee_msg_param *
- *
- * @x: Pointer to a struct optee_msg_arg
- *
- * Returns a pointer to the params[] inside a struct optee_msg_arg.
- */
-#define OPTEE_MSG_GET_PARAMS(x) \
-	(struct optee_msg_param *)(((struct optee_msg_arg *)(x)) + 1)
+	/* num_params tells the actual number of element in params */
+	struct optee_msg_param params[0];
+};
 
 /**
  * OPTEE_MSG_GET_ARG_SIZE - return size of struct optee_msg_arg
@@ -236,7 +242,7 @@ struct optee_msg_arg {
 
 /*
  * Return the following UID if using API specified in this file without
- * further extentions:
+ * further extensions:
  * 384fb3e0-e7f8-11e3-af63-0002a5d5c51b.
  * Represented in 4 32-bit words in OPTEE_MSG_UID_0, OPTEE_MSG_UID_1,
  * OPTEE_MSG_UID_2, OPTEE_MSG_UID_3.
@@ -249,7 +255,7 @@ struct optee_msg_arg {
 
 /*
  * Returns 2.0 if using API specified in this file without further
- * extentions. Represented in 2 32-bit words in OPTEE_MSG_REVISION_MAJOR
+ * extensions. Represented in 2 32-bit words in OPTEE_MSG_REVISION_MAJOR
  * and OPTEE_MSG_REVISION_MINOR
  */
 #define OPTEE_MSG_REVISION_MAJOR	2
@@ -281,8 +287,6 @@ struct optee_msg_arg {
  * Returns revision in 2 32-bit words in the same way as
  * OPTEE_MSG_CALLS_REVISION described above.
  */
-#define OPTEE_MSG_OS_OPTEE_REVISION_MAJOR	1
-#define OPTEE_MSG_OS_OPTEE_REVISION_MINOR	0
 #define OPTEE_MSG_FUNCID_GET_OS_REVISION	0x0001
 
 /*
@@ -371,7 +375,12 @@ struct optee_msg_arg {
 #define OPTEE_MSG_RPC_CMD_GET_TIME	3
 
 /*
- * Wait queue primitive, helper for secure world to implement a wait queue
+ * Wait queue primitive, helper for secure world to implement a wait queue.
+ *
+ * If secure world need to wait for a secure world mutex it issues a sleep
+ * request instead of spinning in secure world. Conversely is a wakeup
+ * request issued when a secure world mutex with a thread waiting thread is
+ * unlocked.
  *
  * Waiting on a key
  * [in] param[0].u.value.a OPTEE_MSG_RPC_WAIT_QUEUE_SLEEP

@@ -16,7 +16,10 @@ struct rtk_usb_phy_s {
 	struct usb_phy phy;
 	struct device *dev;
 
-	int portN;
+	enum rtd_chip_id chip_id;
+	enum rtd_chip_revision chip_revision;
+
+	int phyN;
 	void *reg_addr;
 	void *phy_data;
 
@@ -30,5 +33,21 @@ struct rtk_usb_phy_data_s {
 	char data;
 };
 
+#define phy_read(addr)			__raw_readl(addr)
+#define phy_write(addr, val)	do { smp_wmb(); __raw_writel(val, addr); } while(0)
+#define PHY_IO_TIMEOUT_MSEC		(50)
+
+static inline int utmi_wait_register(void __iomem *reg, u32 mask, u32 result)
+{
+	unsigned long timeout = jiffies + msecs_to_jiffies(PHY_IO_TIMEOUT_MSEC);
+	while (time_before(jiffies, timeout)) {
+		smp_rmb();
+		if ((phy_read(reg) & mask) == result)
+			return 0;
+		udelay(100);
+	}
+	pr_err("\033[0;32;31m can't program USB phy \033[m\n");
+	return -1;
+}
 
 #endif /* __PHY_RTK_USB_H__ */

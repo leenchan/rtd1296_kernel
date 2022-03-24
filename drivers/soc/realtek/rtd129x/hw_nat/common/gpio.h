@@ -1,10 +1,10 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2002  
+* Copyright c                  Realtek Semiconductor Corporation, 2002
 * All rights reserved.
-* 
-* Program : GPIO Header File 
-* Abstract : 
-* Author : Louis Yung-Chieh Lo (yjlou@realtek.com.tw)               
+*
+* Program : GPIO Header File
+* Abstract :
+* Author : Louis Yung-Chieh Lo (yjlou@realtek.com.tw)
 * $Id: gpio.h,v 1.1 2009/03/23 11:54:49 jasonwang Exp $
 *
 * This program is free software; you can redistribute it and/or modify
@@ -31,7 +31,7 @@
 	CS		B0		E3		O
 	INT		A4		E2		I    (slic2)
 	INT				E1		I    (slic1)
-	RELAY			E0		O		
+	RELAY			E0		O
 
 //CS is active low
 #define si3120_RS	0x80
@@ -98,9 +98,9 @@ typedef uint32 gpioID;
 
 
 
-int32 _rtl865x_initGpioPin(gpioID gpioId, 
-				enum GPIO_PERIPHERAL dedicate, 
-				enum GPIO_DIRECTION direction, 
+int32 _rtl865x_initGpioPin(gpioID gpioId,
+				enum GPIO_PERIPHERAL dedicate,
+				enum GPIO_DIRECTION direction,
 				enum GPIO_INTERRUPT_TYPE interruptEnable );
 int32 _rtl865x_getGpioDataBit( uint32 gpioId, uint32* data );
 int32 _rtl865x_setGpioDataBit( uint32 gpioId, uint32 data );

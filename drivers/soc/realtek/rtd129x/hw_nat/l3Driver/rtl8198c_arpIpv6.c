@@ -325,7 +325,7 @@ int32 rtl8198c_addIpv6Arp(inv6_addr_t ip, ether_addr_t *mac)
 
 
 	#if 0
-	printk("%s.%d.ipAddr(0x%4x%4x%4x%4x%4x%4x%4x%4x),mac(%02x:%02x:%02x:%02x:%02x:%02x)****\n",
+	pr_err("%s.%d.ipAddr(0x%4x%4x%4x%4x%4x%4x%4x%4x),mac(%02x:%02x:%02x:%02x:%02x:%02x)****\n",
 			__FUNCTION__,__LINE__,
 			ip.v6_addr16[0],ip.v6_addr16[1],ip.v6_addr16[2],ip.v6_addr16[3],
 			ip.v6_addr16[4],ip.v6_addr16[5],ip.v6_addr16[6],ip.v6_addr16[7],
@@ -389,7 +389,7 @@ int32 rtl8198c_addIpv6Arp(inv6_addr_t ip, ether_addr_t *mac)
 	{
 
 		#if 0
-		printk("%s:%d\n,fid(%d),mac(%02x:%02x:%02x:%02x:%02x:%02x)\n",__FUNCTION__,__LINE__,fid,mac->octet[0],mac->octet[1],
+		pr_err("%s:%d,fid(%d),mac(%02x:%02x:%02x:%02x:%02x:%02x)\n",__FUNCTION__,__LINE__,fid,mac->octet[0],mac->octet[1],
 			mac->octet[2],mac->octet[3],mac->octet[4],mac->octet[5]);
 		#endif
 

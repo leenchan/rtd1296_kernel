@@ -31,7 +31,6 @@
 
 static inline u32 dwc3_readl(void __iomem *base, u32 offset)
 {
-	u32 offs = offset - DWC3_GLOBALS_REGS_START;
 	u32 value;
 
 #ifdef CONFIG_USB_PATCH_ON_RTK
@@ -45,7 +44,7 @@ static inline u32 dwc3_readl(void __iomem *base, u32 offset)
 	 * space, see dwc3_probe in core.c.
 	 * However, the offsets are given starting from xHCI address space.
 	 */
-	value = readl(base + offs);
+	value = readl(base + offset - DWC3_GLOBALS_REGS_START);
 
 #ifdef CONFIG_USB_PATCH_ON_RTK
 	/* Add global lock for emmc issue*/
@@ -65,8 +64,6 @@ static inline u32 dwc3_readl(void __iomem *base, u32 offset)
 
 static inline void dwc3_writel(void __iomem *base, u32 offset, u32 value)
 {
-	u32 offs = offset - DWC3_GLOBALS_REGS_START;
-
 #ifdef CONFIG_USB_PATCH_ON_RTK
 	unsigned long flags;
 	rtk_lockapi_lock(flags, __FUNCTION__);
@@ -77,7 +74,7 @@ static inline void dwc3_writel(void __iomem *base, u32 offset, u32 value)
 	 * space, see dwc3_probe in core.c.
 	 * However, the offsets are given starting from xHCI address space.
 	 */
-	writel(value, base + offs);
+	writel(value, base + offset - DWC3_GLOBALS_REGS_START);
 
 #ifdef CONFIG_USB_PATCH_ON_RTK
 	rtk_lockapi_unlock(flags,__FUNCTION__);

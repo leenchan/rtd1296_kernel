@@ -5,19 +5,54 @@
  * Jump label support
  *
  * Copyright (C) 2009-2012 Jason Baron <jbaron@redhat.com>
- * Copyright (C) 2011-2012 Peter Zijlstra <pzijlstr@redhat.com>
+ * Copyright (C) 2011-2012 Red Hat, Inc., Peter Zijlstra
+ *
+ * DEPRECATED API:
+ *
+ * The use of 'struct static_key' directly, is now DEPRECATED. In addition
+ * static_key_{true,false}() is also DEPRECATED. IE DO NOT use the following:
+ *
+ * struct static_key false = STATIC_KEY_INIT_FALSE;
+ * struct static_key true = STATIC_KEY_INIT_TRUE;
+ * static_key_true()
+ * static_key_false()
+ *
+ * The updated API replacements are:
+ *
+ * DEFINE_STATIC_KEY_TRUE(key);
+ * DEFINE_STATIC_KEY_FALSE(key);
+ * DEFINE_STATIC_KEY_ARRAY_TRUE(keys, count);
+ * DEFINE_STATIC_KEY_ARRAY_FALSE(keys, count);
+ * static_branch_likely()
+ * static_branch_unlikely()
  *
  * Jump labels provide an interface to generate dynamic branches using
- * self-modifying code. Assuming toolchain and architecture support, the result
- * of a "if (static_key_false(&key))" statement is an unconditional branch (which
- * defaults to false - and the true block is placed out of line).
+ * self-modifying code. Assuming toolchain and architecture support, if we
+ * define a "key" that is initially false via "DEFINE_STATIC_KEY_FALSE(key)",
+ * an "if (static_branch_unlikely(&key))" statement is an unconditional branch
+ * (which defaults to false - and the true block is placed out of line).
+ * Similarly, we can define an initially true key via
+ * "DEFINE_STATIC_KEY_TRUE(key)", and use it in the same
+ * "if (static_branch_unlikely(&key))", in which case we will generate an
+ * unconditional branch to the out-of-line true branch. Keys that are
+ * initially true or false can be using in both static_branch_unlikely()
+ * and static_branch_likely() statements.
  *
- * However at runtime we can change the branch target using
- * static_key_slow_{inc,dec}(). These function as a 'reference' count on the key
- * object, and for as long as there are references all branches referring to
- * that particular key will point to the (out of line) true block.
+ * At runtime we can change the branch target by setting the key
+ * to true via a call to static_branch_enable(), or false using
+ * static_branch_disable(). If the direction of the branch is switched by
+ * these calls then we run-time modify the branch target via a
+ * no-op -> jump or jump -> no-op conversion. For example, for an
+ * initially false key that is used in an "if (static_branch_unlikely(&key))"
+ * statement, setting the key to true requires us to patch in a jump
+ * to the out-of-line of true branch.
  *
- * Since this relies on modifying code, the static_key_slow_{inc,dec}() functions
+ * In addition to static_branch_{enable,disable}, we can also reference count
+ * the key or branch direction via static_branch_{inc,dec}. Thus,
+ * static_branch_inc() can be thought of as a 'make more true' and
+ * static_branch_dec() as a 'make more false'.
+ *
+ * Since this relies on modifying code, the branch modifying functions
  * must be considered absolute slow paths (machine wide synchronization etc.).
  * OTOH, since the affected branches are unconditional, their runtime overhead
  * will be absolutely minimal, esp. in the default (off) case where the total
@@ -29,20 +64,10 @@
  * cause significant performance degradation. Struct static_key_deferred and
  * static_key_slow_dec_deferred() provide for this.
  *
- * Lacking toolchain and or architecture support, jump labels fall back to a simple
- * conditional branch.
+ * Lacking toolchain and or architecture support, static keys fall back to a
+ * simple conditional branch.
  *
- * struct static_key my_key = STATIC_KEY_INIT_TRUE;
- *
- *   if (static_key_true(&my_key)) {
- *   }
- *
- * will result in the true case being in-line and starts the key with a single
- * reference. Mixing static_key_true() and static_key_false() on the same key is not
- * allowed.
- *
- * Not initializing the key (static data is initialized to 0s anyway) is the
- * same as using STATIC_KEY_INIT_FALSE.
+ * Additional babbling in: Documentation/static-keys.txt
  */
 
 #if defined(CC_HAVE_ASM_GOTO) && defined(CONFIG_JUMP_LABEL)
@@ -53,7 +78,6 @@
 
 #include <linux/types.h>
 #include <linux/compiler.h>
-#include <linux/bug.h>
 
 extern bool static_key_initialized;
 
@@ -92,13 +116,6 @@ enum jump_label_type {
 
 struct module;
 
-#include <linux/atomic.h>
-
-static inline int static_key_count(struct static_key *key)
-{
-	return atomic_read(&key->enabled);
-}
-
 #ifdef HAVE_JUMP_LABEL
 
 #define JUMP_TYPE_FALSE	0UL
@@ -129,15 +146,33 @@ extern int jump_label_text_reserved(void *start, void *end);
 extern void static_key_slow_inc(struct static_key *key);
 extern void static_key_slow_dec(struct static_key *key);
 extern void jump_label_apply_nops(struct module *mod);
+extern int static_key_count(struct static_key *key);
+extern void static_key_enable(struct static_key *key);
+extern void static_key_disable(struct static_key *key);
 
+/*
+ * We should be using ATOMIC_INIT() for initializing .enabled, but
+ * the inclusion of atomic.h is problematic for inclusion of jump_label.h
+ * in 'low-level' headers. Thus, we are initializing .enabled with a
+ * raw value, but have added a BUILD_BUG_ON() to catch any issues in
+ * jump_label_init() see: kernel/jump_label.c.
+ */
 #define STATIC_KEY_INIT_TRUE					\
-	{ .enabled = ATOMIC_INIT(1),				\
+	{ .enabled = { 1 },					\
 	  .entries = (void *)JUMP_TYPE_TRUE }
 #define STATIC_KEY_INIT_FALSE					\
-	{ .enabled = ATOMIC_INIT(0),				\
+	{ .enabled = { 0 },					\
 	  .entries = (void *)JUMP_TYPE_FALSE }
 
 #else  /* !HAVE_JUMP_LABEL */
+
+#include <linux/atomic.h>
+#include <linux/bug.h>
+
+static inline int static_key_count(struct static_key *key)
+{
+	return atomic_read(&key->enabled);
+}
 
 static __always_inline void jump_label_init(void)
 {
@@ -183,14 +218,6 @@ static inline int jump_label_apply_nops(struct module *mod)
 	return 0;
 }
 
-#define STATIC_KEY_INIT_TRUE	{ .enabled = ATOMIC_INIT(1) }
-#define STATIC_KEY_INIT_FALSE	{ .enabled = ATOMIC_INIT(0) }
-
-#endif	/* HAVE_JUMP_LABEL */
-
-#define STATIC_KEY_INIT STATIC_KEY_INIT_FALSE
-#define jump_label_enabled static_key_enabled
-
 static inline void static_key_enable(struct static_key *key)
 {
 	int count = static_key_count(key);
@@ -210,6 +237,14 @@ static inline void static_key_disable(struct static_key *key)
 	if (count)
 		static_key_slow_dec(key);
 }
+
+#define STATIC_KEY_INIT_TRUE	{ .enabled = ATOMIC_INIT(1) }
+#define STATIC_KEY_INIT_FALSE	{ .enabled = ATOMIC_INIT(0) }
+
+#endif	/* HAVE_JUMP_LABEL */
+
+#define STATIC_KEY_INIT STATIC_KEY_INIT_FALSE
+#define jump_label_enabled static_key_enabled
 
 /* -------------------------------------------------------------------------- */
 
@@ -234,8 +269,24 @@ struct static_key_false {
 #define DEFINE_STATIC_KEY_TRUE(name)	\
 	struct static_key_true name = STATIC_KEY_TRUE_INIT
 
+#define DECLARE_STATIC_KEY_TRUE(name)	\
+	extern struct static_key_true name
+
 #define DEFINE_STATIC_KEY_FALSE(name)	\
 	struct static_key_false name = STATIC_KEY_FALSE_INIT
+
+#define DECLARE_STATIC_KEY_FALSE(name)	\
+	extern struct static_key_false name
+
+#define DEFINE_STATIC_KEY_ARRAY_TRUE(name, count)		\
+	struct static_key_true name[count] = {			\
+		[0 ... (count) - 1] = STATIC_KEY_TRUE_INIT,	\
+	}
+
+#define DEFINE_STATIC_KEY_ARRAY_FALSE(name, count)		\
+	struct static_key_false name[count] = {			\
+		[0 ... (count) - 1] = STATIC_KEY_FALSE_INIT,	\
+	}
 
 extern bool ____wrong_branch_error(void);
 

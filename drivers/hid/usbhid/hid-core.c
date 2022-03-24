@@ -274,10 +274,10 @@ static void hid_irq_in(struct urb *urb)
 
 	switch (urb->status) {
 	case 0:			/* success */
-		usbhid_mark_busy(usbhid);
 		usbhid->retry_delay = 0;
 		if ((hid->quirks & HID_QUIRK_ALWAYS_POLL) && !hid->open)
 			break;
+		usbhid_mark_busy(usbhid);
 		if (!test_bit(HID_RESUME_RUNNING, &usbhid->iofl)) {
 			hid_input_report(urb->context, HID_INPUT_REPORT,
 					 urb->transfer_buffer,
@@ -307,7 +307,6 @@ static void hid_irq_in(struct urb *urb)
 	case -EILSEQ:		/* protocol error or unplug */
 	case -EPROTO:		/* protocol error or unplug */
 	case -ETIME:		/* protocol error or unplug */
-	case -EOVERFLOW:	/* Value too large for defined data type */
 	case -ETIMEDOUT:	/* Should never happen, but... */
 		usbhid_mark_busy(usbhid);
 		clear_bit(HID_IN_RUNNING, &usbhid->iofl);
@@ -711,7 +710,8 @@ int usbhid_open(struct hid_device *hid)
 		 * Wait 50 msec for the queue to empty before allowing events
 		 * to go through hid.
 		 */
-		msleep(50);
+		if (res == 0 && !(hid->quirks & HID_QUIRK_ALWAYS_POLL))
+			msleep(50);
 		clear_bit(HID_RESUME_RUNNING, &usbhid->iofl);
 	}
 done:
@@ -971,6 +971,8 @@ static int usbhid_parse(struct hid_device *hid)
 	unsigned int rsize = 0;
 	char *rdesc;
 	int ret, n;
+	int num_descriptors;
+	size_t offset = offsetof(struct hid_descriptor, desc);
 
 	quirks = usbhid_lookup_quirk(le16_to_cpu(dev->descriptor.idVendor),
 			le16_to_cpu(dev->descriptor.idProduct));
@@ -993,10 +995,18 @@ static int usbhid_parse(struct hid_device *hid)
 		return -ENODEV;
 	}
 
+	if (hdesc->bLength < sizeof(struct hid_descriptor)) {
+		dbg_hid("hid descriptor is too short\n");
+		return -EINVAL;
+	}
+
 	hid->version = le16_to_cpu(hdesc->bcdHID);
 	hid->country = hdesc->bCountryCode;
 
-	for (n = 0; n < hdesc->bNumDescriptors; n++)
+	num_descriptors = min_t(int, hdesc->bNumDescriptors,
+	       (hdesc->bLength - offset) / sizeof(struct hid_class_descriptor));
+
+	for (n = 0; n < num_descriptors; n++)
 		if (hdesc->desc[n].bDescriptorType == HID_DT_REPORT)
 			rsize = le16_to_cpu(hdesc->desc[n].wDescriptorLength);
 

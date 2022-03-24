@@ -81,7 +81,6 @@ static int rtkgpio_regulator_probe(struct platform_device *pdev)
 	struct of_regulator_match *match;
 	struct regulator_dev *rdev;
 	struct device *dev = &pdev->dev;
-	int module_en;
 
 	gpio0 = of_get_gpio(dev->of_node, 0);
 	gpio1 = of_get_gpio(dev->of_node, 1);

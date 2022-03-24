@@ -22,6 +22,7 @@
 
 #include "core.h"
 #include "bus.h"
+#include "host.h"
 #include "sd.h"
 #include "sdio_bus.h"
 #include "mmc_ops.h"
@@ -117,8 +118,6 @@ static int sdio_read_cccr(struct mmc_card *card, u32 ocr)
 	unsigned char data;
 	unsigned char speed;
 
-	memset(&card->cccr, 0, sizeof(struct sdio_cccr));
-
 	ret = mmc_io_rw_direct(card, 0, 0, SDIO_CCCR_CCCR, 0, &data);
 	if (ret)
 		goto out;
@@ -167,6 +166,7 @@ static int sdio_read_cccr(struct mmc_card *card, u32 ocr)
 				SDIO_CCCR_UHS, 0, &data);
 			if (ret)
 				goto out;
+
 #ifdef CONFIG_MMC_SDHCI_RTK
                         set_SDIO_version(3);
                         rtk_register_set();
@@ -176,9 +176,11 @@ static int sdio_read_cccr(struct mmc_card *card, u32 ocr)
 				if (data & SDIO_UHS_DDR50)
 					card->sw_caps.sd3_bus_mode
 						|= SD_MODE_UHS_DDR50;
+
 				if (data & SDIO_UHS_SDR50)
 					card->sw_caps.sd3_bus_mode
 						|= SD_MODE_UHS_SDR50;
+
 				if (data & SDIO_UHS_SDR104) {
 					card->sw_caps.sd3_bus_mode
 						|= SD_MODE_UHS_SDR104;
@@ -188,7 +190,6 @@ static int sdio_read_cccr(struct mmc_card *card, u32 ocr)
 						rtk_register_set();
 					}
 #endif
-
 				}
 			}
 
@@ -204,11 +205,12 @@ static int sdio_read_cccr(struct mmc_card *card, u32 ocr)
 			if (data & SDIO_DRIVE_SDTD)
 				card->sw_caps.sd3_drv_type |= SD_DRIVER_TYPE_D;
 		}
+
 		/* if no uhs mode ensure we check for high speed */
 		if (!card->sw_caps.sd3_bus_mode) {
 #ifdef CONFIG_MMC_SDHCI_RTK
-			set_SDIO_version(2);
-			rtk_register_set();
+                        set_SDIO_version(2);
+                        rtk_register_set();
 #endif
 			if (speed & SDIO_SPEED_SHS) {
 				card->cccr.high_speed = 1;
@@ -426,69 +428,38 @@ static unsigned char host_drive_to_sdio_drive(int host_strength)
 
 static void sdio_select_driver_type(struct mmc_card *card)
 {
-	int host_drv_type = SD_DRIVER_TYPE_B;
-	int card_drv_type = SD_DRIVER_TYPE_B;
-	int drive_strength;
+	int card_drv_type, drive_strength, drv_type;
 	unsigned char card_strength;
 	int err;
 
-	/*
-	 * If the host doesn't support any of the Driver Types A,C or D,
-	 * or there is no board specific handler then default Driver
-	 * Type B is used.
-	 */
-	if (!(card->host->caps &
-		(MMC_CAP_DRIVER_TYPE_A |
-		 MMC_CAP_DRIVER_TYPE_C |
-		 MMC_CAP_DRIVER_TYPE_D)))
-		return;
+	card->drive_strength = 0;
 
-	if (!card->host->ops->select_drive_strength)
-		return;
+	card_drv_type = card->sw_caps.sd3_drv_type | SD_DRIVER_TYPE_B;
 
-	if (card->host->caps & MMC_CAP_DRIVER_TYPE_A)
-		host_drv_type |= SD_DRIVER_TYPE_A;
+	drive_strength = mmc_select_drive_strength(card,
+						   card->sw_caps.uhs_max_dtr,
+						   card_drv_type, &drv_type);
 
-	if (card->host->caps & MMC_CAP_DRIVER_TYPE_C)
-		host_drv_type |= SD_DRIVER_TYPE_C;
+	if (drive_strength) {
+		/* if error just use default for drive strength B */
+		err = mmc_io_rw_direct(card, 0, 0, SDIO_CCCR_DRIVE_STRENGTH, 0,
+				       &card_strength);
+		if (err)
+			return;
 
-	if (card->host->caps & MMC_CAP_DRIVER_TYPE_D)
-		host_drv_type |= SD_DRIVER_TYPE_D;
+		card_strength &= ~(SDIO_DRIVE_DTSx_MASK<<SDIO_DRIVE_DTSx_SHIFT);
+		card_strength |= host_drive_to_sdio_drive(drive_strength);
 
-	if (card->sw_caps.sd3_drv_type & SD_DRIVER_TYPE_A)
-		card_drv_type |= SD_DRIVER_TYPE_A;
+		/* if error default to drive strength B */
+		err = mmc_io_rw_direct(card, 1, 0, SDIO_CCCR_DRIVE_STRENGTH,
+				       card_strength, NULL);
+		if (err)
+			return;
+		card->drive_strength = drive_strength;
+	}
 
-	if (card->sw_caps.sd3_drv_type & SD_DRIVER_TYPE_C)
-		card_drv_type |= SD_DRIVER_TYPE_C;
-
-	if (card->sw_caps.sd3_drv_type & SD_DRIVER_TYPE_D)
-		card_drv_type |= SD_DRIVER_TYPE_D;
-
-	/*
-	 * The drive strength that the hardware can support
-	 * depends on the board design.  Pass the appropriate
-	 * information and let the hardware specific code
-	 * return what is possible given the options
-	 */
-	drive_strength = card->host->ops->select_drive_strength(
-		card->sw_caps.uhs_max_dtr,
-		host_drv_type, card_drv_type);
-
-	/* if error just use default for drive strength B */
-	err = mmc_io_rw_direct(card, 0, 0, SDIO_CCCR_DRIVE_STRENGTH, 0,
-		&card_strength);
-	if (err)
-		return;
-
-	card_strength &= ~(SDIO_DRIVE_DTSx_MASK<<SDIO_DRIVE_DTSx_SHIFT);
-	card_strength |= host_drive_to_sdio_drive(drive_strength);
-
-	err = mmc_io_rw_direct(card, 1, 0, SDIO_CCCR_DRIVE_STRENGTH,
-		card_strength, NULL);
-
-	/* if error default to drive strength B */
-	if (!err)
-		mmc_set_driver_type(card->host, drive_strength);
+	if (drv_type)
+		mmc_set_driver_type(card->host, drv_type);
 }
 
 
@@ -591,7 +562,7 @@ static int mmc_sdio_init_uhs_card(struct mmc_card *card)
 	 */
 	if (!mmc_host_is_spi(card->host) &&
 	    ((card->host->ios.timing == MMC_TIMING_UHS_SDR50) ||
-	     (card->host->ios.timing == MMC_TIMING_UHS_SDR104)))
+	      (card->host->ios.timing == MMC_TIMING_UHS_SDR104)))
 		err = mmc_execute_tuning(card);
 out:
 	return err;
@@ -685,8 +656,8 @@ try_again:
 	 */
 	if (!powered_resume && (rocr & ocr & R4_18V_PRESENT)) {
 #ifdef CONFIG_MMC_SDHCI_RTK
-		host->ios.signal_voltage = MMC_SIGNAL_VOLTAGE_180;
-		ocr |= R4_18V_PRESENT;
+                host->ios.signal_voltage = MMC_SIGNAL_VOLTAGE_180;
+                ocr |= R4_18V_PRESENT;
 #else
 		err = mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_180,
 					ocr_card);
@@ -706,11 +677,6 @@ try_again:
 		ocr &= ~R4_18V_PRESENT;
 	}
 
-/*#ifdef CONFIG_MMC_SDHCI_RTK
-#ifdef CONFIG_MMC_SDHCI_RTK_SDIO30  //Workaround: sdhci host version incorrect, jamestai20151224
-	ocr |= R4_18V_PRESENT;
-#endif
-#endif*/
 	/*
 	 * For native busses:  set card RCA and quit open drain mode.
 	 */
@@ -978,16 +944,20 @@ static int mmc_sdio_pre_suspend(struct mmc_host *host)
  */
 static int mmc_sdio_suspend(struct mmc_host *host)
 {
-	printk(KERN_ERR "[SDIO] mmc_sdio_suspend start\n");
-	if (mmc_card_keep_power(host) && mmc_card_wake_sdio_irq(host)) {
-		mmc_claim_host(host);
+	mmc_claim_host(host);
+
+	if (mmc_card_keep_power(host) && mmc_card_wake_sdio_irq(host))
 		sdio_disable_wide(host->card);
-		mmc_release_host(host);
+
+	if (!mmc_card_keep_power(host)) {
+		mmc_power_off(host);
+	} else if (host->retune_period) {
+		mmc_retune_timer_stop(host);
+		mmc_retune_needed(host);
 	}
 
-	if (!mmc_card_keep_power(host))
-		mmc_power_off(host);
-        printk(KERN_ERR "[SDIO] mmc_sdio_suspend OK\n");
+	mmc_release_host(host);
+
 	return 0;
 }
 
@@ -997,8 +967,7 @@ static int mmc_sdio_resume(struct mmc_host *host)
 
 	BUG_ON(!host);
 	BUG_ON(!host->card);
-	printk(KERN_ERR "[SDIO] mmc_sdio_resume start\n");
-        
+
 	/* Basic card reinitialization. */
 	mmc_claim_host(host);
 
@@ -1034,20 +1003,15 @@ static int mmc_sdio_resume(struct mmc_host *host)
 	}
 
 	if (!err && host->sdio_irqs) {
-		if (!(host->caps2 & MMC_CAP2_SDIO_IRQ_NOTHREAD)) {
+		if (!(host->caps2 & MMC_CAP2_SDIO_IRQ_NOTHREAD))
 			wake_up_process(host->sdio_irq_thread);
-		} else if (host->caps & MMC_CAP_SDIO_IRQ) {
-			mmc_host_clk_hold(host);
+		else if (host->caps & MMC_CAP_SDIO_IRQ)
 			host->ops->enable_sdio_irq(host, 1);
-			mmc_host_clk_release(host);
-		}
 	}
 
 	mmc_release_host(host);
 
 	host->pm_flags &= ~MMC_PM_KEEP_POWER;
-	
-        printk(KERN_ERR "[SDIO] mmc_sdio_resume OK\n");
 	return err;
 }
 
@@ -1099,14 +1063,29 @@ out:
 static int mmc_sdio_runtime_suspend(struct mmc_host *host)
 {
 	/* No references to the card, cut the power to it. */
+	mmc_claim_host(host);
 	mmc_power_off(host);
+	mmc_release_host(host);
+
 	return 0;
 }
 
 static int mmc_sdio_runtime_resume(struct mmc_host *host)
 {
+	int ret;
+
 	/* Restore power and re-initialize. */
+	mmc_claim_host(host);
 	mmc_power_up(host, host->card->ocr);
+	ret = mmc_sdio_power_restore(host);
+	mmc_release_host(host);
+
+	return ret;
+}
+
+static int mmc_sdio_reset(struct mmc_host *host)
+{
+	mmc_power_cycle(host, host->card->ocr);
 	return mmc_sdio_power_restore(host);
 }
 
@@ -1120,6 +1099,7 @@ static const struct mmc_bus_ops mmc_sdio_ops = {
 	.runtime_resume = mmc_sdio_runtime_resume,
 	.power_restore = mmc_sdio_power_restore,
 	.alive = mmc_sdio_alive,
+	.reset = mmc_sdio_reset,
 };
 
 
@@ -1273,6 +1253,8 @@ int sdio_reset_comm(struct mmc_card *card)
 
 	printk("%s():\n", __func__);
 	mmc_claim_host(host);
+
+	mmc_retune_disable(host);
 
 	mmc_go_idle(host);
 

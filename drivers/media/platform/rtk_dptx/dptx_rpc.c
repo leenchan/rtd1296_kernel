@@ -13,11 +13,17 @@
 
 #include "dptx_rpc.h"
 
+#if defined(CONFIG_ARCH_RTD129x) || defined(CONFIG_ARCH_RTD119X)
 #define CONVERT_FOR_AVCPU(x)		((unsigned int)(x) | 0xA0000000)
+#else
+#define CONVERT_FOR_AVCPU(x)		(x)
+#endif
+
 
 extern struct ion_device *rtk_phoenix_ion_device;
 
-int RPC_TOAGENT_DPTX_QUERY_TV_System(struct ion_client *client, struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *arg)
+int RPC_TOAGENT_DPTX_QUERY_TV_System(struct ion_client *client,
+			struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *arg)
 {
 	struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *i_rpc = NULL;
 	struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *o_rpc = NULL;
@@ -33,24 +39,27 @@ int RPC_TOAGENT_DPTX_QUERY_TV_System(struct ion_client *client, struct VIDEO_RPC
 			ION_FLAG_SCPUACC |
 			ION_FLAG_ACPUACC);
 	if (IS_ERR(handle)) {
-		printk(KERN_ERR "%s ion_alloc fail\n", __FUNCTION__);
+		pr_err("%s ion_alloc fail\n", __FUNCTION__);
 		goto exit;
 	}
 	if(ion_phys(client, handle, &dat, &len) != 0) {
-		printk(KERN_ERR "%s ion_phys fail\n", __FUNCTION__);
+		pr_err("%s ion_phys fail\n", __FUNCTION__);
 		goto exit;
 	}
+
 	i_rpc = ion_map_kernel(client, handle);
-	offset = get_rpc_alignment_offset(sizeof(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM));
-	o_rpc = (struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *)((unsigned long)i_rpc + offset);
+	offset = get_rpc_alignment_offset(
+			sizeof(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM));
+	o_rpc = (struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *)
+				((unsigned long)i_rpc + offset);
 
 	if (send_rpc_command(RPC_AUDIO,
-				ENUM_VIDEO_KERNEL_RPC_QUERY_CONFIG_TV_SYSTEM,
-				CONVERT_FOR_AVCPU(dat),
-				CONVERT_FOR_AVCPU(dat + offset),
-				&RPC_ret))
+			ENUM_VIDEO_KERNEL_RPC_QUERY_CONFIG_TV_SYSTEM,
+			CONVERT_FOR_AVCPU(dat),
+			CONVERT_FOR_AVCPU(dat + offset),
+			&RPC_ret))
 	{
-		printk(KERN_ERR "%s RPC fail\n", __FUNCTION__);
+		pr_err("%s RPC fail\n", __FUNCTION__);
 		goto exit;
 	}
 	ret = 0;
@@ -78,7 +87,8 @@ exit:
 	return ret;
 }
 
-int RPC_TOAGENT_DPTX_Config_TV_System(struct ion_client *client, struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *arg)
+int RPC_TOAGENT_DPTX_Config_TV_System(struct ion_client *client,
+			struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *arg)
 {
 	struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *rpc = NULL;
 	unsigned int RPC_ret;
@@ -91,11 +101,11 @@ int RPC_TOAGENT_DPTX_Config_TV_System(struct ion_client *client, struct VIDEO_RP
 			RTK_PHOENIX_ION_HEAP_AUDIO_MASK,
 			ION_FLAG_NONCACHED | ION_FLAG_SCPUACC |	ION_FLAG_ACPUACC);
 	if (IS_ERR(handle)) {
-		printk(KERN_ERR "%s ion_alloc fail\n", __FUNCTION__);
+		pr_err("%s ion_alloc fail\n", __FUNCTION__);
 		goto exit;
 	}
 	if(ion_phys(client, handle, &dat, &len) != 0) {
-		printk(KERN_ERR "%s ion_phys fail\n", __FUNCTION__);
+		pr_err("%s ion_phys fail\n", __FUNCTION__);
 		goto exit;
 	}
 	rpc = ion_map_kernel(client, handle);
@@ -122,7 +132,7 @@ int RPC_TOAGENT_DPTX_Config_TV_System(struct ion_client *client, struct VIDEO_RP
 			CONVERT_FOR_AVCPU(dat + get_rpc_alignment_offset(sizeof(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM))),
 			&RPC_ret))
 	{
-		printk(KERN_ERR "%s RPC fail\n", __FUNCTION__);
+		pr_err("%s RPC fail\n", __FUNCTION__);
 		goto exit;
 	}
 	ret = 0;

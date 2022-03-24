@@ -19,16 +19,18 @@ LDFLAGS_vmlinux	+= --be8
 LDFLAGS_MODULE	+= --be8
 endif
 
-OBJCOPYFLAGS	:=-O binary -R .comment -S
+ifeq ($(CONFIG_ARM_MODULE_PLTS),y)
+LDFLAGS_MODULE	+= -T $(srctree)/arch/arm/kernel/module.lds
+endif
+
 GZFLAGS		:=-9
 #KBUILD_CFLAGS	+=-pipe
 
 # Never generate .eh_frame
 KBUILD_CFLAGS	+= $(call cc-option,-fno-dwarf2-cfi-asm)
 
-# Do not use arch/arm/defconfig - it's always outdated.
-# Select a platform tht is kept up-to-date
-KBUILD_DEFCONFIG := versatile_defconfig
+# This should work on most of the modern platforms
+KBUILD_DEFCONFIG := multi_v7_defconfig
 
 # defines filename extension depending memory management type.
 ifeq ($(CONFIG_MMU),)
@@ -64,6 +66,7 @@ KBUILD_CFLAGS	+= $(call cc-option,-fno-ipa-sra)
 # testing for a specific architecture or later rather impossible.
 arch-$(CONFIG_CPU_32v7M)	=-D__LINUX_ARM_ARCH__=7 -march=armv7-m -Wa,-march=armv7-m
 arch-$(CONFIG_CPU_32v7)		=-D__LINUX_ARM_ARCH__=7 $(call cc-option,-march=armv7-a,-march=armv5t -Wa$(comma)-march=armv7-a)
+arch-$(CONFIG_CPU_32v8)		=-D__LINUX_ARM_ARCH__=7 $(call cc-option,-march=armv8-a,-march=armv7-a -Wa$(comma)-march=armv8-a)
 arch-$(CONFIG_CPU_32v6)		=-D__LINUX_ARM_ARCH__=6 $(call cc-option,-march=armv6,-march=armv5t -Wa$(comma)-march=armv6)
 # Only override the compiler option if ARMv6. The ARMv6K extensions are
 # always available in ARMv7
@@ -125,6 +128,10 @@ CFLAGS_ISA	:=$(call cc-option,-marm,)
 AFLAGS_ISA	:=$(CFLAGS_ISA)
 endif
 
+ifeq ($(CONFIG_THUMB2_KERNEL),y)
+CFLAGS_MODULE  +=-mlong-calls
+endif
+
 # Need -Uarm for gcc < 3.x
 KBUILD_CFLAGS	+=$(CFLAGS_ABI) $(CFLAGS_ISA) $(arch-y) $(tune-y) $(call cc-option,-mshort-load-bytes,$(call cc-option,-malignment-traps,)) -msoft-float -Uarm
 KBUILD_AFLAGS	+=$(CFLAGS_ABI) $(AFLAGS_ISA) $(arch-y) $(tune-y) -include asm/unified.h -msoft-float
@@ -137,7 +144,6 @@ head-y		:= arch/arm/kernel/head$(MMUEXT).o
 # Text offset. This list is sorted numerically by address in order to
 # provide a means to avoid/resolve conflicts in multi-arch kernels.
 textofs-y	:= 0x00008000
-textofs-$(CONFIG_ARCH_CLPS711X) := 0x00028000
 # We don't want the htc bootloader to corrupt kernel during resume
 textofs-$(CONFIG_PM_H1940)      := 0x00108000
 # SA1111 DMA bug: we don't want the kernel to live in precious DMA-able memory
@@ -147,10 +153,16 @@ endif
 textofs-$(CONFIG_ARCH_MSM8X60) := 0x00208000
 textofs-$(CONFIG_ARCH_MSM8960) := 0x00208000
 textofs-$(CONFIG_ARCH_AXXIA) := 0x00308000
+textofs-$(CONFIG_ARCH_RTD119X) := 0x00108000
+textofs-$(CONFIG_ARCH_RTD129x) := 0x00208000
+textofs-$(CONFIG_ARCH_RTD139x) := 0x00208000
+textofs-$(CONFIG_ARCH_RTD16xx) := 0x00208000
+textofs-$(CONFIG_ARCH_RTD13xx) := 0x00208000
 
 # Machine directory name.  This list is sorted alphanumerically
 # by CONFIG_* macro name.
 machine-$(CONFIG_ARCH_ALPINE)		+= alpine
+machine-$(CONFIG_ARCH_ARTPEC)		+= artpec
 machine-$(CONFIG_ARCH_AT91)		+= at91
 machine-$(CONFIG_ARCH_AXXIA)		+= axxia
 machine-$(CONFIG_ARCH_BCM)		+= bcm
@@ -175,9 +187,11 @@ machine-$(CONFIG_ARCH_IOP33X)		+= iop33x
 machine-$(CONFIG_ARCH_IXP4XX)		+= ixp4xx
 machine-$(CONFIG_ARCH_KEYSTONE)		+= keystone
 machine-$(CONFIG_ARCH_KS8695)		+= ks8695
+machine-$(CONFIG_ARCH_LPC18XX)		+= lpc18xx
 machine-$(CONFIG_ARCH_LPC32XX)		+= lpc32xx
 machine-$(CONFIG_ARCH_MESON)		+= meson
 machine-$(CONFIG_ARCH_MMP)		+= mmp
+machine-$(CONFIG_ARCH_MPS2)		+= vexpress
 machine-$(CONFIG_ARCH_MOXART)		+= moxart
 machine-$(CONFIG_ARCH_MV78XX0)		+= mv78xx0
 machine-$(CONFIG_ARCH_MVEBU)		+= mvebu
@@ -204,16 +218,25 @@ machine-$(CONFIG_ARCH_SHMOBILE) 	+= shmobile
 machine-$(CONFIG_ARCH_SIRF)		+= prima2
 machine-$(CONFIG_ARCH_SOCFPGA)		+= socfpga
 machine-$(CONFIG_ARCH_STI)		+= sti
+machine-$(CONFIG_ARCH_STM32)		+= stm32
 machine-$(CONFIG_ARCH_SUNXI)		+= sunxi
+machine-$(CONFIG_ARCH_TANGO)		+= tango
 machine-$(CONFIG_ARCH_TEGRA)		+= tegra
 machine-$(CONFIG_ARCH_U300)		+= u300
 machine-$(CONFIG_ARCH_U8500)		+= ux500
+machine-$(CONFIG_ARCH_UNIPHIER)		+= uniphier
 machine-$(CONFIG_ARCH_VERSATILE)	+= versatile
 machine-$(CONFIG_ARCH_VEXPRESS)		+= vexpress
 machine-$(CONFIG_ARCH_VT8500)		+= vt8500
 machine-$(CONFIG_ARCH_W90X900)		+= w90x900
+machine-$(CONFIG_ARCH_ZX)		+= zx
 machine-$(CONFIG_ARCH_ZYNQ)		+= zynq
 machine-$(CONFIG_PLAT_SPEAR)		+= spear
+machine-$(CONFIG_ARCH_RTD119X)	+= rtd119x
+machine-$(CONFIG_ARCH_RTD129x)	+= rtd129x
+machine-$(CONFIG_ARCH_RTD139x)	+= rtd139x
+machine-$(CONFIG_ARCH_RTD16xx)  += rtd16xx
+machine-$(CONFIG_ARCH_RTD13xx)  += rtd13xx
 
 # Platform directory name.  This list is sorted alphanumerically
 # by CONFIG_* macro name.
@@ -226,6 +249,7 @@ plat-$(CONFIG_PLAT_ORION)	+= orion
 plat-$(CONFIG_PLAT_PXA)		+= pxa
 plat-$(CONFIG_PLAT_S3C24XX)	+= samsung
 plat-$(CONFIG_PLAT_VERSATILE)	+= versatile
+
 
 ifeq ($(CONFIG_ARCH_EBSA110),y)
 # This is what happens if you forget the IOCS16 line.
@@ -251,10 +275,12 @@ machdirs := $(patsubst %,arch/arm/mach-%/,$(machine-y))
 platdirs := $(patsubst %,arch/arm/plat-%/,$(sort $(plat-y)))
 
 ifneq ($(CONFIG_ARCH_MULTIPLATFORM),y)
+ifneq ($(CONFIG_ARM_SINGLE_ARMV7M),y)
 ifeq ($(KBUILD_SRC),)
 KBUILD_CPPFLAGS += $(patsubst %,-I%include,$(machdirs) $(platdirs))
 else
 KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%include,$(machdirs) $(platdirs))
+endif
 endif
 endif
 
@@ -314,8 +340,12 @@ INSTALL_TARGETS	= zinstall uinstall install
 
 PHONY += bzImage $(BOOT_TARGETS) $(INSTALL_TARGETS)
 
+bootpImage uImage: zImage
+zImage: Image
+
 $(BOOT_TARGETS): vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $(boot)/$@
+	@$(kecho) '  Kernel: $(boot)/$@ is ready'
 
 $(INSTALL_TARGETS):
 	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $@
@@ -346,7 +376,6 @@ archclean:
 
 # My testing targets (bypasses dependencies)
 bp:;	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $(boot)/bootpImage
-i zi:;	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $@
 
 
 define archhelp

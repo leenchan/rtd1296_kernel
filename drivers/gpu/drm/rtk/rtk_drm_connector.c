@@ -40,6 +40,7 @@ void rtk_connector_destroy(struct drm_connector *connector)
 
     DRM_DEBUG_KMS("DRM %s on connector=%p\n", __func__, connector);
 
+    drm_connector_unreference(connector);
     drm_connector_unregister(connector);
     drm_connector_cleanup(connector);
     kfree(rtk_connector);
@@ -54,6 +55,7 @@ enum drm_connector_status rtk_connector_detect(struct drm_connector
 
 #if 1
     status = connector_status_connected;
+    drm_connector_reference(connector);
 #else
     if (hdmitx_switch_get_state())
         status = connector_status_connected;
@@ -96,6 +98,14 @@ rtk_connector_helper_best_encoder(struct drm_connector *connector)
         return encoder; /* return best candidate encoder */
     }
 }
+
+static struct {
+       int w, h, type;
+} rtk_drm_modes[] = {
+       {1920, 1080,  DRM_MODE_TYPE_PREFERRED},
+       {  -1,  -1, -1}
+};
+
 
 int rtk_connector_helper_get_modes(struct drm_connector *connector)
 {
@@ -142,6 +152,28 @@ int rtk_connector_helper_get_modes(struct drm_connector *connector)
                 state->crtc = connector->encoder->crtc;
             }
         }
+    }
+
+    if (count == 0) {
+        /* default */
+        int i = 0;
+        while (rtk_drm_modes[i].w != -1) {
+            struct drm_display_mode *mode =
+                drm_mode_find_dmt(connector->dev,
+                        rtk_drm_modes[i].w,
+                        rtk_drm_modes[i].h,
+                        60 , false);
+
+            if (mode != NULL) {
+                mode->type |= rtk_drm_modes[i].type;
+                drm_mode_probed_add(connector, mode);
+                count++;
+            }
+
+            i++;
+        }
+       DRM_DEBUG_KMS("found %d modes\n", count);
+
     }
     return count;
 }

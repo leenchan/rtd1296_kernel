@@ -484,7 +484,7 @@ struct {								\
 #endif /* __linux__ */
 
 /*
- * Counting List definitions. 
+ * Counting List definitions.
  */
 #define CLIST_HEAD(name, type)						\
 struct name { \

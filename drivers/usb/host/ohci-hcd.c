@@ -44,7 +44,6 @@
 #include <asm/irq.h>
 #include <asm/unaligned.h>
 #include <asm/byteorder.h>
-//#include <soc/realtek/rtd129x_lockapi.h>
 
 
 #define DRIVER_AUTHOR "Roman Weissgaerber, David Brownell"
@@ -73,7 +72,8 @@
 static const char	hcd_name [] = "ohci_hcd";
 
 #define	STATECHANGE_DELAY	msecs_to_jiffies(300)
-#define	IO_WATCHDOG_DELAY	msecs_to_jiffies(250)
+#define	IO_WATCHDOG_DELAY	msecs_to_jiffies(275)
+#define	IO_WATCHDOG_OFF		0xffffff00
 
 #include "ohci.h"
 #include "pci-quirks.h"
@@ -100,13 +100,13 @@ static void io_watchdog_func(unsigned long _ohci);
 
 
 /* Some boards misreport power switching/overcurrent */
-static bool distrust_firmware = 1;
+static bool distrust_firmware = true;
 module_param (distrust_firmware, bool, 0);
 MODULE_PARM_DESC (distrust_firmware,
 	"true to distrust firmware power/overcurrent setup");
 
 /* Some boards leave IR set wrongly, since they fail BIOS/SMM handshakes */
-static bool no_handshake = 0;
+static bool no_handshake;
 module_param (no_handshake, bool, 0);
 MODULE_PARM_DESC (no_handshake, "true (not default) disables BIOS handshake");
 
@@ -156,7 +156,8 @@ static int ohci_urb_enqueue (
 	int		retval = 0;
 
 	/* every endpoint has a ed, locate and maybe (re)initialize it */
-	if (! (ed = ed_get (ohci, urb->ep, urb->dev, pipe, urb->interval)))
+	ed = ed_get(ohci, urb->ep, urb->dev, pipe, urb->interval);
+	if (! ed)
 		return -ENOMEM;
 
 	/* for the private part of the URB we need the number of TDs (size) */
@@ -230,8 +231,9 @@ static int ohci_urb_enqueue (
 		}
 
 		/* Start up the I/O watchdog timer, if it's not running */
-		if (!timer_pending(&ohci->io_watchdog) &&
-				list_empty(&ohci->eds_in_use)) {
+		if (ohci->prev_frame_no == IO_WATCHDOG_OFF &&
+				list_empty(&ohci->eds_in_use) &&
+				!(ohci->flags & OHCI_QUIRK_QEMU)) {
 			ohci->prev_frame_no = ohci_frame_no(ohci);
 			mod_timer(&ohci->io_watchdog,
 					jiffies + IO_WATCHDOG_DELAY);
@@ -444,7 +446,8 @@ static int ohci_init (struct ohci_hcd *ohci)
 	struct usb_hcd *hcd = ohci_to_hcd(ohci);
 
 	/* Accept arbitrarily long scatter-gather lists */
-	hcd->self.sg_tablesize = ~0;
+	if (!(hcd->driver->flags & HCD_LOCAL_MEM))
+		hcd->self.sg_tablesize = ~0;
 
 	if (distrust_firmware)
 		ohci->flags |= OHCI_QUIRK_HUB_POWER;
@@ -500,7 +503,7 @@ static int ohci_init (struct ohci_hcd *ohci)
 
 	setup_timer(&ohci->io_watchdog, io_watchdog_func,
 			(unsigned long) ohci);
-	set_timer_slack(&ohci->io_watchdog, msecs_to_jiffies(20));
+	ohci->prev_frame_no = IO_WATCHDOG_OFF;
 
 	ohci->hcca = dma_alloc_coherent (hcd->self.controller,
 			sizeof(*ohci->hcca), &ohci->hcca_dma, GFP_KERNEL);
@@ -730,7 +733,7 @@ static void io_watchdog_func(unsigned long _ohci)
 	u32		head;
 	struct ed	*ed;
 	struct td	*td, *td_start, *td_next;
-	unsigned	frame_no;
+	unsigned	frame_no, prev_frame_no = IO_WATCHDOG_OFF;
 	unsigned long	flags;
 
 	spin_lock_irqsave(&ohci->lock, flags);
@@ -835,7 +838,7 @@ static void io_watchdog_func(unsigned long _ohci)
 			}
 		}
 		if (!list_empty(&ohci->eds_in_use)) {
-			ohci->prev_frame_no = frame_no;
+			prev_frame_no = frame_no;
 			ohci->prev_wdh_cnt = ohci->wdh_cnt;
 			ohci->prev_donehead = ohci_readl(ohci,
 					&ohci->regs->donehead);
@@ -845,6 +848,7 @@ static void io_watchdog_func(unsigned long _ohci)
 	}
 
  done:
+	ohci->prev_frame_no = prev_frame_no;
 	spin_unlock_irqrestore(&ohci->lock, flags);
 }
 
@@ -855,9 +859,6 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 	struct ohci_hcd		*ohci = hcd_to_ohci (hcd);
 	struct ohci_regs __iomem *regs = ohci->regs;
 	int			ints;
-	unsigned long flags;
-
-	//rtk_lockapi_lock(flags, __FUNCTION__);
 
 	/* Read interrupt status (and flush pending writes).  We ignore the
 	 * optimization of checking the LSB of hcca->done_head; it doesn't
@@ -872,7 +873,6 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 		ohci->rh_state = OHCI_RH_HALTED;
 		ohci_dbg (ohci, "device removed!\n");
 		usb_hc_died(hcd);
-		//rtk_lockapi_unlock(flags,__FUNCTION__);
 		return IRQ_HANDLED;
 	}
 
@@ -880,10 +880,8 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 	ints &= ohci_readl(ohci, &regs->intrenable);
 
 	/* interrupt for some other device? */
-	if (ints == 0 || unlikely(ohci->rh_state == OHCI_RH_HALTED)) {
-		//rtk_lockapi_unlock(flags,__FUNCTION__);
+	if (ints == 0 || unlikely(ohci->rh_state == OHCI_RH_HALTED))
 		return IRQ_NOTMINE;
-	}
 
 	if (ints & OHCI_INTR_UE) {
 		// e.g. due to PCI Master/Target Abort
@@ -965,8 +963,6 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 	}
 	spin_unlock(&ohci->lock);
 
-	//rtk_lockapi_unlock(flags,__FUNCTION__);
-
 	return IRQ_HANDLED;
 }
 
@@ -981,6 +977,7 @@ static void ohci_stop (struct usb_hcd *hcd)
 	if (quirk_nec(ohci))
 		flush_work(&ohci->nec_work);
 	del_timer_sync(&ohci->io_watchdog);
+	ohci->prev_frame_no = IO_WATCHDOG_OFF;
 
 	ohci_writel (ohci, OHCI_INTR_MIE, &ohci->regs->intrdisable);
 	ohci_usb_reset(ohci);
@@ -1251,11 +1248,6 @@ MODULE_LICENSE ("GPL");
 #ifdef CONFIG_MFD_TC6393XB
 #include "ohci-tmio.c"
 #define TMIO_OHCI_DRIVER	ohci_hcd_tmio_driver
-#endif
-
-#ifdef CONFIG_MACH_JZ4740
-#include "ohci-jz4740.c"
-#define PLATFORM_DRIVER	ohci_hcd_jz4740_driver
 #endif
 
 #ifdef CONFIG_TILE_USB

@@ -19,6 +19,11 @@
 
 #include <linux/version.h>
 
+#define INFINITE_DEBUG
+#ifdef INFINITE_DEBUG
+#include <linux/kgdb.h>
+#endif
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0)
 #define DRV_RELDATE		"Jan 27, 2014"
 #include <linux/kconfig.h>
@@ -33,6 +38,7 @@
 #include <linux/netdevice.h>
 #include <linux/inetdevice.h>
 #include <linux/etherdevice.h>
+#include <linux/netfilter.h>
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
@@ -123,7 +129,16 @@
 #include "rtl865xc_swNic.h"
 
 #ifdef CONFIG_RTL_836X_SUPPORT
+#include "rtl836x/rtk_switch.h"
+#include "rtl836x/rtk_types.h"
+#include "rtl836x/rtk_error.h"
+#include "rtl836x/vlan.h"
+#include "rtl836x/cpu.h"
+#include "rtl836x/stat.h"
+#include "rtl836x/port.h"
+#include "rtl836x/l2.h"
 #include "rtl836x/rtk_rtl8367.h"
+extern spinlock_t rtl836x_ext_lock;
 #endif
 
 /*l4*/
@@ -187,10 +202,13 @@ int rtl_enable_netif_routing(void);
 extern int hwwifiEnable;
 #endif
 #endif
-#if defined(IMPROVE_MCAST_PERFORMANCE_WITH_RTL8367)
+extern int igmp_netfilter;
+#if defined (IMPROVE_MCAST_PERFORMANCE_WITH_RTL8367)
 extern int rtl_initMcastImprove(void);
 #endif
+#ifndef TEST_PACKETS
 #define TEST_PACKETS(mac) ((mac[0] == 0x01 && mac[1] == 0x00 && mac[2] == 0x5e && mac[3] == 0x01 && mac[4] == 0x02 && mac[5] == 0x03) || (mac[0] == 0x33 && mac[1] == 0x33 && mac[2] == 0x00 && mac[3] == 0x00 && mac[4] == 0x00 && mac[5] == 0x01))
+#endif
 #endif
 
 #if defined(CONFIG_RTD_1295_HWNAT)
@@ -206,16 +224,16 @@ extern int rtl_initMcastImprove(void);
 #include <linux/of_gpio.h>
 #include <linux/gpio.h>
 #include <linux/workqueue.h>
-#include <soc/realtek/rtd129x_cpu.h>
+#include <soc/realtek/rtk_cpu.h>
 #include "AsicDriver/rtl865x_asicBasic.h"
 
-#define RTL_DEBUG	1
-#ifdef RTL_DEBUG
+// #define RTL_DEBUG	1
+// #ifdef RTL_DEBUG
 #define DBG(fmt, ...) pr_err("%s:%d: " fmt "\n", \
 				__func__, __LINE__, ## __VA_ARGS__)
-#else
-#define DBG(fmt, ...)
-#endif
+// #else
+// #define DBG(fmt, ...)
+// #endif
 
 void __iomem *rtl_hwnat_mmio;
 void __iomem *rtl_hwnat_clk_mmio;
@@ -224,20 +242,22 @@ unsigned int rtl_hwnat_base;
 struct platform_device *rtl819x_pdev;
 void rtl_dump_data(void *p, int len);
 extern uint8 hwnat_mac0_enable;	/* 0: interface used by SATA, 1: interface used by NAT */
-extern uint8 hwnat_mac0_mode;	/* 0:RGMII, 1:SGMII */
+extern uint8 hwnat_mac0_mode;	/* 0:RGMII to PHY, 1:SGMII to PHY, 2: RGMII to MAC, 3: SGMII to MAC */
 extern uint8 hwnat_mac5_conn_to;	/* 0:PHY, 1:MAC */
 extern uint8 hwnat_rgmii_voltage;	/* 1:1.8V, 2:2.5V, 3:3.3V */
 extern uint8 hwnat_rgmii_enable;	/* 0:disable, 1:enable */
-extern uint8 hwnat_rgmii_tx_delay;	/* 0 to 7: 0.5ns per step */
-extern uint8 hwnat_rgmii_rx_delay;	/* 0 to 7: 0.5ns per step */
+extern uint8 hwnat_rgmii0_tx_delay;	/* 0 to 7: 0.5ns per step */
+extern uint8 hwnat_rgmii0_rx_delay;	/* 0 to 7: 0.5ns per step */
+extern uint8 hwnat_rgmii1_tx_delay;	/* 0 to 7: 0.5ns per step */
+extern uint8 hwnat_rgmii1_rx_delay;	/* 0 to 7: 0.5ns per step */
 extern uint8 hwnat_led_mode;		/* 0~3: SCAN_0~3, 4~6: DIRECT 0~2 */
 static uint8 hwnat_gpio_link_led_enable;	/* 0:disable, 1:enable */
 static uint8 hwnat_gpio_link_led;
 
 unsigned int RTL_LANPORT_MASK = RTL_DEF_LANPORT_MASK;
-/* #define RTL_SWNAT	1 */
+#define RTL_SWNAT	1
 #if defined(RTL_SWNAT)
-bool rtl_hwnat_enable = false;
+extern bool rtl_hwnat_enable;
 
 void ntohl_array(u32 *org_buf, u32 *dst_buf, unsigned int words)
 {
@@ -251,10 +271,42 @@ void ntohl_array(u32 *org_buf, u32 *dst_buf, unsigned int words)
 	}
 
 }
+
+int rtl819x_retore_hw_ip(void) {
+	return SUCCESS;
+}
+
+int get_dev_ip_mask(const char *name, unsigned int *ip, unsigned int *mask)
+{
+	struct in_device *in_dev;
+	struct net_device *landev;
+	struct in_ifaddr *ifap = NULL;
+
+	if ((name == NULL) || (ip == NULL) || (mask == NULL)) {
+		return -1;
+	}
+
+	if ((landev = __dev_get_by_name(&init_net, name)) != NULL) {
+		in_dev = (struct in_device *)(landev->ip_ptr);
+		if (in_dev != NULL) {
+			for (ifap = in_dev->ifa_list; ifap != NULL;
+				ifap = ifap->ifa_next) {
+				if (strcmp(name, ifap->ifa_label) == 0) {
+					*ip = ifap->ifa_address;
+					*mask = ifap->ifa_mask;
+					return 0;
+				}
+			}
+
+		}
+	}
+
+	return -1;
+}
 #else /* defined(RTL_SWNAT) */
 extern bool rtl_hwnat_enable;
 #endif /* defined(RTL_SWNAT) */
-extern void rtd129x_hwnat_clk_init(void);
+extern void rtd129x_hwnat_clk_init(struct device *dev);
 extern void rtk_polling_mac0_lnk_status(void);
 #define CHECK_IF_HWNAT_READY if (!rtl_hwnat_enable) return SUCCESS
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
@@ -263,7 +315,10 @@ extern void rtk_polling_mac0_lnk_status(void);
 uint16 sw_pvid[RTL8651_PORT_NUMBER];
 #endif
 
+#ifndef TEST_PACKETS
 #define TEST_PACKETS(mac) ((mac[0] == 0x01 && mac[1] == 0x00 && mac[2] == 0x5e && mac[3] == 0x01 && mac[4] == 0x02 && mac[5] == 0x03) || (mac[0] == 0x33 && mac[1] == 0x33 && mac[2] == 0x00 && mac[3] == 0x00 && mac[4] == 0x00 && mac[5] == 0x01))
+#endif
+
 __DRAM_FWD unsigned int _debug_flag;
 
 #if defined(CONFIG_RTL_ETH_802DOT1X_SUPPORT)
@@ -362,16 +417,20 @@ int lock_owner_rx = -1;
 int lock_owner_tx = -1;
 int lock_owner_buf = -1;
 int lock_owner_hw = -1;
+int lock_owner_event = -1;
 spinlock_t lock_eth_other;
 spinlock_t lock_eth_rx;
 spinlock_t lock_eth_tx;
 spinlock_t lock_eth_buf;
 spinlock_t lock_eth_hw;
+spinlock_t lock_eth_event;
 #endif
 
 #if defined(CONFIG_SMP) && defined(CONFIG_RTL_IGMP_SNOOPING)
 int lock_owner_igmp = -1;
 spinlock_t lock_igmp;
+int lock_owner_igmp_concurrent = -1;
+spinlock_t lock_igmp_concurrent;
 #endif
 
 static unsigned int curLinkPortMask = 0;
@@ -544,10 +603,8 @@ static void rtl_unkownUnicastTimer(unsigned long data);
 static void rtl_clearUnknownUnicastCnt(void);
 #endif
 
-#if !defined(CONFIG_RTD_1295_HWNAT)
 #if defined(DYNAMIC_ADJUST_TASKLET) || defined(RTL8196C_EEE_MAC) || defined(CONFIG_RTL_8198_ESD)
 static void one_sec_timer(unsigned long task_priv);
-#endif
 #endif
 
 #ifdef CONFIG_RTL8196C_GREEN_ETHERNET
@@ -954,9 +1011,28 @@ static struct rtl865x_vlanConfig vlanconfig[] = {
 /*		=====  ===   =======	===	 ===   =========   =======	====	====================================	*/
 
 #if defined(CONFIG_RTD_1295_HWNAT)
+#if defined(CONFIG_RTL_MULTI_LAN_DEV)
+#if defined(CONFIG_RTL_CPU_TAG)
+	{	RTL_DRV_LAN_P5_NETIF_NAME,	1,	IF_ETHER,	RTL_WANVLANID,		RTL_WAN_FID,		RTL_WANPORT_MASK,		RTL_WANPORT_MASK,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x94 } }, 0 },
+	{	RTL_DRV_LAN_P1_NETIF_NAME,	0,	IF_ETHER,	RTL_LANVLANID,		RTL_LAN_FID,		RTL_LANPORT_MASK_1,		RTL_LANPORT_MASK_1,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x95 } }, 0 },
+	{	RTL_DRV_LAN_P2_NETIF_NAME,	0,	IF_ETHER,	RTL_LANVLANID,		RTL_LAN_FID,		RTL_LANPORT_MASK_2,		RTL_LANPORT_MASK_2,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x95 } }, 0 },
+#else /* CONFIG_RTL_CPU_TAG */
+#if defined(CONFIG_RTL_WAN_MAC5)
+	{	RTL_DRV_LAN_P5_NETIF_NAME,	0,	IF_ETHER,	RTL_LANVLANID,		RTL_LAN_FID,		RTL_LANPORT_MASK_5,		RTL_LANPORT_MASK_5,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x95 } }, 0 },
+#else /* CONFIG_RTL_WAN_MAC5 */
 	{	RTL_DRV_LAN_P4_NETIF_NAME,	1,	IF_ETHER,	RTL_WANVLANID,		RTL_WAN_FID,		RTL_WANPORT_MASK,		RTL_WANPORT_MASK,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x94 } }, 0 },
 	{	RTL_DRV_LAN_P5_NETIF_NAME,	0,	IF_ETHER,	RTL_LANVLANID,		RTL_LAN_FID,		RTL_LANPORT_MASK_5,		RTL_LANPORT_MASK_5,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x95 } }, 0 },
 	{	RTL_DRV_LAN_P0_NETIF_NAME,	0,	IF_ETHER,	RTL_LANVLANID,		RTL_LAN_FID,		RTL_LANPORT_MASK_1,		RTL_LANPORT_MASK_1,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x90 } }, 0 },
+#endif /* CONFIG_RTL_WAN_MAC5 */
+#endif /* CONFIG_RTL_CPU_TAG */
+#else /* CONFIG_RTL_MULTI_LAN_DEV */
+#if defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)
+	{	RTL_DRV_LAN_P5_NETIF_NAME,	1,	IF_ETHER,	RTL_WANVLANID,		RTL_WAN_FID,		RTL_WANPORT_MASK,		RTL_WANPORT_MASK,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x95 } }, 0 },
+#else /* CONFIG_RTL_2_RGMII_PORTS_ONLY */
+	{	RTL_DRV_LAN_P4_NETIF_NAME,	1,	IF_ETHER,	RTL_WANVLANID,		RTL_WAN_FID,		RTL_WANPORT_MASK,		RTL_WANPORT_MASK,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x94 } }, 0 },
+#endif /* CONFIG_RTL_2_RGMII_PORTS_ONLY */
+	{	RTL_DRV_LAN_NETIF_NAME,		0,	IF_ETHER, 	RTL_LANVLANID,		RTL_LAN_FID,		RTL_DEF_LANPORT_MASK,		RTL_DEF_LANPORT_MASK,		1500, 	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x90 } }, 0 },
+#endif /* CONFIG_RTL_MULTI_LAN_DEV */
 #else /* defined(CONFIG_RTD_1295_HWNAT) */
 #ifdef CONFIG_BRIDGE
 #if defined(CONFIG_RTL_MULTI_LAN_DEV)
@@ -2760,7 +2836,8 @@ static void re865x_set_rx_mode(struct net_device *dev)
 #endif
 #endif
 
-#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT) || defined(CONFIG_RTL_8198C_8367RB)
+#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT) || \
+	defined(CONFIG_RTL_8198C_8367RB) || defined(CONFIG_RTL_836X_SUPPORT)
 rtk_stat_port_cntr_t port_cntrs;
 #endif
 
@@ -2783,18 +2860,31 @@ int rtl_get_portRate(unsigned int port, unsigned long *rxRate,
 void re865x_accumulate_port_stats(uint32 portnum,
 	struct net_device_stats *net_stats)
 {
-#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT)
+#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT) || \
+	(defined(CONFIG_RTL_CPU_TAG) && defined(CONFIG_RTL_836X_SUPPORT))
 #ifdef CONFIG_RTL_8367R_SUPPORT
 	if (portnum < 0 || portnum > CPU)
 		return;
 #endif
 
+	#if defined(CONFIG_RTL_836X_SUPPORT)
+	spin_lock(&rtl836x_ext_lock);
+	rtk_stat_port_getAll(rtl836x_portmap(portnum), &port_cntrs);
+	spin_unlock(&rtl836x_ext_lock);
+	#else
 	rtk_stat_port_getAll(portnum, &port_cntrs);
+	#endif /* CONFIG_RTL_836X_SUPPORT */
 
 	/* rx_pkt = rx_unicast +rx_multicast + rx_broadcast */
+	#if defined(CONFIG_RTL_836X_SUPPORT)
+	net_stats->rx_packets += port_cntrs.ifInUcastPkts;
+	net_stats->rx_packets += port_cntrs.ifInMulticastPkts;
+	net_stats->rx_packets += port_cntrs.ifInBroadcastPkts;
+	#else
 	net_stats->rx_packets += port_cntrs.ifInUcastPkts;
 	net_stats->rx_packets += port_cntrs.etherStatsMcastPkts;
 	net_stats->rx_packets += port_cntrs.etherStatsBcastPkts;
+	#endif /* CONFIG_RTL_836X_SUPPORT */
 
 	/* tx_pkt = tx_unicast +tx_multicast + tx_broadcast */
 	net_stats->tx_packets += port_cntrs.ifOutUcastPkts;
@@ -2812,7 +2902,11 @@ void re865x_accumulate_port_stats(uint32 portnum,
 	net_stats->rx_errors += port_cntrs.dot3StatsFCSErrors;
 	net_stats->rx_errors += port_cntrs.etherStatsJabbers;
 	net_stats->rx_errors += port_cntrs.etherStatsFragments;
+	#if defined(CONFIG_RTL_836X_SUPPORT)
+	net_stats->tx_dropped += port_cntrs.ifOutDiscards;
+	#else
 	net_stats->tx_dropped += port_cntrs.dot1dTpPortInDiscards;
+	#endif /* CONFIG_RTL_836X_SUPPORT */
 	net_stats->multicast += port_cntrs.etherStatsMcastPkts;
 
 	net_stats->collisions += port_cntrs.etherStatsCollisions;
@@ -3130,6 +3224,29 @@ static void rtl865x_disableDevPortForward(struct net_device *dev,
 					uint32 enable);
 				rtk_port_adminEnable_set(port, 0);
 			}
+#elif defined(CONFIG_RTD_1295_HWNAT) && \
+	defined(CONFIG_RTL_CPU_TAG) && \
+	defined(CONFIG_RTL_836X_SUPPORT)
+			if (port <= 5) {
+				spin_lock(&rtl836x_ext_lock);
+				rtk_port_adminEnable_set(rtl836x_portmap(port), 0);
+				spin_unlock(&rtl836x_ext_lock);
+			}
+#elif defined(CONFIG_RTD_1295_HWNAT) && \
+	defined(CONFIG_RTL_2_RGMII_PORTS_ONLY) && \
+	defined(CONFIG_RTL_836X_SUPPORT)
+			if (port == 0) {
+				spin_lock(&rtl836x_ext_lock);
+				rtk_port_adminEnable_set(rtl836x_portmap(0), 0);
+				rtk_port_adminEnable_set(rtl836x_portmap(1), 0);
+				rtk_port_adminEnable_set(rtl836x_portmap(2), 0);
+				rtk_port_adminEnable_set(rtl836x_portmap(3), 0);
+				spin_unlock(&rtl836x_ext_lock);
+			} else if (port == 5) {
+				spin_lock(&rtl836x_ext_lock);
+				rtk_port_adminEnable_set(rtl836x_portmap(5), 0);
+				spin_unlock(&rtl836x_ext_lock);
+			}
 #else
 			REG32(PCRP0 + (port << 2)) =
 				((REG32(PCRP0 + (port << 2))) & (~ForceLink));
@@ -3149,6 +3266,9 @@ static void rtl865x_disableDevPortForward(struct net_device *dev,
 #endif
 }
 
+#if !(defined(CONFIG_RTD_1295_HWNAT) && (defined(CONFIG_RTL_CPU_TAG) || \
+	defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)) && \
+	defined(CONFIG_RTL_836X_SUPPORT))
 #if !defined(CONFIG_RTL_8196C)
 static void rtl865x_restartDevPHYNway(struct net_device *dev,
 	struct dev_priv *cp)
@@ -3162,6 +3282,7 @@ static void rtl865x_restartDevPHYNway(struct net_device *dev,
 	return;
 }
 #endif
+#endif /* !(CONFIG_RTD_1295_HWNAT && ONFIG_RTL_CPU_TAG && CONFIG_RTL_836X_SUPPORT) */
 
 #if defined(CONFIG_819X_PHY_RW) || defined(CONFIG_RTL_HW_VLAN_SUPPORT)
 static void rtl865x_setPortForward(int port_num, int forward)
@@ -3219,6 +3340,29 @@ static void rtl865x_enableDevPortForward(struct net_device *dev,
 				rtk_port_adminEnable_set(port, 1);
 			}
 #else
+#if defined(CONFIG_RTD_1295_HWNAT) && \
+	defined(CONFIG_RTL_836X_SUPPORT)
+#if defined(CONFIG_RTL_CPU_TAG)
+			if (port <= 5) {
+				spin_lock(&rtl836x_ext_lock);
+				rtk_port_adminEnable_set(rtl836x_portmap(port), 1);
+				spin_unlock(&rtl836x_ext_lock);
+			}
+#elif defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)
+			if (port == 0) {
+				spin_lock(&rtl836x_ext_lock);
+				rtk_port_adminEnable_set(rtl836x_portmap(0), 1);
+				rtk_port_adminEnable_set(rtl836x_portmap(1), 1);
+				rtk_port_adminEnable_set(rtl836x_portmap(2), 1);
+				rtk_port_adminEnable_set(rtl836x_portmap(3), 1);
+				spin_unlock(&rtl836x_ext_lock);
+			} else if (port == 5) {
+				spin_lock(&rtl836x_ext_lock);
+				rtk_port_adminEnable_set(rtl836x_portmap(5), 1);
+				spin_unlock(&rtl836x_ext_lock);
+			}
+#endif /* CONFIG_RTL_CPU_TAG || CONFIG_RTL_2_RGMII_PORTS_ONLY */
+#endif /* CONFIG_RTD_1295_HWNAT && CONFIG_RTL_836X_SUPPORT */
 			REG32(PCRP0 + (port << 2)) =
 				((REG32(PCRP0 + (port << 2))) | (ForceLink));
 			REG32(PCRP0 + (port << 2)) =
@@ -3639,6 +3783,8 @@ void tx_done_callback(void *skb)
 				skb_reserve(((struct sk_buff *)skb),
 					RTL_PRIV_DATA_SIZE);
 #endif
+
+				printk("otavio - Tx callback malandrico!\n");
 				/* reserve for 4 byte alignment */
 				skb_reserve(((struct sk_buff *)skb), RX_OFFSET);
 				/* enable irq */
@@ -3952,6 +4098,11 @@ static inline void re865x_relayTrappedMCast(struct sk_buff *skb,
 	struct sk_buff *pskb = NULL;
 #endif
 
+#if defined(CONFIG_RTD_1295_HWNAT)
+	dma_addr_t mapping = 0;
+	struct dev_priv *cp;
+#endif /* defined(CONFIG_RTD_1295_HWNAT) */
+
 	if (mcastFwdPortMask == 0) {
 		return;
 	}
@@ -3964,6 +4115,10 @@ static inline void re865x_relayTrappedMCast(struct sk_buff *skb,
 
 	if (skb2 != NULL) {
 		nicTx.txIdx = 0;
+
+#if defined(CONFIG_RTD_1295_HWNAT)
+	cp = NETDRV_PRIV(skb2->dev);
+#endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 #ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
 		if (vlan_bridge_tag && vlan_bridge_multicast_tag
@@ -4025,12 +4180,35 @@ static inline void re865x_relayTrappedMCast(struct sk_buff *skb,
 		}
 #endif
 
+#if defined(CONFIG_RTD_1295_HWNAT)
+		mapping = dma_map_single(&rtl819x_pdev->dev, skb2->data,
+					skb2->len, DMA_TO_DEVICE);
+		if (unlikely(dma_mapping_error(&rtl819x_pdev->dev, mapping))) {
+			if (net_ratelimit())
+				netif_err(cp, drv, skb2->dev,
+					"Failed to map TX DMA!\n");
+#if defined(CONFIG_RTL_PROC_DEBUG) || defined(CONFIG_RTL_DEBUG_TOOL)
+			tx_drop_cnt++;
+#endif
+			dev_kfree_skb_any(skb2);
+			return;
+		}
+
+		if (RTL_swNic_send((void *)skb2, (void *)mapping,
+			skb2->len, &nicTx) <0) {
+			dev_kfree_skb_any(skb2);
+		}
+
+#else /* CONFIG_RTD_1295_HWNAT */
 		RTL_CACHE_WBACK((unsigned long)skb2->data, skb2->len);
+
 		if (RTL_swNic_send((void *)skb2, skb2->data, skb2->len,
 				&nicTx) < 0) {
 			dev_kfree_skb_any(skb2);
 		}
+#endif /* CONFIG_RTD_1295_HWNAT */
 	}
+
 	return;
 }
 
@@ -4067,10 +4245,24 @@ void rtl865x_igmpSyncLinkStatus(void)
 #if defined(CONFIG_BRIDGE_IGMP_SNOOPING) || defined(CONFIG_RTL_IGMP_SNOOPING)
 #if defined(CONFIG_RTL_IGMP_SNOOPING)
 #if defined(CONFIG_NETFILTER)
+#if defined(CONFIG_RTD_1295_HWNAT)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
 unsigned int (*IgmpRxFilter_Hook)(struct sk_buff *skb,
-	unsigned int hook,
-	const struct net_device *in,
-	const struct net_device *out, struct xt_table *table);
+		 const struct nf_hook_state *state,
+		 struct xt_table *table);
+#else
+unsigned int (*IgmpRxFilter_Hook)(struct sk_buff *skb,
+		 unsigned int hook,
+		 const struct nf_hook_state *state,
+		 struct xt_table *table);
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0) */
+#else
+unsigned int (*IgmpRxFilter_Hook)(struct sk_buff *skb,
+	     unsigned int hook,
+	     const struct net_device *in,
+	     const struct net_device *out,
+	     struct xt_table *table);
+#endif
 EXPORT_SYMBOL(IgmpRxFilter_Hook);
 static bool rtl_MulticastRxFilterOff(struct sk_buff *skb, int ipversion)
 {
@@ -4147,6 +4339,9 @@ static bool rtl_MulticastRxFilterOff(struct sk_buff *skb, int ipversion)
 
 	if (ipversion == 4) {
 		struct net_device *origDev = skb->dev;
+#if defined(CONFIG_RTD_1295_HWNAT)
+		struct nf_hook_state state;
+#endif /* CONFIG_RTD_1295_HWNAT */
 
 /* #ifndef CONFIG_RTL_8198C // modified by lynn_pu, 2014-10-22 */
 #if !defined(CONFIG_RTL_8198C) && !defined(CONFIG_RTL_8197F) && (!defined(CONFIG_RLX) && (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)))
@@ -4162,9 +4357,23 @@ static bool rtl_MulticastRxFilterOff(struct sk_buff *skb, int ipversion)
 				RTL_PS_BR0_DEV_NAME);
 		}
 #endif
+
+#if defined(CONFIG_RTD_1295_HWNAT)
+		state.hook = NF_INET_LOCAL_IN;
+		state.in = skb->dev;
+		state.out = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
+		ret = (IgmpRxFilter_Hook(skb, &state, dev_net(skb->dev)->ipv4.iptable_filter)
+				!= NF_ACCEPT);
+#else
+		ret = (IgmpRxFilter_Hook(skb, NF_INET_LOCAL_IN, &state, dev_net(skb->dev)->ipv4.iptable_filter)
+				!= NF_ACCEPT);
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0) */
+#else
 		ret = ((IgmpRxFilter_Hook(skb, NF_INET_LOCAL_IN, skb->dev, NULL,
 					dev_net(skb->dev)->ipv4.
 					iptable_filter)) != NF_ACCEPT);
+#endif
 		skb->dev = origDev;
 	} else if (ipversion == 6)
 		ret = false;	/* ipv6 hava no iptables rule now */
@@ -4256,11 +4465,7 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 #endif
 
 #if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-	pppoe_type = rtl_is_pppoe_igmp_bridge_frame(skb, 1, skb->data);
-	/* pppoe udp/tcp will be forward or flooding to eth by hw, do nothing. */
-	if ((pppoe_type == PPPOE_UDP) || (pppoe_type == PPPOE_UDP)) {
-		return 0;
-	}
+	pppoe_type = rtl_is_pppoe_igmp_bridge_frame(skb,1,skb->data);
 #endif
 
 	if (skb->data[0] == 0xff)	/* broadcast packets just return */
@@ -4335,7 +4540,7 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 #if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
 	if ((mCastFlag == IPV4_MCAST_PACKET)
 		|| (mCastFlag == DSLITE_MCAST_PACKET)
-		|| (pppoe_type == PPPOE_IGMP))
+		|| (pppoe_type>0 && pppoe_type<=PPPOE_TCP))
 #else
 	if ((mCastFlag == IPV4_MCAST_PACKET)
 		|| mCastFlag == DSLITE_MCAST_PACKET)
@@ -4353,12 +4558,12 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 		}
 #endif
 
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST)
-#ifdef CONFIG_RTL_VLAN_PASSTHROUGH_SUPPORT
-		if (*(uint16 *)skb->vlan_passthrough_saved_tag ==
-			__constant_htons(ETH_P_8021Q)) {
-			vid = *((unsigned short *)(skb->
-					vlan_passthrough_saved_tag + 2));
+
+//#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
+		#ifdef CONFIG_RTL_VLAN_PASSTHROUGH_SUPPORT
+        if (*(uint16*)skb->vlan_passthrough_saved_tag == __constant_htons(ETH_P_8021Q))
+        {
+            vid = *((unsigned short *)(skb->vlan_passthrough_saved_tag+2));
 			vid = __constant_ntohs(vid) & 0xfff;
 			skb->srcVlanId = vid;
 		} else {
@@ -4374,7 +4579,7 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 			printk("[%s:%d]skb->srcVlanId is %d\n", __FUNCTION__,
 				__LINE__, skb->srcVlanId);
 #endif
-#endif
+//#endif
 
 #if defined(CONFIG_RTL_MULTI_LAN_DEV)
 #ifdef CONFIG_RTL_VLAN_8021Q
@@ -4407,9 +4612,8 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 		/*hardware ip multicast table will trap 0x01-00-5e-XX-XX-XX type packets */
 		/*how about other packets not trapped by hardware multicast table?---->we assume it has been flooded by l2 table */
 #if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-		if (pppoe_type != 0)
-			iph = rtl_get_pppoe_ipv4_hdr(skb->data, 1,
-				skb->protocol);
+		if ((pppoe_type>0 && pppoe_type<=PPPOE_TCP))
+			iph = rtl_get_pppoe_ipv4_hdr(skb->data, 1, skb->protocol);
 		else
 #endif
 			iph = re865x_getIpv4Header(skb->data);
@@ -4528,7 +4732,7 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 							(unsigned short)pid);
 						if (existMulticastEntry != NULL) {
 							/*it's already in cache */
-#if definedCONFIG_RTL_VLAN_8021Q
+#if defined(CONFIG_RTL_VLAN_8021Q)
 							if (linux_vlan_enable)
 								goto relay_out;
 							else
@@ -4663,7 +4867,7 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 #ifdef CONFIG_RTL_VLAN_8021Q
 				if (linux_vlan_enable
 					&& linux_vlan_hw_support_enable) {
-#if definedCONFIG_RT_MULTIPLE_BR_SUPPORT
+#if defined(CONFIG_RT_MULTIPLE_BR_SUPPORT)
 					if (is_nat_wan_vlan(vid)) {
 						/* special case: lan-wan bridge and lan-wan nat have same vid */
 						for (i = 0;
@@ -4769,7 +4973,7 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 							0xFFFFFFFF)) {
 						/*igmp packet */
 #if defined(CONFIG_NETFILTER)
-						if (rtl_MulticastRxFilterOff
+						if (igmp_netfilter && rtl_MulticastRxFilterOff
 							(skb, 4) == true) {
 #ifdef CONFIG_RTL_VLAN_8021Q
 							if (linux_vlan_enable)
@@ -4838,10 +5042,18 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 	else if ((skb->data[0] == 0x33) && (skb->data[1] == 0x33)
 		&& (skb->data[2] != 0xff))
 #else
-	else if ((mCastFlag == IPV6_MCAST_PACKET)
-		|| mCastFlag == SIXRD_MCAST_PACKET)
+#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
+	else if((mCastFlag ==IPV6_MCAST_PACKET)||mCastFlag ==SIXRD_MCAST_PACKET ||(pppoe_type>=PPPOE_ICMPV6))
+#else
+	else if((mCastFlag ==IPV6_MCAST_PACKET)||mCastFlag ==SIXRD_MCAST_PACKET )
+#endif
 #endif
 	{
+
+		//#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
+		skb->srcVlanId=vid;
+		skb->srcPort=pid;
+		//#endif
 
 #if defined(CONFIG_RTL_HARDWARE_MULTICAST)
 		skb->srcVlanId = vid;
@@ -4895,13 +5107,18 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 #endif
 
 		/*when enable mld snooping, gateway will add acl to trap packet with dmac equal to 0x33-33-xx-xx-xx-xx */
-		ipv6h = re865x_getIpv6Header(skb->data);
-		if (ipv6h != NULL) {
-			l4Protocol = re865x_getIpv6TransportProtocol(ipv6h);
-			/*udp or tcp packet */
-			if ((l4Protocol == IPPROTO_UDP)
-				|| (l4Protocol == IPPROTO_TCP)
-				|| (l4Protocol == Any_0_hop_protocl)) {
+	#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
+		if(pppoe_type>=PPPOE_ICMPV6)
+			ipv6h = rtl_get_pppoe_ipv6_hdr(skb->data,1 ,skb->protocol);
+		else
+	#endif
+		ipv6h=re865x_getIpv6Header(skb->data);
+		if(ipv6h!=NULL)
+		{
+			l4Protocol=re865x_getIpv6TransportProtocol(ipv6h);
+			/*udp or tcp packet*/
+			if((l4Protocol==IPPROTO_UDP) || (l4Protocol==IPPROTO_TCP)|| (l4Protocol==Any_0_hop_protocl))
+			{
 
 				if (nicIgmpModuleIndex != 0xFFFFFFFF) {
 					multicastDataInfo.ipVersion = 6;
@@ -5106,10 +5323,10 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 	}
 #if ((defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)) && defined(CONFIG_RTL_HARDWARE_MULTICAST))
 	else if (mCastFlag == IPV6_MCAST_PACKET2) {
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST)
+//#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
 		skb->srcVlanId = vid;
 		skb->srcPort = pid;
-#endif
+//#endif
 		vlanRelayPortMask =
 			rtl865x_getVlanPortMask(vid) & (~(1 << pid)) & cp_this->
 			portmask & ((1 << RTL8651_MAC_NUMBER) - 1);
@@ -5124,10 +5341,10 @@ __MIPS16 int rtl_MulticastRxCheck(struct sk_buff *skb, rtl_nicRx_info *info,
 #endif
 #endif
 	else {
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST)
+		//#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
 		skb->srcVlanId = 0;
 		skb->srcPort = 0xFFFF;
-#endif
+		//#endif
 	}
 
 #if 0
@@ -6205,7 +6422,6 @@ __MIPS16 __IRAM_FWD static inline void rtl_processRxFrame(rtl_nicRx_info *info)
 #endif
 #if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
 	int type;
-	type = rtl_is_pppoe_igmp_bridge_frame(skb, 1, skb->data);
 #endif
 
 	cp_this = info->priv;
@@ -6218,10 +6434,14 @@ __MIPS16 __IRAM_FWD static inline void rtl_processRxFrame(rtl_nicRx_info *info)
 	data = skb->tail = skb->data;
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
-#if 0
-	if (net_ratelimit())
-		printk("[%s:%d]vid=%d\n", __FUNCTION__, __LINE__, vid);
+#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
+	type = rtl_is_pppoe_igmp_bridge_frame(skb,1,skb->data);
 #endif
+
+	#if 0
+	if(net_ratelimit())
+		printk("[%s:%d]vid=%d\n",__FUNCTION__,__LINE__,vid);
+	#endif
 #if 0				/* defined(CONFIG_RTL_STP) */
 	if (info->isStpVirtualDev) {
 		pid = info->pid;
@@ -6423,7 +6643,9 @@ __MIPS16 __IRAM_FWD static inline void rtl_processRxFrame(rtl_nicRx_info *info)
 		ret = rtk_process_11q_rx(pid, skb, &skb1, info);
 		if (ret == 1) {
 			if (skb1) {
+#if defined(CONFIG_RTL_IGMP_SNOOPING) || defined(CONFIG_BRIDGE_IGMP_SNOOPING)
 				static rtl_nicRx_info info1 = { 0 };
+#endif
 
 				cp1 = netdev_priv(skb1->dev);
 
@@ -7235,7 +7457,7 @@ static void rtd129x_send_uevent_work(struct work_struct *work)
 	kobject_uevent(&cp->dev->dev.kobj, cp->link_event);
 }
 
-void rtd129x_send_uevent(unsigned int curLinkPortMask, unsigned int newportmask)
+void rtd129x_send_uevent(unsigned int curportmask, unsigned int newportmask)
 {
 	int i;
 	struct dev_priv *cp = NULL;
@@ -7243,11 +7465,11 @@ void rtd129x_send_uevent(unsigned int curLinkPortMask, unsigned int newportmask)
 	for (i = 0; i < ETH_INTF_NUM; i++) {
 		cp = ((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[i]));
 		if (_rtl86xx_dev.dev[i] && cp && cp->opened) {
-			if (((cp->portmask & curLinkPortMask) == 0)
+			if (((cp->portmask & curportmask) == 0)
 				&& (cp->portmask & newportmask)) {
 				cp->link_event = KOBJ_LINKUP;
 				schedule_work(&cp->link_event_work);
-			} else if ((cp->portmask & curLinkPortMask)
+			} else if ((cp->portmask & curportmask)
 				&& ((cp->portmask & newportmask) == 0)) {
 				cp->link_event = KOBJ_LINKDOWN;
 				schedule_work(&cp->link_event_work);
@@ -7255,6 +7477,17 @@ void rtd129x_send_uevent(unsigned int curLinkPortMask, unsigned int newportmask)
 		}
 	}
 }
+
+#if defined(CONFIG_RTL_836X_SUPPORT)
+#if defined(CONFIG_RTL_CPU_TAG) || defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)
+void rtd129x_update_link_status(void)
+{
+	newLinkPortMask = rtl836x_link_status_get();
+	rtd129x_send_uevent(curLinkPortMask, newLinkPortMask);
+	curLinkPortMask = newLinkPortMask;
+}
+#endif /* CONFIG_RTL_CPU_TAG || CONFIG_RTL_2_RGMII_PORTS_ONLY */
+#endif /* CONFIG_RTL_836X_SUPPORT */
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 #if defined(CONFIG_RTL_REPORT_LINK_STATUS)
@@ -7946,7 +8179,9 @@ static void interrupt_dsr_link(unsigned long task_priv)
 	esd_recovery();
 #endif
 
+#if !defined(CONFIG_RTL_CPU_TAG)
 	newLinkPortMask = rtl865x_getPhysicalPortLinkStatus();
+#endif /* !CONFIG_RTL_CPU_TAG */
 
 	/* clearL2Table_forLinkDownPort(curLinkPortMask, newLinkPortMask); */
 
@@ -7991,10 +8226,14 @@ static void interrupt_dsr_link(unsigned long task_priv)
 #endif
 
 #if defined(CONFIG_RTD_1295_HWNAT)
+#if !defined(CONFIG_RTL_CPU_TAG)
 	rtd129x_send_uevent(curLinkPortMask, newLinkPortMask);
+#endif /* !CONFIG_RTL_CPU_TAG */
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
+#if !defined(CONFIG_RTL_CPU_TAG)
 	curLinkPortMask = newLinkPortMask;
+#endif /* !CONFIG_RTL_CPU_TAG */
 
 #ifdef LINK_TASKLET
 #if defined(CONFIG_RTD_1295_HWNAT)
@@ -8123,13 +8362,14 @@ __IRAM_GEN static inline void rtl_link_change_interrupt_process(unsigned int
 
 __MIPS16 __IRAM_FWD irqreturn_t interrupt_isr(int irq, void *dev_instance)
 {
-	struct net_device *dev = dev_instance;
+	struct net_device *dev = (struct net_device *)dev_instance;
 	struct dev_priv *cp;
 	unsigned int status, old_status;
 	cp = NETDRV_PRIV(dev);
 	status = REG32(CPUIISR);
 	old_status = status;
 	status &= REG32(CPUIIMR);
+
 
 #ifdef CONFIG_RTL_819X_SWCORE
 	cnt_swcore++;
@@ -8150,7 +8390,6 @@ __MIPS16 __IRAM_FWD irqreturn_t interrupt_isr(int irq, void *dev_instance)
 #endif
 
 	rtl_rx_interrupt_process(status, cp);
-
 	rtl_tx_interrupt_process(status, cp);
 
 #if defined(CONFIG_RTL_IGMP_SNOOPING) || defined(CONFIG_RTL_LINKCHG_PROCESS) || defined(CONFIG_RTL_PHY_PATCH) || defined(CONFIG_RTL_ETH_802DOT1X_SUPPORT) || defined(CONFIG_RTL_8198C_10M_REFINE)
@@ -8177,7 +8416,6 @@ static int rtl865x_init_hw(void)
 	ret = RTL_swNic_init(rxRingSize, mbufRingSize, txRingSize, MBUF_LEN);
 
 	if (ret != SUCCESS) {
-		printk("819x-nic: swNic_init failed!\n");
 		return FAILED;
 	}
 	return SUCCESS;
@@ -8222,6 +8460,27 @@ static void reset_hw_mib_counter(struct net_device *dev)
 						rtk_stat_port_reset(port);
 					}
 #endif
+#if defined(CONFIG_RTD_1295_HWNAT)
+#if defined(CONFIG_RTL_CPU_TAG) && defined(CONFIG_RTL_836X_SUPPORT)
+					spin_lock(&rtl836x_ext_lock);
+					rtk_stat_port_reset(rtl836x_portmap(port));
+					spin_unlock(&rtl836x_ext_lock);
+#elif defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)
+					if (port == 0) {
+						spin_lock(&rtl836x_ext_lock);
+						rtk_stat_port_reset(rtl836x_portmap(0));
+						rtk_stat_port_reset(rtl836x_portmap(1));
+						rtk_stat_port_reset(rtl836x_portmap(2));
+						rtk_stat_port_reset(rtl836x_portmap(3));
+						spin_unlock(&rtl836x_ext_lock);
+					} else if (port == 5) {
+						spin_lock(&rtl836x_ext_lock);
+						rtk_stat_port_reset(rtl836x_portmap(5));
+						spin_unlock(&rtl836x_ext_lock);
+					}
+#endif /* CONFIG_RTL_CPU_TAG && CONFIG_RTL_836X_SUPPORT */
+#endif /* CONFIG_RTD_1295_HWNAT */
+
 				}
 				WRITE_MEM32(MIB_CONTROL, set_value);
 			}
@@ -8540,7 +8799,6 @@ static void ckeck_link_speed(void)
 
 #endif
 
-#if !defined(CONFIG_RTD_1295_HWNAT)
 #if defined(DYNAMIC_ADJUST_TASKLET) || defined(CONFIG_RTL8196C_REVISION_B) || defined(CONFIG_RTL_8198) || defined(RTL_CPU_QOS_ENABLED) || defined(CONFIG_RTL_819XD) || defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
 extern int rtl865x_reinitSwitchCore(void);
 static void one_sec_timer(unsigned long task_priv)
@@ -8553,6 +8811,7 @@ static void one_sec_timer(unsigned long task_priv)
 	/* spin_lock_irqsave (&cp->lock, flags); */
 	SMP_LOCK_ETH(flags);
 
+#if !defined(CONFIG_RTD_1295_HWNAT)
 #if defined(PATCH_GPIO_FOR_LED)
 	if (((struct net_device *)task_priv)->name[3] == '0') {	/* eth0 */
 		int port;
@@ -8952,6 +9211,7 @@ static void one_sec_timer(unsigned long task_priv)
 	if (gpio_simulate_mdc_mdio)
 		ckeck_link_speed();
 #endif
+#endif /* !CONFIG_RTD_1295_HWNAT */
 
 	mod_timer(&cp->expire_timer, jiffies + HZ);
 
@@ -8959,7 +9219,6 @@ static void one_sec_timer(unsigned long task_priv)
 	SMP_UNLOCK_ETH(flags);
 }
 #endif
-#endif /* !defined(CONFIG_RTD_1295_HWNAT) */
 
 #ifdef CONFIG_RTL8196C_GREEN_ETHERNET
 static void power_save_timer(unsigned long task_priv)
@@ -8990,9 +9249,13 @@ int32 rtd129x_set_phy_power_down(uint32 port, uint32 pwr_down)
 {
 	switch (port) {
 	case 0:
-		if (hwnat_mac0_enable == 0)
+		if (hwnat_mac0_enable == 0 || (hwnat_mac0_mode & 2) > 0)
 			goto out;
 		break;
+	case 1:
+	case 2:
+	case 3:
+		goto out;
 	case 4:
 		break;
 	case 5:
@@ -9008,6 +9271,176 @@ int32 rtd129x_set_phy_power_down(uint32 port, uint32 pwr_down)
 out:
 	return 0;
 }
+
+#if defined(CONFIG_RTL_WAN_MAC5)
+extern int linux_vlan_enable;
+extern int linux_vlan_hw_support_enable;
+extern uint16 rtk_vlan_wan_vid;
+extern uint16 rtk_vlan_hw_nat_lan_vid;
+
+extern void rtl_vlan_reinit(bool enable);
+extern int32 rtl_vlan_group_set(uint32 flag, uint32 mask, uint32 tagMask,
+				uint32 vid, uint32 vlanType);
+extern int32 rtl_vlan_pvid_set(int32 port, uint32 pvid);
+#endif /* CONFIG_RTL_WAN_MAC5 */
+
+static int rtl_nat_net_init(void)
+{
+	#if defined(CONFIG_RTL_WAN_MAC5)
+	#if defined(CONFIG_RTL_836X_SUPPORT)
+	rtk_vlan_cfg_t vlan;
+	#endif /* CONFIG_RTL_836X_SUPPORT */
+
+	rtl_vlan_reinit(true);
+
+	/* tag member: port 6 (CPU), port 5 */
+	rtl_vlan_group_set(1, 0x60, 0x60, 100, 1);
+	rtl_vlan_group_set(1, 0x60, 0x60, 200, 1);
+
+	/* untagged packets are sent to LAN */
+	rtl_vlan_pvid_set(5, 200);
+
+	#if defined(CONFIG_RTL_836X_SUPPORT)
+	spin_lock(&rtl836x_ext_lock);
+	memset(&vlan, 0x00, sizeof(rtk_vlan_cfg_t));
+
+	RTK_PORTMASK_PORT_SET(vlan.mbr, UTP_PORT0);
+	RTK_PORTMASK_PORT_SET(vlan.mbr, EXT_PORT0);
+	RTK_PORTMASK_PORT_SET(vlan.untag, UTP_PORT0);
+
+	rtk_vlan_set(100, &vlan);
+
+	memset(&vlan, 0x00, sizeof(rtk_vlan_cfg_t));
+
+	RTK_PORTMASK_PORT_SET(vlan.mbr, UTP_PORT1);
+	RTK_PORTMASK_PORT_SET(vlan.mbr, UTP_PORT2);
+	RTK_PORTMASK_PORT_SET(vlan.mbr, EXT_PORT0);
+	RTK_PORTMASK_PORT_SET(vlan.untag, UTP_PORT1);
+	RTK_PORTMASK_PORT_SET(vlan.untag, UTP_PORT2);
+
+	rtk_vlan_set(200, &vlan);
+
+	rtk_vlan_portPvid_set(UTP_PORT0, 100, 0);
+	rtk_vlan_portPvid_set(UTP_PORT1, 200, 0);
+	rtk_vlan_portPvid_set(UTP_PORT2, 200, 0);
+	rtk_vlan_portPvid_set(EXT_PORT0, 200, 0);
+	spin_unlock(&rtl836x_ext_lock);
+	#endif /* CONFIG_RTL_836X_SUPPORT */
+	#endif /* CONFIG_RTL_WAN_MAC5 */
+
+	#if defined(CONFIG_RTL_CPU_TAG) || defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)
+	#if defined(CONFIG_RTL_836X_SUPPORT)
+	/* for external switch */
+	rtk_l2_ucastAddr_t l2_entry;
+	rtk_mac_t mac;
+	rtk_api_ret_t ret;
+	rtk_portmask_t portmask;
+	rtk_vlan_cfg_t vlan;
+	struct rtl865x_vlanConfig *vlancfg_entry;
+
+	memset(&mac, 0x00, sizeof(rtk_mac_t));
+	memset(&l2_entry, 0x00, sizeof(rtk_l2_ucastAddr_t));
+	memset(&vlan, 0x00, sizeof(rtk_vlan_cfg_t));
+
+
+	spin_lock(&rtl836x_ext_lock);
+	/* set switch port isolation */
+	/* EFID 1: UTP_PORT0, EXT_PORT0 */
+	/* EFID 0: UTP_PORT1, UTP_PORT2, EXT_PORT1 */
+	RTK_PORTMASK_CLEAR(portmask);
+	RTK_PORTMASK_PORT_SET(portmask, EXT_PORT0);
+	rtk_port_isolation_set(UTP_PORT0, &portmask);
+
+	RTK_PORTMASK_CLEAR(portmask);
+	RTK_PORTMASK_PORT_SET(portmask, UTP_PORT0);
+	rtk_port_isolation_set(EXT_PORT0, &portmask);
+
+	RTK_PORTMASK_CLEAR(portmask);
+	RTK_PORTMASK_PORT_SET(portmask, UTP_PORT2);
+	RTK_PORTMASK_PORT_SET(portmask, EXT_PORT1);
+	rtk_port_isolation_set(UTP_PORT1, &portmask);
+
+	RTK_PORTMASK_CLEAR(portmask);
+	RTK_PORTMASK_PORT_SET(portmask, UTP_PORT1);
+	RTK_PORTMASK_PORT_SET(portmask, EXT_PORT1);
+	rtk_port_isolation_set(UTP_PORT2, &portmask);
+
+	RTK_PORTMASK_CLEAR(portmask);
+	RTK_PORTMASK_PORT_SET(portmask, UTP_PORT1);
+	RTK_PORTMASK_PORT_SET(portmask, UTP_PORT2);
+	rtk_port_isolation_set(EXT_PORT1, &portmask);
+
+	rtk_port_efid_set(UTP_PORT0, 1);
+	rtk_port_efid_set(EXT_PORT0, 1);
+	rtk_port_efid_set(UTP_PORT1, 0);
+	rtk_port_efid_set(UTP_PORT2, 0);
+	rtk_port_efid_set(EXT_PORT1, 0);
+
+	#if !defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)
+	/* Let 8367 remove RTL_LANVLANID: 9 */
+	RTK_PORTMASK_PORT_SET(vlan.mbr, UTP_PORT1);
+	RTK_PORTMASK_PORT_SET(vlan.mbr, UTP_PORT2);
+	RTK_PORTMASK_PORT_SET(vlan.mbr, EXT_PORT1);
+	RTK_PORTMASK_PORT_SET(vlan.untag, UTP_PORT1);
+	RTK_PORTMASK_PORT_SET(vlan.untag, UTP_PORT2);
+	RTK_PORTMASK_PORT_SET(vlan.untag, EXT_PORT1);
+
+	ret = rtk_vlan_set(RTL_LANVLANID, &vlan);
+
+	rtk_vlan_portPvid_set(UTP_PORT1, RTL_LANVLANID, 0);
+	rtk_vlan_portPvid_set(UTP_PORT2, RTL_LANVLANID, 0);
+	rtk_vlan_portPvid_set(EXT_PORT1, RTL_LANVLANID, 0);
+	#endif /* CONFIG_RTL_2_RGMII_PORTS_ONLY */
+
+	/* add WAN MAC to EXT_PORT0 */
+	vlancfg_entry = rtl_get_vlanconfig_by_netif_name(RTL_DRV_WAN0_NETIF_NAME);
+	if (vlancfg_entry) {
+		mac.octet[0] = vlancfg_entry->mac.octet[0];
+		mac.octet[1] = vlancfg_entry->mac.octet[1];
+		mac.octet[2] = vlancfg_entry->mac.octet[2];
+		mac.octet[3] = vlancfg_entry->mac.octet[3];
+		mac.octet[4] = vlancfg_entry->mac.octet[4];
+		mac.octet[5] = vlancfg_entry->mac.octet[5];
+
+		l2_entry.port = EXT_PORT0 ;
+		l2_entry.cvid = 1;
+		l2_entry.efid = 1;
+		l2_entry.is_static = 1;
+
+		if ((ret = rtk_l2_addr_add(&mac, &l2_entry)) != RT_ERR_OK)
+			pr_err("Add WAN MAC to switch failed!\n");
+	}
+
+	/* add LAN MAC to EXT_PORT1 */
+	vlancfg_entry = rtl_get_vlanconfig_by_netif_name(RTL_DRV_LAN_NETIF_NAME);
+	if (vlancfg_entry) {
+		mac.octet[0] = vlancfg_entry->mac.octet[0];
+		mac.octet[1] = vlancfg_entry->mac.octet[1];
+		mac.octet[2] = vlancfg_entry->mac.octet[2];
+		mac.octet[3] = vlancfg_entry->mac.octet[3];
+		mac.octet[4] = vlancfg_entry->mac.octet[4];
+		mac.octet[5] = vlancfg_entry->mac.octet[5];
+
+		l2_entry.port = EXT_PORT1 ;
+		l2_entry.cvid = 1;
+		l2_entry.efid = 0;
+		l2_entry.is_static = 1;
+
+		if ((ret = rtk_l2_addr_add(&mac, &l2_entry)) != RT_ERR_OK)
+			pr_err("Add LAN MAC to switch failed!\n");
+
+		/* also add pseudo MAC */
+		mac.octet[0] |= 0x2;
+		if ((ret = rtk_l2_addr_add(&mac, &l2_entry)) != RT_ERR_OK)
+			pr_err("Add OTT MAC to switch failed!\n");
+	}
+	spin_unlock(&rtl836x_ext_lock);
+	#endif /* CONFIG_RTL_836X_SUPPORT */
+	#endif /* CONFIG_RTL_CPU_TAG || CONFIG_RTL_2_RGMII_PORTS_ONLY */
+
+	return 0;
+}
+
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 static struct net_device *irqDev = NULL;
@@ -9023,6 +9456,7 @@ static int re865x_open(struct net_device *dev)
 	unsigned int port;
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
+		printk("otavio - Open the doors to the re865x dicksucker!\n");
 	cp = NETDRV_PRIV(dev);
 #ifdef CONFIG_RTL_HW_VLAN_SUPPORT_HW_NAT
 	/* printk("re865x_open dev=%s , id = %d \n",dev->name,cp->id); */
@@ -9125,6 +9559,16 @@ static int re865x_open(struct net_device *dev)
 		rtl865x_start();
 #if defined(CONFIG_RTD_1295_HWNAT)
 		SMP_UNLOCK_ETH(flags);
+
+		/* post init after the 1st dev is opened */
+		rtl_nat_net_init();
+
+		/* start one_sec_timer */
+		init_timer(&cp->expire_timer);
+		cp->expire_timer.expires = jiffies + HZ;
+		cp->expire_timer.data = (unsigned long)dev;
+		cp->expire_timer.function = one_sec_timer;
+		mod_timer(&cp->expire_timer, jiffies + HZ);
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 	}
 #if !defined(CONFIG_RTD_1295_HWNAT)
@@ -9167,7 +9611,7 @@ static int re865x_open(struct net_device *dev)
 #endif
 	}
 #endif
-#endif /* !defined(CONFIG_RTD_1295_HWNAT) */
+#endif /* !CONFIG_RTD_1295_HWNAT */
 
 #ifdef CONFIG_RTL8196C_GREEN_ETHERNET
 	if (REG32(REVR) == RTL8196C_REVISION_B) {
@@ -9233,6 +9677,7 @@ static int re865x_open(struct net_device *dev)
 		}
 	}
 
+	#if !defined(CONFIG_RTL_836X_SUPPORT)
 	if (cp->link_event == KOBJ_MAX) {
 		newLinkPortMask = rtl865x_getPhysicalPortLinkStatus();
 		if (cp->portmask & newLinkPortMask) {
@@ -9244,6 +9689,7 @@ static int re865x_open(struct net_device *dev)
 			schedule_work(&cp->link_event_work);
 		}
 	}
+	#endif /* !CONFIG_RTL_836X_SUPPORT */
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 	return SUCCESS;
@@ -9348,6 +9794,8 @@ static int re865x_close(struct net_device *dev)
 		rtk_queue_exit(&rx_skb_queue);
 
 #if defined(CONFIG_RTD_1295_HWNAT)
+		if (timer_pending(&cp->expire_timer))
+			del_timer_sync(&cp->expire_timer);
 		irqDev = NULL;
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 	}
@@ -9380,10 +9828,14 @@ static int re865x_close(struct net_device *dev)
 #endif
 	{
 		rtl865x_disableDevPortForward(dev, cp);
+#if !(defined(CONFIG_RTD_1295_HWNAT) && (defined(CONFIG_RTL_CPU_TAG) || \
+	defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)) && \
+	defined(CONFIG_RTL_836X_SUPPORT))
 #if !defined(CONFIG_RTL_8196C)
 		/*for lan dhcp client to renew ip address */
 		rtl865x_restartDevPHYNway(dev, cp);
 #endif
+#endif /* !(CONFIG_RTD_1295_HWNAT && CONFIG_RTL_CPU_TAG && CONFIG_RTL_836X_SUPPORT) */
 		rtl8186_stop_hw(dev, cp);
 	}
 #if !defined(CONFIG_RTD_1295_HWNAT)
@@ -9623,7 +10075,7 @@ int re865x_setMCastTxInfo(struct sk_buff *skb, struct net_device *dev,
 	struct sk_buff *skb_wan = NULL;
 	rtl_nicTx_info nicTx_wan;
 #endif
-#if definedCONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD
+#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
 	int type;
 #endif
 
@@ -9650,10 +10102,9 @@ int re865x_setMCastTxInfo(struct sk_buff *skb, struct net_device *dev,
 #ifndef CONFIG_RTL_VLAN_8021Q
 	nicTx->portlist = cp->portmask;
 #endif
-#if definedCONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD
+#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
 	type = rtl_is_pppoe_igmp_bridge_frame(skb, 1, skb->data);
-	if (((skb->data[0] == 0x01) && (skb->data[1] == 0x00)
-			&& (skb->data[2] == 0x5e)) || type != 0)
+	if(((skb->data[0]==0x01) && (skb->data[1]==0x00) && (skb->data[2]==0x5e)) || (type>0&&type<=PPPOE_TCP))
 #else
 	if ((skb->data[0] == 0x01) && (skb->data[1] == 0x00)
 		&& (skb->data[2] == 0x5e))
@@ -9662,8 +10113,8 @@ int re865x_setMCastTxInfo(struct sk_buff *skb, struct net_device *dev,
 		if (igmpsnoopenabled != TRUE) {
 			return -1;
 		}
-#if definedCONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD
-		if (type != 0)
+#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
+		if(type>0&&type<=PPPOE_TCP)
 			iph = rtl_get_pppoe_ipv4_hdr(skb->data, 1, 0);
 		else
 #endif
@@ -9755,8 +10206,12 @@ int re865x_setMCastTxInfo(struct sk_buff *skb, struct net_device *dev,
 		}
 	}
 #if defined(CONFIG_RTL_MLD_SNOOPING)
-	else if ((skb->data[0] == 0x33) && (skb->data[1] == 0x33)
-		&& (skb->data[2] != 0xff)) {
+#if defined (CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
+	else if (((skb->data[0]==0x33) && (skb->data[1]==0x33) && (skb->data[2]!=0xff))||(type>=PPPOE_ICMPV6))
+#else
+	else if ((skb->data[0]==0x33) && (skb->data[1]==0x33) && (skb->data[2]!=0xff))
+#endif
+	{
 
 		if (mldSnoopEnabled != TRUE) {
 			return -1;
@@ -9764,13 +10219,18 @@ int re865x_setMCastTxInfo(struct sk_buff *skb, struct net_device *dev,
 		if (cp->portnum <= 1) {
 			return -1;
 		}
+#if defined (CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
+		if(type>=PPPOE_ICMPV6)
+			ipv6h=rtl_get_pppoe_ipv6_hdr(skb->data,1,0);
+		else
+#endif
+			ipv6h=re865x_getIpv6Header(skb->data);
 
-		ipv6h = re865x_getIpv6Header(skb->data);
 		if (ipv6h != NULL) {
 			l4Protocol = re865x_getIpv6TransportProtocol(ipv6h);
 			/*udp or tcp packet */
-			if ((l4Protocol == IPPROTO_UDP)
-				|| (l4Protocol == IPPROTO_TCP)) {
+			if((l4Protocol==IPPROTO_UDP) || (l4Protocol==IPPROTO_TCP))
+			{
 				/*only process tcp/udp in igmp snooping data plane */
 				multicastDataInfo.ipVersion = 6;
 				memcpy(&multicastDataInfo.sourceIp,
@@ -10224,8 +10684,13 @@ static inline int rtl_pstProcess_xmit(struct dev_priv *cp,
 #endif
 	/*jwj: directly use skb->dev may more safer. */
 	/* cp->dev->trans_start = jiffies; */
+	#if defined(CONFIG_RTD_1295_HWNAT) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
+	if (dev)
+		netif_trans_update(dev);
+	#else
 	if (dev)
 		dev->trans_start = jiffies;
+	#endif /* CONFIG_RTD_1295_HWNAT */
 
 	return SUCCESS;
 }
@@ -10813,7 +11278,6 @@ __MIPS16 __IRAM_FWD
 #if defined(CONFIG_SMP)
 			SMP_UNLOCK_ETH_XMIT(flags);
 #endif
-
 			return 0;
 		}
 	}
@@ -10861,6 +11325,9 @@ __MIPS16 __IRAM_FWD
 	tx_skb = nicTx.out_skb = insert_vlan_tag(skb, cp->id);
 	if (tx_skb == NULL) {
 		dev_kfree_skb_any(skb);
+#if defined(CONFIG_SMP)
+		SMP_UNLOCK_ETH_XMIT(flags);
+#endif
 		return 0;
 	}
 #endif
@@ -10881,6 +11348,9 @@ __MIPS16 __IRAM_FWD
 		tx_skb = nicTx.out_skb = insert_vlan_tag(skb, RTL_WANVLANID);
 		if (tx_skb == NULL) {
 			/* dev_kfree_skb_any(skb); */
+#if defined(CONFIG_SMP)
+			SMP_UNLOCK_ETH_XMIT(flags);
+#endif
 			return 0;
 		}
 	}
@@ -11077,6 +11547,9 @@ __MIPS16 __IRAM_FWD
 	tx_retry_cnt = 0;
 	while (1) {
 		/* do not suitable to use RTL_swNic_send */
+#if defined(CONFIG_SMP)
+		SMP_UNLOCK_ETH_XMIT(flags);
+#endif
 #if defined(CONFIG_RTD_1295_HWNAT)
 #if defined(CONFIG_RTL_SWITCH_NEW_DESCRIPTOR)
 #if (defined(CONFIG_RTL_TSO) || defined(CONFIG_RTL_GSO))
@@ -11085,11 +11558,12 @@ __MIPS16 __IRAM_FWD
 			retval = _New_swNic_send_tso_sg((void *)tx_skb,
 				(void *)mapping, tx_skb->len, &nicTx);
 		} else {
-			retval = _New_swNic_send((void *)tx_skb,
+			// retval = _New_swNic_send((void *)tx_skb,
+			retval = New_swNic_send((void *)tx_skb,
 				(void *)mapping, tx_skb->len, &nicTx);
 		}
 #else
-		retval = _New_swNic_send((void *)tx_skb, (void *)mapping,
+		retval = New_swNic_send((void *)tx_skb, (void *)mapping,
 			tx_skb->len, &nicTx);
 #endif
 #else
@@ -11126,7 +11600,9 @@ __MIPS16 __IRAM_FWD
 #endif
 #endif
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
-
+#if defined(CONFIG_SMP)
+		SMP_LOCK_ETH_XMIT(flags);
+#endif
 		if (retval >= 0)
 			break;
 
@@ -11475,7 +11951,8 @@ int re865x_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	uint16 port_id = 0;
 #endif
 
-#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT)
+#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT) || \
+	(defined(CONFIG_RTL_CPU_TAG) && defined(CONFIG_RTL_836X_SUPPORT))
 	extern int rtk_port_phyStatus_get(uint32 port, uint32 *pLinkStatus,
 		uint32 *pSpeed, uint32 *pDuplex);
 	uint32 linkStatus, speed, duplex;
@@ -11519,15 +11996,18 @@ int re865x_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 
 	switch (args[0]) {
 
-#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT)
+#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT) || \
+	(defined(CONFIG_RTL_CPU_TAG) && defined(CONFIG_RTL_836X_SUPPORT))
 	case RTL8651_IOCTL_GETWANLINKSTATUS:
 		{
 			pRet = (int32 *)args[3];
 			*pRet = FAILED;
 			rc = SUCCESS;
 
+			spin_lock(&rtl836x_ext_lock);
 			rc = rtk_port_phyStatus_get(RTL83XX_WAN, &linkStatus,
 				&speed, &duplex);
+			spin_unlock(&rtl836x_ext_lock);
 
 			if (rc == SUCCESS) {
 				if (linkStatus == 1) {
@@ -11565,8 +12045,8 @@ int re865x_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 					if ((READ_MEM32(PSRP0 + (i << 2)) &
 							PortStatusLinkUp) !=
 						0) {
-						*pRet = SUCCESS;
-					}
+								*pRet = SUCCESS;
+							}
 					break;
 				}
 			}
@@ -11574,14 +12054,17 @@ int re865x_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 		}
 #endif
 
-#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT)
+#if defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT) || \
+	(defined(CONFIG_RTL_CPU_TAG) && defined(CONFIG_RTL_836X_SUPPORT))
 	case RTL8651_IOCTL_GETWANLINKSPEED:
 		{
 			pRet = (int32 *)args[3];
 			*pRet = FAILED;
 
+			spin_lock(&rtl836x_ext_lock);
 			rc = rtk_port_phyStatus_get(RTL83XX_WAN, &linkStatus,
 				&speed, &duplex);
+			spin_unlock(&rtl836x_ext_lock);
 
 			if (rc == SUCCESS) {
 				*pRet = speed;
@@ -13433,10 +13916,14 @@ static int rtl_set_vlanconfig_mac_addr(void)
 	/* DBG("MAC address base = %pM", mac); */
 
 	for (i = 0; i < ETH_INTF_NUM; i++) {
+		#if defined(CONFIG_RTL_WAN_MAC5)
+		sprintf(ifname, "eth%d", i);
+		#else /* CONFIG_RTL_WAN_MAC5 */
 		if (i == RTL_LAN_IDX)
 			sprintf(ifname, RTL_DRV_LAN_NETIF_NAME);
 		else
 			sprintf(ifname, "eth%d", i);
+		#endif /* CONFIG_RTL_WAN_MAC5 */
 
 		vlancfg_entry = rtl_get_vlanconfig_by_netif_name(ifname);
 
@@ -13580,6 +14067,10 @@ int __init re865x_probe(void)
 	int dt_tmp;
 	unsigned dt_array[6];
 
+#ifdef INFINITE_DEBUG
+	printk("otavio - the infinite debugging initiate...INFINIIIIIITE!\n");
+#endif
+
 	rtl819x_pdev = pdev;
 	_rtl86xx_dev.plat_dev = pdev;
 	/* initialize memory map of registers and IRQ */
@@ -13628,25 +14119,38 @@ int __init re865x_probe(void)
 	DBG("RGMII voltage = %d (1:1.8V, 2:2.5V, 3:3.3V)", dt_tmp);
 	hwnat_rgmii_voltage = dt_tmp;
 
-	of_property_read_u32(pdev->dev.of_node, "rgmii_tx_delay", &dt_tmp);
-	DBG("RGMII TX delay = %d (0.5 ns per step)", dt_tmp);
-	hwnat_rgmii_tx_delay = dt_tmp;
+	of_property_read_u32(pdev->dev.of_node, "rgmii0_tx_delay", &dt_tmp);
+	DBG("RGMII0 TX delay = %d (0.5 ns per step)", dt_tmp);
+	hwnat_rgmii0_tx_delay = dt_tmp;
 
-	of_property_read_u32(pdev->dev.of_node, "rgmii_rx_delay", &dt_tmp);
-	DBG("RGMII RX delay = %d (0.5 ns per step)", dt_tmp);
-	hwnat_rgmii_rx_delay = dt_tmp;
+	of_property_read_u32(pdev->dev.of_node, "rgmii0_rx_delay", &dt_tmp);
+	DBG("RGMII0 RX delay = %d (0.5 ns per step)", dt_tmp);
+	hwnat_rgmii0_rx_delay = dt_tmp;
+
+	of_property_read_u32(pdev->dev.of_node, "rgmii1_tx_delay", &dt_tmp);
+	DBG("RGMII1 TX delay = %d (0.5 ns per step)", dt_tmp);
+	hwnat_rgmii1_tx_delay = dt_tmp;
+
+	of_property_read_u32(pdev->dev.of_node, "rgmii1_rx_delay", &dt_tmp);
+	DBG("RGMII1 RX delay = %d (0.5 ns per step)", dt_tmp);
+	hwnat_rgmii1_rx_delay = dt_tmp;
 
 	of_property_read_u32(pdev->dev.of_node, "mac0_enable", &dt_tmp);
 	DBG("mac0_enable = %s", dt_tmp > 0 ? "enable" : "disable");
 	hwnat_mac0_enable = dt_tmp;
+	#if defined(CONFIG_RTL_MULTI_LAN_DEV)
+	#if !defined(CONFIG_RTL_CPU_TAG)
 	if (hwnat_mac0_enable == 0) {
 		vlanconfig[2].if_type = IF_NONE;
 		vlanconfig[2].memPort = 0;
 		RTL_LANPORT_MASK &= ~RTL_LANPORT_MASK_1;
 	}
+	#endif /* !CONFIG_RTL_CPU_TAG */
+	#endif /* CONFIG_RTL_MULTI_LAN_DEV */
 
 	of_property_read_u32(pdev->dev.of_node, "mac0_mode", &dt_tmp);
-	DBG("mac0_mode = %s", dt_tmp > 0 ? "SGMII" : "RGMII");
+	DBG("mac0_mode = %s to %s", (dt_tmp & 1) > 0 ? "SGMII" : "RGMII",
+		(dt_tmp & 2) > 0 ? "MAC" : "PHY");
 	hwnat_mac0_mode = dt_tmp;
 
 	of_property_read_u32(pdev->dev.of_node, "mac5_conn_to", &dt_tmp);
@@ -13682,7 +14186,7 @@ int __init re865x_probe(void)
 
 	/* Init RGMII/SGMII/PHY clock */
 	/* Init ASIC table */
-	rtd129x_hwnat_clk_init();
+	rtd129x_hwnat_clk_init(&pdev->dev);
 
 	/* enable interrupt migration
 	 * timeout = 800 * 512ns = 400us
@@ -13717,6 +14221,7 @@ int __init re865x_probe(void)
 	spin_lock_init(&lock_eth_tx);
 	spin_lock_init(&lock_eth_buf);
 	spin_lock_init(&lock_eth_hw);
+	spin_lock_init(&lock_eth_event);
 #endif
 
 	/* initial the global variables in dmem. */
@@ -13965,6 +14470,7 @@ int __init re865x_probe(void)
 #if defined(CONFIG_RTL_IGMP_SNOOPING)
 #if defined(CONFIG_SMP)
 	spin_lock_init(&lock_igmp);
+	spin_lock_init(&lock_igmp_concurrent);
 #endif
 	memset(&mCastSnoopingGlobalConfig, 0,
 		sizeof(struct rtl_mCastSnoopingGlobalConfig));
@@ -13972,7 +14478,7 @@ int __init re865x_probe(void)
 	mCastSnoopingGlobalConfig.maxSourceNum = 300;
 	mCastSnoopingGlobalConfig.hashTableSize = 64;
 
-	mCastSnoopingGlobalConfig.groupMemberAgingTime = 260;
+	mCastSnoopingGlobalConfig.groupMemberAgingTime = 600;
 	mCastSnoopingGlobalConfig.lastMemberAgingTime = 2;
 	mCastSnoopingGlobalConfig.querierPresentInterval = 260;
 
@@ -13981,6 +14487,11 @@ int __init re865x_probe(void)
 	mCastSnoopingGlobalConfig.pimRouterAgingTime = 120;
 
 	igmpInitFlag = rtl_initMulticastSnooping(mCastSnoopingGlobalConfig);
+	if (igmpInitFlag == FAILED) {
+		printk(KERN_ERR
+				"HW_MCAST:%s:%d Failed to rtl_initMulticastSnooping\n", __func__, __LINE__);
+	}
+
 #if defined(IMPROVE_MCAST_PERFORMANCE_WITH_RTL8367)
 	rtl_initMcastImprove();
 #endif
@@ -14173,7 +14684,7 @@ int __init re865x_probe(void)
 			create_proc_entry("up_event", 0, res_stats_root);
 		if (rtk_link_event_entry) {
 			rtk_link_event_entry->read_proc = rtk_link_event_read;
-			rtk_link_event_entry->write_proc = rtk_link_event_write;
+			rtk_link_event_entry->write_proc = ;
 		}
 
 		if ((rtk_link_status_entry =
@@ -14327,10 +14838,15 @@ int __init re865x_probe(void)
 	rtl865x_setSpanningEnable(FALSE);
 #endif
 
+	#if defined(CONFIG_RTL_WAN_MAC5)
+	((struct dev_priv *)(NETDRV_PRIV(_rtl86xx_dev.dev[0])))->dev_next =
+		NULL;
+	#else /* CONFIG_RTL_WAN_MAC5 */
 	((struct dev_priv *)(NETDRV_PRIV(_rtl86xx_dev.dev[0])))->dev_next =
 		_rtl86xx_dev.dev[1];
 	((struct dev_priv *)(NETDRV_PRIV(_rtl86xx_dev.dev[1])))->dev_prev =
 		_rtl86xx_dev.dev[0];
+	#endif /* CONFIG_RTL_WAN_MAC5 */
 
 #if defined(CONFIG_RTL_ETH_PRIV_SKB)
 	init_priv_eth_skb_buf();
@@ -14770,7 +15286,7 @@ int __init re865x_probe(void)
 #endif
 
 #ifdef CONFIG_RTL_836X_SUPPORT
-    rtl836x_init();
+	rtl836x_init();
 #endif
 
 	return 0;
@@ -15226,7 +15742,9 @@ static void __exit re865x_exit_fake(void)
 
 #if defined(CONFIG_RTD_1295_HWNAT)
 #ifdef CONFIG_PM
+#if defined(CONFIG_RTL_HARDWARE_NAT)
 void rtl819x_save_hw_tables(void);
+#endif /* CONFIG_RTL_HARDWARE_NAT */
 void rtd129x_save_regs(void);
 void rtd129x_restore_regs(void);
 void rtd129x_restore_alecr_regs(void);
@@ -15264,7 +15782,9 @@ static int rtd129x_nat_suspend(struct device *dev)
 		printk(KERN_ERR "[RTD129X_NAT] %s Suspend mode\n", __func__);
 	}
 	rtd129x_save_regs();
+	#if defined(CONFIG_RTL_HARDWARE_NAT)
 	rtl819x_save_hw_tables();
+	#endif /* CONFIG_RTL_HARDWARE_NAT */
 
 	rtl_hwnat_enable_orig = rtl_hwnat_enable;
 	rtl_hwnat_enable = false;
@@ -15291,7 +15811,7 @@ static int rtd129x_nat_resume(struct device *dev)
 	}
 
 	/* Enable clk and release reset module */
-	rtd129x_hwnat_clk_init();
+	rtd129x_hwnat_clk_init(dev);
 
 	/* reset driver */
 	rtd129x_restore_regs();
@@ -15351,6 +15871,69 @@ static struct platform_driver rtd1295_nic_driver = {
 			.of_match_table = of_match_ptr(rtd1295_nic_dt_ids),
 		},
 };
+
+// extern rtd129x_hwnat_reset_nat(struct device *dev);
+void rtd129x_nat_driver_restart(void)
+{
+	struct net_device *ndev;
+	int i;
+	struct dev_priv *cp;
+
+	pr_info("[RTD129X_NAT] restart\n");
+	for (i = 0; i < ETH_INTF_NUM; i++) {
+		ndev = _rtl86xx_dev.dev[i];
+		if (ndev) {
+			cp = NETDRV_PRIV(ndev);
+#if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
+			napi_disable(&cp->napi);
+#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+			if (netif_running(ndev)) {
+				netif_device_detach(ndev);
+				netif_stop_queue(ndev);
+			}
+		}
+	}
+
+	rtd129x_save_regs();
+	#if defined(CONFIG_RTL_HARDWARE_NAT)
+	rtl819x_save_hw_tables();
+	#endif /* CONFIG_RTL_HARDWARE_NAT */
+
+	rtl_hwnat_enable_orig = rtl_hwnat_enable;
+	rtl_hwnat_enable = false;
+	// rtd129x_hwnat_reset_nat(&_rtl86xx_dev.pdev->dev);
+	msleep(10);
+
+
+	/* Enable clk and release reset module */
+	//rtd129x_hwnat_clk_init(&_rtl86xx_dev.plat_dev->dev);
+
+	/* reset driver */
+	rtd129x_restore_regs();
+	rtl865x_reinitSwitchCore();
+	/* Workaround:
+	 * MSCR is changed when calling rtl865x_reinitSwitchCore().
+	 * Therefore, we restore ALECR regs again */
+	rtd129x_restore_alecr_regs();
+
+	for (i = 0; i < ETH_INTF_NUM; i++) {
+		ndev = _rtl86xx_dev.dev[i];
+		if (ndev) {
+			cp = NETDRV_PRIV(ndev);
+#if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
+			napi_enable(&cp->napi);
+#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+			if (netif_running(ndev)) {
+				netif_device_attach(ndev);
+			}
+		}
+	}
+
+	rtl_hwnat_enable = rtl_hwnat_enable_orig;
+
+	pr_info("[RTD129X_NAT] restart done.\n");
+}
+
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 #ifdef CONFIG_RTK_FAKE_ETH
@@ -15960,6 +16543,65 @@ static int32 rtl_reinit_hw_table(void)
 static int rtl_config_perport_perdev_vlanconfig(int mode)
 {
 #if defined(CONFIG_RTD_1295_HWNAT)
+	#if defined(CONFIG_RTL_CPU_TAG)
+	if ((mode == BRIDGE_MODE) || (mode == WISP_MODE)) {
+		vlanconfig[0].isWan = 0;
+		vlanconfig[0].vid = RTL_LANVLANID;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->id = RTL_LANVLANID;	/* eth0 */
+	} else {
+		vlanconfig[0].isWan = 1;
+		vlanconfig[0].vid = RTL_WANVLANID;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->id = RTL_WANVLANID;	/* eth0 */
+	}
+	vlanconfig[0].memPort = RTL_WANPORT_MASK;
+	vlanconfig[0].untagSet = RTL_WANPORT_MASK;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->portmask = RTL_WANPORT_MASK;	/* eth0 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->portnum = 1;
+
+	vlanconfig[1].isWan = 0;
+	vlanconfig[1].vid = RTL_LANVLANID;
+	vlanconfig[1].memPort = RTL_LANPORT_MASK_1;
+	vlanconfig[1].untagSet = RTL_LANPORT_MASK_1;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->portmask = RTL_LANPORT_MASK_1;	/* eth1 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->id = RTL_LANVLANID_1;	/* eth1 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->portnum = 1;
+
+	vlanconfig[2].isWan = 0;
+	vlanconfig[2].vid = RTL_LANVLANID;
+	vlanconfig[2].memPort = RTL_LANPORT_MASK_2;
+	vlanconfig[2].untagSet = RTL_LANPORT_MASK_2;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->portmask = RTL_LANPORT_MASK_2;	/* eth2 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->id = RTL_LANVLANID_2;	/* eth2 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->portnum = 1;
+
+	#if 0
+	vlanconfig[3].isWan = 0;
+	vlanconfig[3].vid = RTL_LANVLANID;
+	vlanconfig[3].memPort = RTL_LANPORT_MASK_3;
+	vlanconfig[3].untagSet = RTL_LANPORT_MASK_3;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[3]))->portmask = RTL_LANPORT_MASK_3;	/* eth3 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[3]))->id = RTL_LANVLANID_3;	/* eth3 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[3]))->portnum = 1;
+
+	vlanconfig[4].isWan = 0;
+	vlanconfig[4].vid = RTL_LANVLANID;
+	vlanconfig[4].memPort = RTL_LANPORT_MASK_0;
+	vlanconfig[4].untagSet = RTL_LANPORT_MASK_0;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[4]))->portmask = RTL_LANPORT_MASK_0;	/* eth4 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[4]))->id = RTL_LANVLANID_0;	/* eth4 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[4]))->portnum = 1;
+	#endif
+
+	#else /* CONFIG_RTL_CPU_TAG */
+	#if defined(CONFIG_RTL_WAN_MAC5)
+	vlanconfig[0].isWan = 0;
+	vlanconfig[0].vid = RTL_LANVLANID;
+	vlanconfig[0].memPort = RTL_LANPORT_MASK_5;
+	vlanconfig[0].untagSet = RTL_LANPORT_MASK_5;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->portmask = RTL_LANPORT_MASK_5;	/* eth0 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->id = RTL_WANVLANID;	/* eth0 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->portnum = 1;
+	#else /* CONFIG_RTL_WAN_MAC5 */
 	if ((mode == BRIDGE_MODE) || (mode == WISP_MODE)) {
 		vlanconfig[0].isWan = 0;
 		vlanconfig[0].vid = RTL_LANVLANID;
@@ -15989,9 +16631,10 @@ static int rtl_config_perport_perdev_vlanconfig(int mode)
 		vlanconfig[2].untagSet = RTL_LANPORT_MASK_1;
 		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->portmask = RTL_LANPORT_MASK_1;	/* eth2 */
 		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->id = RTL_LANVLANID_1;	/* eth2 */
-		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->portnum =
-			1;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->portnum = 1;
 	}
+	#endif /* CONFIG_RTL_WAN_MAC5 */
+	#endif /* CONFIG_RTL_CPU_TAG */
 #else /* defined(CONFIG_RTD_1295_HWNAT) */
 	vlanconfig[0].vid = RTL_LANVLANID;
 	vlanconfig[0].memPort = RTL_LANPORT_MASK_4;
@@ -16118,6 +16761,27 @@ static int rtl_config_lanwan_dev_vlanconfig(int mode)
 	}
 
 #else /* else CONFIG_POCKET_ROUTER_SUPPORT */
+	#if defined(CONFIG_RTD_1295_HWNAT)
+	if (mode == BRIDGE_MODE || mode == WISP_MODE) {
+		vlanconfig[0].isWan = 0;
+		vlanconfig[0].vid = RTL_LANVLANID;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->id = RTL_LANVLANID;
+	} else {
+		vlanconfig[0].isWan = 1;
+		vlanconfig[0].vid = RTL_WANVLANID;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->id = RTL_WANVLANID;
+	}
+	vlanconfig[0].memPort = RTL_WANPORT_MASK;
+	vlanconfig[0].untagSet = RTL_WANPORT_MASK;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->portmask = RTL_WANPORT_MASK;
+
+	vlanconfig[1].isWan = 0;
+	vlanconfig[1].vid = RTL_LANVLANID;
+	vlanconfig[1].memPort = RTL_LANPORT_MASK;
+	vlanconfig[1].untagSet = RTL_LANPORT_MASK;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->portmask = RTL_LANPORT_MASK;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->id = RTL_LANVLANID;
+	#else /* CONFIG_RTD_1295_HWNAT */
 	vlanconfig[0].memPort = RTL_LANPORT_MASK;
 	vlanconfig[0].vid = RTL_LANVLANID;
 	vlanconfig[0].untagSet = RTL_LANPORT_MASK;
@@ -16130,6 +16794,7 @@ static int rtl_config_lanwan_dev_vlanconfig(int mode)
 	vlanconfig[1].untagSet = RTL_WANPORT_MASK;
 	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->portmask = RTL_WANPORT_MASK;	/* eth1 */
 	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->id = RTL_WANVLANID;	/* eth1 */
+	#endif /* CONFIG_RTD_1295_HWNAT */
 
 #endif /* endif CONFIG_POCKET_ROUTER_SUPPORT */
 
@@ -16182,6 +16847,43 @@ int rtl_is_lan_dev(struct net_device *dev)
 	if (dev == NULL)
 		return ret;
 
+#if defined(CONFIG_RTD_1295_HWNAT)
+#if defined(CONFIG_RTL_CPU_TAG)
+	if (rtl865x_curOpMode == GATEWAY_MODE) {
+		if ((strcmp(dev->name, "eth1") == 0)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P2_NETIF_NAME) == 0)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P3_NETIF_NAME) == 0)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P0_NETIF_NAME) == 0))
+			ret = TRUE;
+	} else if ((rtl865x_curOpMode == WISP_MODE)
+		|| (rtl865x_curOpMode == BRIDGE_MODE)) {
+		if ((strcmp(dev->name, "eth1") == 0)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P2_NETIF_NAME) == 0)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P3_NETIF_NAME) == 0)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P0_NETIF_NAME) == 0)
+#if !defined(CONFIG_RTL_IVL_SUPPORT)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P5_NETIF_NAME) == 0)
+#endif
+			)
+			ret = TRUE;
+	}
+#else /* CONFIG_RTL_CPU_TAG */
+	if (rtl865x_curOpMode == GATEWAY_MODE) {
+		if ((strcmp(dev->name, "eth1") == 0)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P0_NETIF_NAME) == 0))
+			ret = TRUE;
+	} else if ((rtl865x_curOpMode == WISP_MODE)
+		|| (rtl865x_curOpMode == BRIDGE_MODE)) {
+		if ((strcmp(dev->name, "eth1") == 0)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P0_NETIF_NAME) == 0)
+#if !defined(CONFIG_RTL_IVL_SUPPORT)
+			|| (strcmp(dev->name, RTL_DRV_LAN_P4_NETIF_NAME) == 0)
+#endif
+			)
+			ret = TRUE;
+	}
+#endif /* CONFIG_RTL_CPU_TAG */
+#else /* CONFIG_RTD_1295_HWNAT */
 	if (rtl865x_curOpMode == GATEWAY_MODE) {
 		if ((strcmp(dev->name, "eth0") == 0)
 			|| (strcmp(dev->name, RTL_DRV_LAN_P1_NETIF_NAME) == 0)
@@ -16200,6 +16902,7 @@ int rtl_is_lan_dev(struct net_device *dev)
 			)
 			ret = TRUE;
 	}
+#endif /* CONFIG_RTD_1295_HWNAT */
 
 	return ret;
 }
@@ -16286,7 +16989,8 @@ int32 rtl865x_changeOpMode(int mode)
 	struct rtl865x_interface_info ifInfo;
 #endif
 
-#if (defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT)) && !defined(CONFIG_RTL_CPU_TAG)
+#if (defined(CONFIG_RTL_8367R_SUPPORT) || defined(CONFIG_RTL_8370_SUPPORT)) && \
+	!defined(CONFIG_RTL_CPU_TAG) && !defined(CONFIG_RTL_2_RGMII_PORTS_ONLY)
 	{
 		extern int RTL83XX_vlan_reinit(int mode);
 
@@ -19538,26 +20242,41 @@ static int rtl865x_stormCtrlReadProc(char *page, char **start, off_t off,
 static int rtl865x_stormCtrlWriteProc(struct file *file, const char *buffer,
 	unsigned long count, void *data)
 {
-	uint32 tmpBuf[32];
+	char tmpBuf[128];
 	uint32 stormCtrlType = MULTICAST_STORM_CONTROL;
 	uint32 enableStormCtrl = FALSE;
 	uint32 percentage = 0;
 	uint32 uintVal;
+	char *strptr = NULL, *tokptr = NULL;
 
-	if (buffer && !copy_from_user(tmpBuf, buffer, count)) {
-		tmpBuf[count - 1] = 0;
-		uintVal = simple_strtol((const char *)tmpBuf, NULL, 0);
-		/* printk("%s(%d),tmpBuf=%s,count=%d,uintVal=%d\n",__FUNCTION__,__LINE__, */
-		/* tmpBuf,count,uintVal);//Added for test */
-		if (uintVal > 100) {
-			enableStormCtrl = FALSE;
-			percentage = 0;
-		} else {
-			enableStormCtrl = TRUE;
-			percentage = uintVal;
+	if (buffer && !copy_from_user(tmpBuf, buffer, count))
+	{
+		tmpBuf[count-1]=0;
+		strptr = tmpBuf;
+		tokptr = strsep(&strptr," ");
+		//uintVal=simple_strtol((const char *)tmpBuf, NULL, 0);
+		//printk("%s(%d),tmpBuf=%s,count=%d,uintVal=%d\n",__FUNCTION__,__LINE__,
+		//	tmpBuf,count,uintVal);//Added for test
+		if(tokptr!=NULL)
+		{
+			uintVal=simple_strtol(tokptr, NULL, 0);
+			tokptr = strsep(&strptr," ");
+			if(tokptr!=NULL)
+				stormCtrlType = simple_strtol(tokptr, NULL, 0);
+
+			if(uintVal>100)
+			{
+				enableStormCtrl=FALSE;
+				percentage=0;
 		}
-		rtl865x_setStormControl(stormCtrlType, enableStormCtrl,
-			percentage);
+			else
+			{
+				enableStormCtrl=TRUE;
+				percentage=uintVal;
+			}
+			printk("type:%d, enable:%d, percent%d\n", stormCtrlType, enableStormCtrl, percentage);
+			rtl865x_setStormControl(stormCtrlType,enableStormCtrl,percentage);
+		}
 		return count;
 	}
 	return -EFAULT;
@@ -19575,7 +20294,7 @@ int32 rtl8651_initStormCtrl(void)
 		stormCtrlProc->write_proc = rtl865x_stormCtrlWriteProc;
 	}
 #endif
-
+	//rtl865x_setStormControl(0x3,TRUE,1);
 	return 0;
 }
 
@@ -21739,6 +22458,9 @@ void rtl819x_save_hw_tables(void)
 	rtl819x_save_hw_arp_table();
 	rtl819x_save_hw_ppp_table();
 	rtl819x_save_inused_route();
+	#if defined(CONFIG_RTL_HARDWARE_IPV6_SUPPORT)
+	rtl819x_save_ipv6_hw_tables();
+	#endif /* CONFIG_RTL_HARDWARE_IPV6_SUPPORT */
 }
 
 void rtl819x_restore_hw_tables(void)
@@ -21749,6 +22471,9 @@ void rtl819x_restore_hw_tables(void)
 	rtl819x_restore_hw_ppp_table();
 	rtl819x_restore_inused_route();
 	rtl819x_restore_hw_arp_table();
+	#if defined(CONFIG_RTL_HARDWARE_IPV6_SUPPORT)
+	rtl819x_restore_ipv6_hw_tables();
+	#endif /* CONFIG_RTL_HARDWARE_IPV6_SUPPORT */
 }
 
 #endif
@@ -22269,10 +22994,10 @@ int rtl865x_reinitSwitchCore(void)
 #endif
 
 #if defined(CONFIG_RTL_8197F)
+#if defined(CONFIG_RTD_1295_HWNAT)
 	REG32(DMA_CR0) =
 		(REG32(DMA_CR0) & ~(LowFifoMark_MASK | HiFifoMark_MASK)) |
-		((0x30 << LowFifoMark_OFFSET) | 0xD7);
-#if defined(CONFIG_RTD_1295_HWNAT)
+		((0x80 << LowFifoMark_OFFSET) | 0xC0);
 	{
 		rtl865xc_tblAsic_aclTable_t tmp_rule;
 		memset(&tmp_rule, 0, sizeof(rtl865xc_tblAsic_aclTable_t));
@@ -22280,9 +23005,12 @@ int rtl865x_reinitSwitchCore(void)
 		_rtl8651_readAsicEntry(TYPE_ACL_RULE_TABLE, 0, &tmp_rule);
 		_rtl8651_forceAddAsicEntry(TYPE_ACL_RULE_TABLE, 0, &tmp_rule);
 	}
-#else /* !defined(CONFIG_RTD_1295_HWNAT) */
+#else /* CONFIG_RTD_1295_HWNAT */
+	REG32(DMA_CR0) =
+		(REG32(DMA_CR0) & ~(LowFifoMark_MASK | HiFifoMark_MASK)) |
+		((0x30 << LowFifoMark_OFFSET) | 0xD7);
 	REG32(0xbb0c0000) = REG32(0xbb0c0000);
-#endif /* !defined(CONFIG_RTD_1295_HWNAT) */
+#endif /* CONFIG_RTD_1295_HWNAT */
 #endif
 
 	/*enable switch core interrupt */
@@ -25439,6 +26167,34 @@ static void rtk_update_netif_vlan_multi_lan_dev(int netif_idx, uint16 vid,
 
 	/* update hw netif table vid , depend on vlanconfig idx */
 #if defined(CONFIG_RTD_1295_HWNAT)
+	#if defined(CONFIG_RTL_CPU_TAG)
+	if (portmask & RTL_LANPORT_MASK_1) {
+		/* avoid exchange port mask, store in the fixed position  */
+		vlanconfig[1].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->id = vid;
+	}
+	if (portmask & RTL_LANPORT_MASK_2) {
+		vlanconfig[2].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->id = vid;
+	}
+	#if 0
+	if (portmask & RTL_LANPORT_MASK_3) {
+		vlanconfig[3].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[3]))->id = vid;
+	}
+	if (portmask & RTL_LANPORT_MASK_0) {
+		vlanconfig[4].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[4]))->id = vid;
+	}
+	#endif
+	#else /* CONFIG_RTL_CPU_TAG */
+	#if defined(CONFIG_RTL_WAN_MAC5)
+	if (portmask & RTL_LANPORT_MASK_5) {
+		/* avoid exchange port mask, store in the fixed position  */
+		vlanconfig[0].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->id = vid;
+	}
+	#else /* CONFIG_RTL_WAN_MAC5 */
 	if (portmask & RTL_LANPORT_MASK_5) {
 		/* avoid exchange port mask, store in the fixed position  */
 		vlanconfig[1].vid = vid;
@@ -25450,6 +26206,8 @@ static void rtk_update_netif_vlan_multi_lan_dev(int netif_idx, uint16 vid,
 		vlanconfig[2].vid = vid;
 		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->id = vid;
 	}
+	#endif /* CONFIG_RTL_WAN_MAC5 */
+	#endif /* CONFIG_RTL_CPU_TAG */
 #else /* defined(CONFIG_RTD_1295_HWNAT) */
 	if (portmask & RTL_LANPORT_MASK_4) {
 		/* avoid exchange port mask, store in the fixed position  */
@@ -25474,6 +26232,31 @@ static void rtk_update_netif_vlan_multi_lan_dev(int netif_idx, uint16 vid,
 static void rtk_update_vlan_multi_lan_dev(uint16 vid, uint32 portmask)
 {
 #if defined(CONFIG_RTD_1295_HWNAT)
+	#if defined(CONFIG_RTL_CPU_TAG)
+	if (portmask & RTL_LANPORT_MASK_1) {
+		/* avoid exchange port mask, store in the fixed position  */
+		vlanconfig[1].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->id = vid;
+	} else if (portmask & RTL_LANPORT_MASK_2) {
+		vlanconfig[2].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->id = vid;
+	#if 0
+	} else if (portmask & RTL_LANPORT_MASK_3) {
+		vlanconfig[3].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[3]))->id = vid;
+	} else if (portmask & RTL_LANPORT_MASK_0) {
+		vlanconfig[4].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[4]))->id = vid;
+	#endif
+	}
+	#else /* CONFIG_RTL_CPU_TAG */
+	#if defined(CONFIG_RTL_WAN_MAC5)
+	if (portmask & RTL_LANPORT_MASK_5) {
+		/* avoid exchange port mask, store in the fixed position  */
+		vlanconfig[0].vid = vid;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->id = vid;
+	}
+	#else /* CONFIG_RTL_WAN_MAC5 */
 	if (portmask & RTL_LANPORT_MASK_5) {
 		/* avoid exchange port mask, store in the fixed position  */
 		vlanconfig[1].vid = vid;
@@ -25484,6 +26267,8 @@ static void rtk_update_vlan_multi_lan_dev(uint16 vid, uint32 portmask)
 		vlanconfig[2].vid = vid;
 		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->id = vid;
 	}
+	#endif /* CONFIG_RTL_WAN_MAC5 */
+	#endif /* CONFIG_RTL_CPU_TAG */
 #else /* defined(CONFIG_RTD_1295_HWNAT) */
 	if (portmask & RTL_LANPORT_MASK_4) {
 		/* avoid exchange port mask, store in the fixed position  */
@@ -28333,6 +29118,11 @@ int rtl_add_Acl_for_out_of_br_subnet(void)
 #endif
 #if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
 #define	IS_MULTICAST(a)		((((long int) (a)) & 0xf0000000) == 0xe0000000)
+#if defined(CONFIG_RTL_MLD_SNOOPING)
+#define	IS_V6_MULTICAST(a)	((((long int) (a)) & 0xff000000) == 0xff000000)
+#define PPP_IPV6_PROTOCOL 0x0057
+#endif
+
 #define PPP_IPV4_PROTOCOL 0x0021
 
 struct iphdr *rtl_get_pppoe_ipv4_hdr(unsigned char *data, int check_from_mac,
@@ -28371,19 +29161,68 @@ struct iphdr *rtl_get_pppoe_ipv4_hdr(unsigned char *data, int check_from_mac,
 	return iph;
 }
 
-int rtl_is_pppoe_igmp_bridge_frame(struct sk_buff *skb, int check_from_mac,
-	unsigned char *dest)
+inline struct ipv6hdr * rtl_get_pppoe_ipv6_hdr(unsigned char *data, int check_from_mac, unsigned short protocol)
+{
+	uint8 *ptr;
+	struct ipv6hdr *ip6h = NULL;
+	int is_pppoe_ipv6 = 0;
+
+	if (check_from_mac == 1) {
+		ptr = data+12;
+
+		if (*(uint16 *)(ptr) == (uint16)htons(ETH_P_8021Q))
+		{
+			ptr=ptr+4;
+		}
+
+		if (*(uint16 *)(ptr) == (uint16)htons(ETH_P_PPP_SES))
+		{
+			ptr = ptr+2+6;
+			if(*(uint16 *)(ptr) == (uint16)htons(PPP_IPV6_PROTOCOL))
+			{
+				ptr = ptr+2;
+				is_pppoe_ipv6=1;
+			}
+		}
+		if(is_pppoe_ipv6)
+			ip6h = (struct ipv6hdr *)ptr;
+	}
+	else if (protocol == htons(ETH_P_PPP_SES))
+	{
+		ptr = data+6;
+		if(*(uint16 *)(ptr) == (uint16)htons(PPP_IPV6_PROTOCOL))
+		{
+			ptr = ptr+2;
+			is_pppoe_ipv6=1;
+		}
+		if(is_pppoe_ipv6)
+			ip6h = (struct ipv6hdr *)ptr;
+	}
+	return ip6h;
+}
+
+inline int rtl_is_pppoe_igmp_bridge_frame(struct sk_buff *skb,int check_from_mac,unsigned char *dest)
 {
 	int ret = 0;
 	struct iphdr *iph = NULL;
 
-	/*jwj: need to check bridge port?? */
-	/* if (rtl865x_curOpMode != BRIDGE_MODE) */
-	/* return 0; */
-	if (check_from_mac && (skb->data[0] & 0x01))
+#if defined(CONFIG_RTL_MLD_SNOOPING)
+	struct ipv6hdr *ipv6h=NULL;
+	int l4_proto = 0;
+#endif
+	/*jwj: need to check bridge port??*/
+	//if (rtl865x_curOpMode != BRIDGE_MODE)
+		//return 0;
+	if (!((*((uint16*)(dest+(ETH_ALEN<<1))) == __constant_htons(ETH_P_PPP_SES))
+		|| (*((uint16*)(dest+(ETH_ALEN<<1)+4)) == __constant_htons(ETH_P_PPP_SES))))
 		return 0;
 
-	if (!check_from_mac && (dest[0] & 0x01))
+	//if(check_from_mac && (dest[0]&0x01))
+	//	return 0;
+
+	//if(!check_from_mac && (dest[0]&0x01))
+		//return 0;
+	if(dest[0]&0x01)
 		return 0;
 
 	iph = rtl_get_pppoe_ipv4_hdr(skb->data, check_from_mac, skb->protocol);
@@ -28397,7 +29236,29 @@ int rtl_is_pppoe_igmp_bridge_frame(struct sk_buff *skb, int check_from_mac,
 		else
 			ret = 0;
 	}
-	/* printk("check_from_mac is %d, ret is %d\n", check_from_mac, ret); */
+
+#if defined(CONFIG_RTL_MLD_SNOOPING)
+	ipv6h = rtl_get_pppoe_ipv6_hdr(skb->data, check_from_mac, skb->protocol);
+	if(ipv6h && IS_V6_MULTICAST(ntohl(ipv6h->daddr.s6_addr32[0])))
+	{
+		l4_proto = re865x_getIpv6TransportProtocol(ipv6h);
+		if(l4_proto==UDP_PROTOCOL)
+			ret = PPPOE_UDPV6;
+		else if(l4_proto==TCP_PROTOCOL)
+			ret = PPPOE_TCPV6;
+		#if 0
+		/*for gateway, mld query from wan will be handle by kernel and mld report without pppoe header
+		  for brdige, mld packets will be forwarded by hw
+		  if mld packets is handled here, unkno
+		  wn packets will be duplicated*/
+		else if(l4_proto==ICMP_PROTOCOL)
+			ret = PPPOE_ICMPV6;
+		#endif
+		else
+			ret = 0;
+	}
+#endif
+
 	return ret;
 }
 #endif

@@ -25,10 +25,14 @@
 #include <linux/usb/otg.h>
 #include <linux/syscalls.h>
 #include <linux/suspend.h>
-#include <soc/realtek/rtd129x_cpu.h>
+#include <soc/realtek/rtk_chip.h>
 
 #include "core.h"
 #include "dwc3-rtk-drd.h"
+
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+#include <linux/usb/class-dual-role.h>
+#endif
 
 #ifdef CONFIG_USB_TYPE_C_RTK_RTS5400
 extern bool rtk_rts5400_is_UFP_attached(void);
@@ -36,13 +40,23 @@ extern bool rtk_rts5400_is_enabled(void);
 extern int rtk_rts5400_set_type_c_soft_reset(void);
 #endif
 
-extern int rtk_usb_type_c_power_on_off(struct device *usb_dev, bool on);
+extern int rtk_usb_manager_is_iso_mode(struct device *usb_dev);
+extern int rtk_usb_manager_schedule_work(struct device *usb_dev,
+	    struct work_struct *work);
+extern int rtk_usb_type_c_init(struct device *type_c_dev);
+extern int rtk_usb_type_c_power_on_off(struct device *type_c_dev, bool on);
+extern int rtk_usb_type_c_plug_config(struct device *type_c_dev,
+	    int dr_mode, int cc);
 
 struct type_c_data {
 	void __iomem *wrap_base;
+	void __iomem *type_c_reg_base;
 	struct device *dev;
 
-	/*GPIO*/
+	enum rtd_chip_id chip_id;
+	enum rtd_chip_revision chip_revision;
+
+	/* rd control GPIO only for rtd129x*/
 	unsigned int rd_ctrl_gpio;
 
 	/*Parameters*/
@@ -66,6 +80,7 @@ struct type_c_data {
 #define EXTERNAL_Rd 0
 	int cc_dfp_mode;
 
+	/* Host/Device mode status */
 	struct dwc3 *dwc;
 	int dwc3_mode; /* define by dwc3 driver, and it is fixed */
 	bool support_drd_mode; /* if support Host/device switch */
@@ -101,37 +116,42 @@ struct type_c_data {
 
 	/* boot time check device mode transfer to host mode*/
 	bool check_at_boot;
+	int boot_check_time;
 	struct delayed_work boot_check_work;
+
+	/* A sw debounce to filter cc signal */
+	bool filter_config_channel_signal;
 
 	bool debug;
 #ifdef CONFIG_DYNAMIC_DEBUG
 	struct dentry		*debug_dir;
 #endif
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+	struct dual_role_phy_instance *drp;
+#endif
 };
 
-// Wrapper register address begin from 0x98013200
-// register USB2 PHY
-#define USB_TMP_reg   0x50
-#define USB_TMP_reg_1 0x54
-#define USB_TMP_reg_2 0x58
-#define USB_TMP_reg_3 0x5c
+// wrapper register offset for USB2 PHY
 #define USB2_PHY_reg  0x70
-// register type c
-#define USB_TYPEC_CTRL_CC1_0 0x14c //0x9801334c
-#define USB_TYPEC_CTRL_CC1_1 0x150 //0x98013350
-#define USB_TYPEC_CTRL_CC2_0 0x154 //0x98013354
-#define USB_TYPEC_CTRL_CC2_1 0x158 //0x98013358
-#define USB_TYPEC_STS        0x15c //0x9801335c
-#define USB_TYPEC_CTRL       0x160 //0x98013360
-#define USB_DBUS_PWR_CTRL    0x164 //0x98013364
+#define USB2_PHY_SWITCH_MASK 0x707
+#define USB2_PHY_SWITCH_DEVICE 0x0
+#define USB2_PHY_SWITCH_HOST 0x606
 
-// USB_TYPEC_CTRL_CC1_0 USB_TYPEC_CTRL_CC2_0
-#define EN_SWITCH BIT(29)
-#define Txout_sel BIT(28)
-#define Rxin_sel BIT(27)
-#define SWITCH_MASK (EN_SWITCH | Txout_sel | Rxin_sel)
-#define enable_cc1 EN_SWITCH
-#define enable_cc2 (EN_SWITCH | Txout_sel | Rxin_sel)
+// Type C register offset
+#define USB_TYPEC_CTRL_CC1_0 0x0
+#define USB_TYPEC_CTRL_CC1_1 0x4
+#define USB_TYPEC_CTRL_CC2_0 0x8
+#define USB_TYPEC_CTRL_CC2_1 0xC
+#define USB_TYPEC_STS        0x10
+#define USB_TYPEC_CTRL       0x14
+#define USB_DBUS_PWR_CTRL    0x18
+
+// Bit mapping USB_TYPEC_CTRL_CC1_0 and USB_TYPEC_CTRL_CC2_0
+#define EN_EXTERNAL_RD BIT(29) /* only for rtd1395 */
+#define enable_cc1 0x1
+#define enable_cc2 0x2
+#define disable_cc 0x0
+
 #define rp4pk_code(val) ((0x1f & val) << 22)
 #define code_rp4pk(val) ((val >> 22) & 0x1f)
 #define rp36k_code(val) ((0x1f & val) << 17)
@@ -152,7 +172,7 @@ struct type_c_data {
 #define CC_MODE_DFP_1_5 0x2
 #define CC_MODE_DFP_3_0 0x3
 
-// USB_TYPEC_CTRL_CC1_1 USB_TYPEC_CTRL_CC2_1
+// Bit mapping USB_TYPEC_CTRL_CC1_1 and USB_TYPEC_CTRL_CC2_1
 #define vref_2p6v(val) ((0x7 & val) << 26)
 #define vref_1p23v(val) ((0xf & val) << 22)
 #define vref_0p8v(val) ((0xf & val) << 18)
@@ -170,7 +190,7 @@ struct type_c_data {
 #define decode_0p2v(val) ((val >> 8) & 0x7)
 #define decode_1_1p6v(val) ((val >> 4) & 0xf)
 #define decode_0_1p6v(val) ((val >> 0) & 0xf)
-// USB_TYPEC_STS
+// Bit mapping USB_TYPEC_STS
 #define det_sts 0x7
 #define cc1_det_sts (det_sts)
 #define cc2_det_sts (det_sts << 3)
@@ -184,7 +204,7 @@ struct type_c_data {
 #define cc2_det_sts_rd (det_sts_rd << 3)
 #define cc2_det_sts_rp (det_sts_rp << 3)
 
-//USB_TYPEC_CTRL
+// Bit mapping USB_TYPEC_CTRL
 #define cc2_int_en BIT(11)
 #define cc1_int_en BIT(10)
 #define cc2_int_sts BIT(9)
@@ -193,124 +213,161 @@ struct type_c_data {
 #define ENABLE_TYPE_C_DETECT (cc1_int_en | cc2_int_en)
 #define all_cc_int_sts (cc1_int_sts | cc2_int_sts)
 
-//Parameter
+// Parameter
 #define DETECT_TIME 50 //ms
 
-static void enable_writel(int value, void __iomem* addr) {
+static void enable_writel(int value, void __iomem *addr)
+{
 	writel(value | readl(addr),  addr);
 }
 
-static void disable_writel(int value, void __iomem* addr) {
+static void disable_writel(int value, void __iomem *addr)
+{
 	writel(~value & readl(addr),  addr);
 }
 
-static void switch_dwc3_mode(struct type_c_data *type_c, int dr_mode) {
+static inline int rtk_type_c_init(struct type_c_data *type_c)
+{
+	dev_info(type_c->dev, "%s\n", __func__);
 
-	if (!type_c->support_drd_mode) {
+	rtk_usb_type_c_init(type_c->dev);
+}
+
+static inline void switch_type_c_plug_config(struct type_c_data *type_c,
+	    int dr_mode, int cc)
+{
+	dev_info(type_c->dev, "%s dr_mode=%d cc=0x%x\n", __func__, dr_mode, cc);
+
+	rtk_usb_type_c_plug_config(type_c->dev, dr_mode, cc);
+}
+
+static void switch_dwc3_mode(struct type_c_data *type_c, int dr_mode)
+{
+	if (!type_c->support_drd_mode)
 		dr_mode = type_c->dwc3_mode;
-	}
+	dev_dbg(type_c->dev, "%s START....", __func__);
 
 	type_c->cur_mode = dr_mode;
+	type_c->dwc->dr_mode = dr_mode;
 
 	switch (dr_mode) {
-		case USB_DR_MODE_PERIPHERAL:
-			dev_info(type_c->dev, "%s dr_mode=USB_DR_MODE_PERIPHERAL\n", __func__);
+	case USB_DR_MODE_PERIPHERAL:
+		dev_info(type_c->dev, "%s dr_mode=USB_DR_MODE_PERIPHERAL\n",
+			    __func__);
 #ifdef CONFIG_USB_RTK_DWC3_DRD_MODE
-			dwc3_drd_to_device(type_c->dwc);
+		dwc3_drd_to_device(type_c->dwc);
 #else
-			dev_err(type_c->dev, "NO add config CONFIG_USB_RTK_DWC3_DRD_MODE");
+		dev_err(type_c->dev, "NO add config CONFIG_USB_RTK_DWC3_DRD_MODE");
 #endif
-			mdelay(10);
-			writel(0x0, type_c->wrap_base + USB2_PHY_reg);
+		mdelay(10);
+		writel(USB2_PHY_SWITCH_DEVICE |
+			    (~USB2_PHY_SWITCH_MASK &
+			    readl(type_c->wrap_base + USB2_PHY_reg)),
+			    type_c->wrap_base + USB2_PHY_reg);
+
 		break;
-		case USB_DR_MODE_HOST:
-			dev_info(type_c->dev, "%s dr_mode=USB_DR_MODE_HOST\n", __func__);
+	case USB_DR_MODE_HOST:
+		dev_info(type_c->dev, "%s dr_mode=USB_DR_MODE_HOST\n", __func__);
 #ifdef CONFIG_USB_RTK_DWC3_DRD_MODE
-			dwc3_drd_to_host(type_c->dwc);
+		dwc3_drd_to_host(type_c->dwc);
 #else
-			dev_err(type_c->dev, "NO add config CONFIG_USB_RTK_DWC3_DRD_MODE");
+		dev_err(type_c->dev, "NO add config CONFIG_USB_RTK_DWC3_DRD_MODE");
 #endif
-			mdelay(10);
-			writel(0x606, type_c->wrap_base + USB2_PHY_reg);
+		mdelay(10);
+		writel(USB2_PHY_SWITCH_HOST |
+			    (~USB2_PHY_SWITCH_MASK &
+			    readl(type_c->wrap_base + USB2_PHY_reg)),
+			    type_c->wrap_base + USB2_PHY_reg);
 		break;
-		default:
-			dev_info(type_c->dev, "%s dr_mode=%d\n", __func__, dr_mode);
-			//mdelay(10);
+	default:
+		dev_info(type_c->dev, "%s dr_mode=%d\n", __func__, dr_mode);
+		//mdelay(10);
 #ifdef CONFIG_USB_RTK_DWC3_DRD_MODE
-			dwc3_drd_to_stop_all(type_c->dwc);
+		dwc3_drd_to_stop_all(type_c->dwc);
 #else
-			dev_err(type_c->dev, "NO add config CONFIG_USB_RTK_DWC3_DRD_MODE");
+		dev_err(type_c->dev, "NO add config CONFIG_USB_RTK_DWC3_DRD_MODE");
 #endif
 	}
+	dev_dbg(type_c->dev, "%s END....", __func__);
 }
 
 /* device attached / detached */
-int device_attached(struct type_c_data *type_c, u32 enable_cc) {
+int device_attached(struct type_c_data *type_c, u32 enable_cc)
+{
 	struct device		*dev = type_c->dev;
+	void __iomem *type_c_reg_base = type_c->type_c_reg_base;
 
 	cancel_delayed_work(&type_c->delayed_work);
 
+	switch_type_c_plug_config(type_c, USB_DR_MODE_HOST, enable_cc);
+
 	switch_dwc3_mode(type_c, USB_DR_MODE_HOST);
 
-	enable_writel(enable_cc, type_c->wrap_base + USB_TYPEC_CTRL_CC1_0);
-
-	dev_info(dev,"%s to enable power\n", __func__);
+	dev_info(dev, "%s to enable power\n", __func__);
 	if (rtk_usb_type_c_power_on_off(dev, true))
 		dev_err(dev, "%s to enable type c power Fail\n", __func__);
 	else
 		dev_dbg(dev, "%s to enable type c power OK\n", __func__);
 
-	enable_writel(ENABLE_TYPE_C_DETECT, type_c->wrap_base + USB_TYPEC_CTRL);
+	enable_writel(ENABLE_TYPE_C_DETECT, type_c_reg_base + USB_TYPEC_CTRL);
 	return 0;
 }
 
-int device_detached(struct type_c_data *type_c) {
+int device_detached(struct type_c_data *type_c)
+{
 	struct device		*dev = type_c->dev;
+	void __iomem *type_c_reg_base = type_c->type_c_reg_base;
 
-	disable_writel(ENABLE_TYPE_C_DETECT, type_c->wrap_base + USB_TYPEC_CTRL);
+	disable_writel(ENABLE_TYPE_C_DETECT, type_c_reg_base + USB_TYPEC_CTRL);
 
-	dev_info(dev,"%s to disable power\n", __func__);
+	dev_info(dev, "%s to disable power\n", __func__);
 	if (rtk_usb_type_c_power_on_off(dev, false))
 		dev_err(dev, "%s to disable type c power Fail\n", __func__);
 	else
 		dev_dbg(dev, "%s to disable type c power OK\n", __func__);
 
-	disable_writel(SWITCH_MASK, type_c->wrap_base + USB_TYPEC_CTRL_CC1_0);
+	switch_type_c_plug_config(type_c, 0, disable_cc);
 
 	msleep(1000);
 
 	switch_dwc3_mode(type_c, 0);
 
-	dev_dbg(dev,"%s start new schedule_delayed_work\n", __func__);
-	schedule_delayed_work(&type_c->delayed_work, msecs_to_jiffies(DETECT_TIME));
-	dev_dbg(dev,"%s ok new schedule_delayed_work\n", __func__);
+	dev_dbg(dev, "%s start new schedule_delayed_work\n", __func__);
+	schedule_delayed_work(&type_c->delayed_work,
+			msecs_to_jiffies(DETECT_TIME));
+	dev_dbg(dev, "%s ok new schedule_delayed_work\n", __func__);
 
 	return 0;
 }
 
 /* host connect /disconnect*/
-int host_connected(struct type_c_data *type_c, u32 enable_cc) {
+int host_connected(struct type_c_data *type_c, u32 enable_cc)
+{
 	struct device		*dev = type_c->dev;
+	void __iomem *type_c_reg_base = type_c->type_c_reg_base;
 
-	dev_info(dev,"%s: a Host connect\n", __func__);
+	dev_info(dev, "%s: a Host connect\n", __func__);
 
 	cancel_delayed_work(&type_c->delayed_work);
 
+	switch_type_c_plug_config(type_c, USB_DR_MODE_PERIPHERAL, enable_cc);
+
 	switch_dwc3_mode(type_c, USB_DR_MODE_PERIPHERAL);
 
-	enable_writel(enable_cc, type_c->wrap_base + USB_TYPEC_CTRL_CC1_0);
-
-	enable_writel(ENABLE_TYPE_C_DETECT, type_c->wrap_base + USB_TYPEC_CTRL);
+	enable_writel(ENABLE_TYPE_C_DETECT, type_c_reg_base + USB_TYPEC_CTRL);
 	return 0;
 }
 
-int host_disconnected(struct type_c_data *type_c) {
+int host_disconnected(struct type_c_data *type_c)
+{
 	struct device		*dev = type_c->dev;
-	dev_info(dev,"%s: a Host disconnect\n", __func__);
+	void __iomem *type_c_reg_base = type_c->type_c_reg_base;
 
-	disable_writel(ENABLE_TYPE_C_DETECT, type_c->wrap_base + USB_TYPEC_CTRL);
+	dev_info(dev, "%s: a Host disconnect\n", __func__);
 
-	disable_writel(SWITCH_MASK, type_c->wrap_base + USB_TYPEC_CTRL_CC1_0);
+	disable_writel(ENABLE_TYPE_C_DETECT, type_c_reg_base + USB_TYPEC_CTRL);
+
+	switch_type_c_plug_config(type_c, 0, disable_cc);
 
 	msleep(1000);
 
@@ -322,19 +379,20 @@ int host_disconnected(struct type_c_data *type_c) {
 }
 
 /* detect host device switch */
-static int detect_device(struct type_c_data *type_c) {
+static int detect_device(struct type_c_data *type_c)
+{
 	struct device		*dev = type_c->dev;
-	struct device_node	*node = dev->of_node;
-	void __iomem 		*wrap_base = type_c->wrap_base;
+	//struct device_node	*node = dev->of_node;
+	void __iomem *type_c_reg_base = type_c->type_c_reg_base;
 	unsigned int gpio = type_c->rd_ctrl_gpio;
 	u32 cc1_config, cc2_config, default_ctrl;
 	int cc_mode_sel = type_c->cc_dfp_mode;
 
-	default_ctrl = readl(wrap_base + USB_TYPEC_CTRL) & debounce_time_MASK;
-	writel(default_ctrl, wrap_base + USB_TYPEC_CTRL);
+	default_ctrl = readl(type_c_reg_base + USB_TYPEC_CTRL) & debounce_time_MASK;
+	writel(default_ctrl, type_c_reg_base + USB_TYPEC_CTRL);
 
-	disable_writel(En_cc_det, wrap_base + USB_TYPEC_CTRL_CC1_0);
-	disable_writel(En_cc_det, wrap_base + USB_TYPEC_CTRL_CC2_0);
+	disable_writel(En_cc_det, type_c_reg_base + USB_TYPEC_CTRL_CC1_0);
+	disable_writel(En_cc_det, type_c_reg_base + USB_TYPEC_CTRL_CC2_0);
 
 	if (gpio != -1 && gpio_is_valid(gpio)) {
 		if (gpio_direction_output(gpio, 1))
@@ -342,63 +400,69 @@ static int detect_device(struct type_c_data *type_c) {
 	}
 
 	switch (cc_mode_sel) {
-		case CC_MODE_DFP_USB:
-		writel(type_c->cc1_vref_dfp_usb, wrap_base + USB_TYPEC_CTRL_CC1_1);
-		writel(type_c->cc2_vref_dfp_usb, wrap_base + USB_TYPEC_CTRL_CC2_1);
+	case CC_MODE_DFP_USB:
+		writel(type_c->cc1_vref_dfp_usb, type_c_reg_base + USB_TYPEC_CTRL_CC1_1);
+		writel(type_c->cc2_vref_dfp_usb, type_c_reg_base + USB_TYPEC_CTRL_CC2_1);
 		break;
-		case CC_MODE_DFP_1_5:
-		writel(type_c->cc1_vref_dfp_1_5, wrap_base + USB_TYPEC_CTRL_CC1_1);
-		writel(type_c->cc2_vref_dfp_1_5, wrap_base + USB_TYPEC_CTRL_CC2_1);
+	case CC_MODE_DFP_1_5:
+		writel(type_c->cc1_vref_dfp_1_5, type_c_reg_base + USB_TYPEC_CTRL_CC1_1);
+		writel(type_c->cc2_vref_dfp_1_5, type_c_reg_base + USB_TYPEC_CTRL_CC2_1);
 		break;
-		case CC_MODE_DFP_3_0:
-		writel(type_c->cc1_vref_dfp_3_0, wrap_base + USB_TYPEC_CTRL_CC1_1);
-		writel(type_c->cc2_vref_dfp_3_0, wrap_base + USB_TYPEC_CTRL_CC2_1);
+	case CC_MODE_DFP_3_0:
+		writel(type_c->cc1_vref_dfp_3_0, type_c_reg_base + USB_TYPEC_CTRL_CC1_1);
+		writel(type_c->cc2_vref_dfp_3_0, type_c_reg_base + USB_TYPEC_CTRL_CC2_1);
 		break;
-		default:
+	default:
 		dev_err(dev, "%s ERROR cc_mode_sel=%d\n", __func__, cc_mode_sel);
 		break;
 	}
 	cc1_config = type_c->cc1_rp | type_c->cc1_rp_code | cc_mode(cc_mode_sel);
 	cc2_config = type_c->cc2_rp | type_c->cc2_rp_code | cc_mode(cc_mode_sel);
 
-	writel(cc1_config, wrap_base + USB_TYPEC_CTRL_CC1_0);
-	writel(cc2_config, wrap_base + USB_TYPEC_CTRL_CC2_0);
+	writel(cc1_config, type_c_reg_base + USB_TYPEC_CTRL_CC1_0);
+	writel(cc2_config, type_c_reg_base + USB_TYPEC_CTRL_CC2_0);
 
 	wmb();
 
-	mdelay(1);
-	enable_writel(En_cc_det, wrap_base + USB_TYPEC_CTRL_CC1_0);
-	enable_writel(En_cc_det, wrap_base + USB_TYPEC_CTRL_CC2_0);
+	enable_writel(En_cc_det, type_c_reg_base + USB_TYPEC_CTRL_CC1_0);
+	enable_writel(En_cc_det, type_c_reg_base + USB_TYPEC_CTRL_CC2_0);
 
 	return 0;
 }
 
-static int detect_host(struct type_c_data *type_c) {
+static int detect_host(struct type_c_data *type_c)
+{
 	struct device		*dev = type_c->dev;
-	struct device_node	*node = dev->of_node;
-	void __iomem 		*wrap_base = type_c->wrap_base;
+	//struct device_node	*node = dev->of_node;
+	void __iomem *type_c_reg_base = type_c->type_c_reg_base;
 	unsigned int gpio = type_c->rd_ctrl_gpio;
 	u32 cc1_config, cc2_config, default_ctrl;
 	u32 cc_rd = En_rd;
 
-	if (/*type_c->check_at_boot || */(type_c->rd_config == EXTERNAL_Rd)) {
-		cc_rd = 0;
+	if (type_c->check_at_boot || (type_c->rd_config == EXTERNAL_Rd)) {
+		if ((type_c->chip_id & 0xFFF0) == CHIP_ID_RTD129X) {
+			cc_rd = 0;
+		} else if ((type_c->chip_id & 0xFFF0) == CHIP_ID_RTD139X) {
+			dev_info(dev, "%s external Rd is build on chip RTD%x, "
+				    "set EN_EXTERNAL_RD Bit 29\n", __func__, type_c->chip_id);
+			cc_rd = EN_EXTERNAL_RD;
+		}
 	}
 
-	default_ctrl = readl(wrap_base + USB_TYPEC_CTRL) & debounce_time_MASK;
-	writel(default_ctrl, wrap_base + USB_TYPEC_CTRL);
+	default_ctrl = readl(type_c_reg_base + USB_TYPEC_CTRL) & debounce_time_MASK;
+	writel(default_ctrl, type_c_reg_base + USB_TYPEC_CTRL);
 
-	disable_writel(En_cc_det, wrap_base + USB_TYPEC_CTRL_CC1_0);
-	disable_writel(En_cc_det, wrap_base + USB_TYPEC_CTRL_CC2_0);
+	disable_writel(En_cc_det, type_c_reg_base + USB_TYPEC_CTRL_CC1_0);
+	disable_writel(En_cc_det, type_c_reg_base + USB_TYPEC_CTRL_CC2_0);
 
-	writel(type_c->cc1_vref_ufp, wrap_base + USB_TYPEC_CTRL_CC1_1);
-	writel(type_c->cc2_vref_ufp, wrap_base + USB_TYPEC_CTRL_CC2_1);
+	writel(type_c->cc1_vref_ufp, type_c_reg_base + USB_TYPEC_CTRL_CC1_1);
+	writel(type_c->cc2_vref_ufp, type_c_reg_base + USB_TYPEC_CTRL_CC2_1);
 
 	cc1_config = cc_rd | type_c->cc1_rd_code | cc_mode(CC_MODE_UFP);
 	cc2_config = cc_rd | type_c->cc2_rd_code | cc_mode(CC_MODE_UFP);
 
-	writel(cc1_config, wrap_base + USB_TYPEC_CTRL_CC1_0);
-	writel(cc2_config, wrap_base + USB_TYPEC_CTRL_CC2_0);
+	writel(cc1_config, type_c_reg_base + USB_TYPEC_CTRL_CC1_0);
+	writel(cc2_config, type_c_reg_base + USB_TYPEC_CTRL_CC2_0);
 
 	if (cc_rd && gpio != -1 && gpio_is_valid(gpio)) {
 		// use internal Rd
@@ -411,45 +475,45 @@ static int detect_host(struct type_c_data *type_c) {
 	}
 	wmb();
 
-	mdelay(1);
-	enable_writel(En_cc_det, wrap_base + USB_TYPEC_CTRL_CC1_0);
-	mdelay(2); // add a delay to avoid error cc2 interrupt on cc_status=0x0
-	enable_writel(En_cc_det, wrap_base + USB_TYPEC_CTRL_CC2_0);
-	mdelay(1); // add a delay to avoid error cc2 interrupt on cc_status=0x0
+	enable_writel(En_cc_det, type_c_reg_base + USB_TYPEC_CTRL_CC1_0);
+	enable_writel(En_cc_det, type_c_reg_base + USB_TYPEC_CTRL_CC2_0);
 
 	return 0;
 }
 
-int host_device_switch_detection(struct type_c_data *type_c) {
+int host_device_switch_detection(struct type_c_data *type_c)
+{
 	struct device		*dev = type_c->dev;
 	int ret = 0;
 	unsigned long		flags;
 
-	spin_lock_irqsave(&type_c->lock, flags);
-	if (type_c->debug) dev_dbg(dev, "ENTER  %s", __func__);
+	if (type_c->debug)
+		dev_dbg(dev, "ENTER %s", __func__);
 	if (type_c->in_host_mode) {
 		type_c->in_host_mode = IN_DEVICE_MODE;
 		detect_host(type_c);
-		if (type_c->debug) dev_dbg(dev, "Now device mode $$$$$$$$$$$$$$$$$$$$$$$");
+		if (type_c->debug)
+			dev_dbg(dev, "Now device mode $$$$");
 	} else {
 		type_c->in_host_mode = IN_HOST_MODE;
 		detect_device(type_c);
-		if (type_c->debug) dev_dbg(dev, "Now host mode   #######################");
+		if (type_c->debug)
+			dev_dbg(dev, "Now host mode   ####");
 	}
-	spin_unlock_irqrestore(&type_c->lock, flags);
 
 	return ret;
 }
 
-int detect_type_c_state(struct type_c_data *type_c) {
+int detect_type_c_state(struct type_c_data *type_c)
+{
 	struct device *dev = type_c->dev;
 	u32 int_status, cc_status, cc_status_check;
 	unsigned long		flags;
 
 	spin_lock_irqsave(&type_c->lock, flags);
 
-	int_status = readl(type_c->wrap_base + USB_TYPEC_CTRL);
-	cc_status = readl(type_c->wrap_base + USB_TYPEC_STS);
+	int_status = readl(type_c->type_c_reg_base + USB_TYPEC_CTRL);
+	cc_status = readl(type_c->type_c_reg_base + USB_TYPEC_STS);
 
 	type_c->connect_change = CONNECT_NO_CHANGE;
 
@@ -457,18 +521,22 @@ int detect_type_c_state(struct type_c_data *type_c) {
 	case IN_HOST_MODE:
 		switch (type_c->is_attach) {
 		case IN_ATTACH:
-			if (((cc_status & cc1_det_sts) == cc1_det_sts) && (type_c->at_cc1 == AT_CC1)) {
-				dev_dbg(dev,"IN host mode and cc1 device detach (cc_status=0x%x)", cc_status);
+			if (((cc_status & cc1_det_sts) == cc1_det_sts) &&
+				    (type_c->at_cc1 == AT_CC1)) {
+				dev_dbg(dev, "IN host mode and cc1 device detach "
+					    "(cc_status=0x%x)", cc_status);
 				type_c->is_attach = TO_DETACH;
 				type_c->connect_change = CONNECT_CHANGE;
-			} else if (((cc_status & cc2_det_sts) == cc2_det_sts) && (type_c->at_cc1 == AT_CC2)) {
-				dev_dbg(dev,"IN host mode and cc2 device detach (cc_status=0x%x)", cc_status);
+			} else if (((cc_status & cc2_det_sts) == cc2_det_sts) &&
+				    (type_c->at_cc1 == AT_CC2)) {
+				dev_dbg(dev, "IN host mode and cc2 device detach "
+				    "(cc_status=0x%x)", cc_status);
 				type_c->is_attach = TO_DETACH;
 				type_c->connect_change = CONNECT_CHANGE;
 			}
 		break;
 		case IN_DETACH:
-			cc_status_check = readl(type_c->wrap_base + USB_TYPEC_STS);
+			cc_status_check = readl(type_c->type_c_reg_base + USB_TYPEC_STS);
 			if (cc_status_check != (cc1_det_sts | cc2_det_sts)) {
 				if (in_interrupt()) {
 					mdelay(300);
@@ -477,44 +545,75 @@ int detect_type_c_state(struct type_c_data *type_c) {
 					msleep(300);
 					spin_lock_irqsave(&type_c->lock, flags);
 				}
-				cc_status_check = readl(type_c->wrap_base + USB_TYPEC_STS);
+				cc_status_check = readl(type_c->type_c_reg_base + USB_TYPEC_STS);
 			}
 			if (cc_status != cc_status_check) {
-				dev_warn(dev, "IN_HOST_MODE: cc_status (0x%x) != cc_status_check (0x%x)\n", cc_status, cc_status_check);
-				cc_status = readl(type_c->wrap_base + USB_TYPEC_STS);
+				dev_warn(dev, "IN_HOST_MODE: cc_status (0x%x) != "
+					    "cc_status_check (0x%x)\n",
+					    cc_status, cc_status_check);
+				cc_status = readl(type_c->type_c_reg_base + USB_TYPEC_STS);
 			}
 
 			if ((cc_status & cc1_det_sts) == cc1_det_sts_rd) {
-				dev_dbg(dev,"IN host mode and cc1 device attach (cc_status=0x%x)", cc_status);
+				dev_dbg(dev, "IN host mode and cc1 device attach "
+					    "(cc_status=0x%x)", cc_status);
 				type_c->is_attach = TO_ATTACH;
 				type_c->at_cc1 = AT_CC1;
 				type_c->connect_change = CONNECT_CHANGE;
 			} else if ((cc_status & cc2_det_sts) == cc2_det_sts_rd) {
-				dev_dbg(dev,"In host mode and cc2 device attach (cc_status=0x%x)", cc_status);
+				dev_dbg(dev, "In host mode and cc2 device attach "
+					    "(cc_status=0x%x)", cc_status);
 				type_c->is_attach = TO_ATTACH;
 				type_c->at_cc1 = AT_CC2;
 				type_c->connect_change = CONNECT_CHANGE;
 			}
 		break;
 		default:
-			dev_err(dev,"IN host_mode and error attach state (is_attach=%d)", type_c->is_attach);
+			dev_err(dev, "IN host_mode and error attach state (is_attach=%d)",
+				    type_c->is_attach);
 		}
 	break;
 	case IN_DEVICE_MODE:
 		switch (type_c->is_attach) {
 		case IN_ATTACH:
-			if ((cc_status & cc1_det_sts) < cc1_det_sts_rp && type_c->at_cc1 == AT_CC1) {
-				dev_dbg(dev,"IN device mode and cc1 host disconnect (cc_status=0x%x)", cc_status);
+			if (type_c->filter_config_channel_signal &&
+				    ((cc_status & cc1_det_sts) < cc1_det_sts_rp ||
+				     (cc_status & cc2_det_sts) < cc2_det_sts_rp)) {
+				/* Add a sw debounce to filter cc signal sent
+				   from apple pd adapter */
+				if (in_interrupt()) {
+					mdelay(5);
+				} else {
+					spin_unlock_irqrestore(&type_c->lock, flags);
+					msleep(5);
+					spin_lock_irqsave(&type_c->lock, flags);
+				}
+				cc_status_check = readl(type_c->type_c_reg_base + USB_TYPEC_STS);
+
+				if (cc_status != cc_status_check) {
+					dev_dbg(dev, "IN_DEVICE_MODE: cc_status (0x%x) != "
+						    "cc_status_check (0x%x) maybe use a pd adapter\n",
+						    cc_status, cc_status_check);
+					cc_status = cc_status_check;
+				}
+			}
+
+			if ((cc_status & cc1_det_sts) < cc1_det_sts_rp &&
+				    type_c->at_cc1 == AT_CC1) {
+				dev_dbg(dev,"IN device mode and cc1 host disconnect "
+					    "(cc_status=0x%x)", cc_status);
 				type_c->is_attach = TO_DETACH;
 				type_c->connect_change = CONNECT_CHANGE;
-			} else if ((cc_status & cc2_det_sts) < cc2_det_sts_rp && type_c->at_cc1 == AT_CC2) {
-				dev_dbg(dev,"IN device mode and cc2 host connect (cc_status=0x%x)", cc_status);
+			} else if ((cc_status & cc2_det_sts) < cc2_det_sts_rp &&
+				    type_c->at_cc1 == AT_CC2) {
+				dev_dbg(dev,"IN device mode and cc2 host connect "
+					    "(cc_status=0x%x)", cc_status);
 				type_c->is_attach = TO_DETACH;
 				type_c->connect_change = CONNECT_CHANGE;
 			}
 		break;
 		case IN_DETACH:
-			cc_status_check = readl(type_c->wrap_base + USB_TYPEC_STS);
+			cc_status_check = readl(type_c->type_c_reg_base + USB_TYPEC_STS);
 			if (cc_status_check != 0x0) {
 				if (in_interrupt()) {
 					mdelay(300);
@@ -523,31 +622,37 @@ int detect_type_c_state(struct type_c_data *type_c) {
 					msleep(300);
 					spin_lock_irqsave(&type_c->lock, flags);
 				}
-				cc_status_check = readl(type_c->wrap_base + USB_TYPEC_STS);
+				cc_status_check = readl(type_c->type_c_reg_base + USB_TYPEC_STS);
 			}
 			if (cc_status != cc_status_check) {
-				dev_warn(dev, "IN_DEVICE_MODE: cc_status (0x%x) != cc_status_check (0x%x)\n", cc_status, cc_status_check);
-				cc_status = readl(type_c->wrap_base + USB_TYPEC_STS);
+				dev_warn(dev, "IN_DEVICE_MODE: cc_status (0x%x) != "
+					    "cc_status_check (0x%x)\n",
+					    cc_status, cc_status_check);
+				cc_status = readl(type_c->type_c_reg_base + USB_TYPEC_STS);
 			}
 
 			if ((cc_status & cc1_det_sts) >= cc1_det_sts_rp) {
-				dev_dbg(dev,"IN device mode and cc1 host connect (cc_status=0x%x)", cc_status);
+				dev_dbg(dev,"IN device mode and cc1 host connect "
+					    "(cc_status=0x%x)", cc_status);
 				type_c->at_cc1 = AT_CC1;
 				type_c->is_attach = TO_ATTACH;
 				type_c->connect_change = CONNECT_CHANGE;
 			} else if ((cc_status & cc2_det_sts) >= cc2_det_sts_rp) {
-				dev_dbg(dev,"IN device mode and cc2 host connect (cc_status=0x%x)", cc_status);
+				dev_dbg(dev,"IN device mode and cc2 host connect "
+					    "(cc_status=0x%x)", cc_status);
 				type_c->at_cc1 = AT_CC2;
 				type_c->is_attach = TO_ATTACH;
 				type_c->connect_change = CONNECT_CHANGE;
 			}
 		break;
 		default:
-			dev_err(dev,"IN device_mode and error attach state (is_attach=%d)", type_c->is_attach);
+			dev_err(dev, "IN device_mode and error attach state (is_attach=%d)",
+				    type_c->is_attach);
 		}
 	break;
 	default:
-		dev_err(dev,"error host or device mode (in_host_mode=%d)", type_c->in_host_mode);
+		dev_err(dev, "error host or device mode (in_host_mode=%d)",
+			    type_c->in_host_mode);
 	}
 
 	type_c->int_status = int_status;
@@ -557,8 +662,10 @@ int detect_type_c_state(struct type_c_data *type_c) {
 	return 0;
 }
 
-void host_device_switch(struct work_struct *work) {
-	struct type_c_data *type_c = container_of(work, struct type_c_data, delayed_work.work);
+void host_device_switch(struct work_struct *work)
+{
+	struct type_c_data *type_c = container_of(work,
+		    struct type_c_data, delayed_work.work);
 	struct device		*dev = type_c->dev;
 	unsigned long		flags;
 	int connect_change = 0;
@@ -568,11 +675,13 @@ void host_device_switch(struct work_struct *work) {
 
 	if (type_c->debug) dev_dbg(type_c->dev, "ENTER %s", __func__);
 
-	if (type_c->is_attach == IN_DETACH && !type_c->connect_change) {
-		if (type_c->support_drd_mode)
-			host_device_switch_detection(type_c);
+	spin_lock_irqsave(&type_c->lock, flags);
+	if (type_c->connect_change)
+		connect_change = type_c->connect_change;
+	spin_unlock_irqrestore(&type_c->lock, flags);
+
+	if (!connect_change)
 		detect_type_c_state(type_c);
-	}
 
 	spin_lock_irqsave(&type_c->lock, flags);
 	if (type_c->connect_change) {
@@ -583,9 +692,12 @@ void host_device_switch(struct work_struct *work) {
 		type_c->connect_change = CONNECT_NO_CHANGE;
 		type_c->is_role_swap = NO_ROLE_SWAP;
 	} else {
-		schedule_delayed_work(&type_c->delayed_work, msecs_to_jiffies(DETECT_TIME));
-	}
+		if (type_c->support_drd_mode)
+			host_device_switch_detection(type_c);
 
+		schedule_delayed_work(&type_c->delayed_work,
+			    msecs_to_jiffies(DETECT_TIME));
+	}
 	spin_unlock_irqrestore(&type_c->lock, flags);
 
 	if (connect_change) {
@@ -595,9 +707,11 @@ void host_device_switch(struct work_struct *work) {
 				&& rtk_rts5400_is_enabled()
 				&& rtk_rts5400_is_UFP_attached()) {
 			u32 enable_cc = at_cc1?enable_cc1:enable_cc2;
-			dev_info(dev, "%s: In Device mode, role swap to Host mode\n", __func__);
+			dev_info(dev, "%s: In Device mode, role swap to Host mode\n",
+				    __func__);
+			switch_type_c_plug_config(type_c, USB_DR_MODE_HOST, enable_cc);
 			switch_dwc3_mode(type_c, USB_DR_MODE_HOST);
-			enable_writel(enable_cc, type_c->wrap_base + USB_TYPEC_CTRL_CC1_0);
+
 			rtk_rts5400_set_type_c_soft_reset();
 
 			type_c->check_at_boot = false;
@@ -618,12 +732,14 @@ void host_device_switch(struct work_struct *work) {
 			else
 				host_disconnected(type_c);
 		}
-		dev_err(dev, "Connection change OK: IN %s mode to %s %s at %s (cc_status=0x%x)\n",
-				in_host_mode?"host":"device",
-				in_host_mode?
-					(is_attach?"attach":"detach"):
-					(is_attach?"connect":"disconnect"),
-				in_host_mode?"device":"host", at_cc1?"cc1":"cc2", type_c->cc_status);
+		dev_err(dev, "Connection change OK: IN %s mode to %s %s at %s "
+			    "(cc_status=0x%x)\n",
+			    in_host_mode?"host":"device",
+			    in_host_mode?
+			        (is_attach?"attach":"detach"):
+			        (is_attach?"connect":"disconnect"),
+			    in_host_mode?"device":"host",
+			    at_cc1?"cc1":"cc2", type_c->cc_status);
 
 	}
 
@@ -633,8 +749,10 @@ void host_device_switch(struct work_struct *work) {
 	if (type_c->check_at_boot) {
 		if (type_c->support_drd_mode && connect_change &&
 			(in_host_mode == IN_DEVICE_MODE) && is_attach) {
-			dev_info(dev, "%s: In Device mode check connection at boot time\n", __func__);
-			schedule_delayed_work(&type_c->boot_check_work, msecs_to_jiffies(10000));
+			dev_info(dev, "%s: In Device mode check connection at boot time\n",
+				    __func__);
+			schedule_delayed_work(&type_c->boot_check_work,
+				    msecs_to_jiffies(type_c->boot_check_time));
 		}
 		type_c->check_at_boot = false;
 	}
@@ -701,11 +819,18 @@ static int host_device_role_swap(struct type_c_data *type_c, bool swap_role)
 			     default: tmp = "USB_DR_MODE_UNKNOWN"; break;
 			    } tmp;}));
 
-		disable_writel(SWITCH_MASK, type_c->wrap_base + USB_TYPEC_CTRL_CC1_0);
+		switch_type_c_plug_config(type_c, 0, disable_cc);
 		mdelay(100);
+		switch_type_c_plug_config(type_c, swap_to_xx_mode, enable_cc);
 		switch_dwc3_mode(type_c, swap_to_xx_mode);
-		enable_writel(enable_cc, type_c->wrap_base + USB_TYPEC_CTRL_CC1_0);
 
+		if (swap_to_xx_mode == USB_DR_MODE_HOST) {
+			bool on = true;
+			rtk_usb_type_c_power_on_off(type_c->dev, on);
+		} else if (swap_to_xx_mode == USB_DR_MODE_PERIPHERAL) {
+			bool off = false;
+			rtk_usb_type_c_power_on_off(type_c->dev, off);
+		}
 		type_c->is_role_swap = (swap_role == TO_SWAP_ROLE?
 			    ROLE_SWAP: NO_ROLE_SWAP);
 	} else {
@@ -715,8 +840,10 @@ static int host_device_role_swap(struct type_c_data *type_c, bool swap_role)
 	return ret;
 }
 
-void boot_time_check(struct work_struct *work) {
-	struct type_c_data *type_c = container_of(work, struct type_c_data, boot_check_work.work);
+static void boot_time_check(struct work_struct *work)
+{
+	struct type_c_data *type_c = container_of(work,
+		    struct type_c_data, boot_check_work.work);
 	struct device		*dev = type_c->dev;
 	int at_cc1, in_host_mode, is_attach;
 	unsigned long		flags;
@@ -734,66 +861,74 @@ void boot_time_check(struct work_struct *work) {
 		int no_host_connect = 0;
 		int no_run_gadget = 0;
 		u32 enable_cc = at_cc1?enable_cc1:enable_cc2;
-		void __iomem *dwc3_dsts_addr = ioremap(0x9802870c, 0x4);
-		void __iomem *dwc3_dctl_addr = ioremap(0x98028704, 0x4);
+		u32 dsts = dwc3_readl(type_c->dwc->regs, DWC3_DSTS);
+		u32 dctl = dwc3_readl(type_c->dwc->regs, DWC3_DCTL);
+
 		dev_info(dev, "%s: Device mode check DSTS=%x DCTL=%x\n", __func__,
-				readl(dwc3_dsts_addr), readl(dwc3_dctl_addr));
-		no_host_connect = (readl(dwc3_dsts_addr) & 0x0003FFF8) == BIT(17);
-		no_run_gadget = (readl(dwc3_dctl_addr) & BIT(31)) == 0x0;
+				dsts, dctl);
+		no_host_connect = (dsts & 0x0003FFF8) == BIT(17);
+		no_run_gadget = (dctl & BIT(31)) == 0x0;
 		if (no_host_connect || no_run_gadget) {
-#if 1
-			dev_info(dev, "%s: In Device mode, NO host connect at boot time"
-				    " switch to Host mode\n",
-				    __func__);
+			dev_info(dev, "%s: In Device mode, NO host connect at boot time "
+				    "(After %dms), switch to Host mode\n",
+				    __func__, type_c->boot_check_time);
 
 			host_device_role_swap(type_c, TO_SWAP_ROLE);
-#else
-			disable_writel(SWITCH_MASK, type_c->wrap_base + USB_TYPEC_CTRL_CC1_0);
-			mdelay(100);
-			dev_info(dev, "%s: In Device mode, NO host connect at boot time, switch to Host mode\n", __func__);
-			switch_dwc3_mode(type_c, USB_DR_MODE_HOST);
-			enable_writel(enable_cc, type_c->wrap_base + USB_TYPEC_CTRL_CC1_0);
-#endif
 		}
-		__iounmap(dwc3_dsts_addr);
-		__iounmap(dwc3_dctl_addr);
 	}
 }
 
-irqreturn_t type_c_detect_irq(int irq, void *__data) {
+irqreturn_t type_c_detect_irq(int irq, void *__data)
+{
 	struct type_c_data 	*type_c = (struct type_c_data *) __data;
 	struct device 		*dev = type_c->dev;
 	unsigned long		flags;
-	u32 int_status, cc_status;
+	//u32 int_status, cc_status;
 
 	detect_type_c_state(type_c);
 
 	spin_lock_irqsave(&type_c->lock, flags);
+
 	if (type_c->connect_change) {
-		dev_info(dev, "%s: IN %s mode to %s %s (at %s interrupt) int_status=0x%x, cc_status=0x%x",
-			__func__,
-			type_c->in_host_mode?"host":"device",
-			type_c->in_host_mode?
-				(type_c->is_attach?"attach":"detach"):
-				(type_c->is_attach?"connect":"disconnect"),
-			type_c->in_host_mode?"device":"host",
-			type_c->at_cc1?"cc1":"cc2", type_c->int_status, type_c->cc_status);
+		dev_info(dev, "%s: IN %s mode to %s %s (at %s interrupt) "
+			    "int_status=0x%x, cc_status=0x%x",
+			    __func__,
+			    type_c->in_host_mode?"host":"device",
+			    type_c->in_host_mode?
+			        (type_c->is_attach?"attach":"detach"):
+			        (type_c->is_attach?"connect":"disconnect"),
+			    type_c->in_host_mode?"device":"host",
+			    type_c->at_cc1?"cc1":"cc2",
+			    type_c->int_status, type_c->cc_status);
 
 		//clear interrupt status
-		disable_writel(all_cc_int_sts, type_c->wrap_base + USB_TYPEC_CTRL);
+		disable_writel(all_cc_int_sts,
+			    type_c->type_c_reg_base + USB_TYPEC_CTRL);
 
 		cancel_delayed_work(&type_c->delayed_work);
 		schedule_delayed_work(&type_c->delayed_work, msecs_to_jiffies(0));
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+		if (type_c->drp)
+			dual_role_instance_changed(type_c->drp);
+#endif
 	} else {
-		dev_info(dev, "%s: ###NO change### Status: IN %s mode %s %s "
-			    "(at %s interrupt) int_status=0x%x, cc_status=0x%x",
-			__func__,
-			type_c->in_host_mode?"host":"device",
-			type_c->in_host_mode?
-				(type_c->is_attach?"attach":"detach"):
-				(type_c->is_attach?"connect":"disconnect"),
-			type_c->in_host_mode?"device":"host",
-			type_c->at_cc1?"cc1":"cc2", type_c->int_status, type_c->cc_status);
+		static int local_count = 0;
+		if (local_count++ > 10) {
+			//clear interrupt status
+			disable_writel(all_cc_int_sts,
+			    type_c->type_c_reg_base + USB_TYPEC_CTRL);
+			local_count = 0;
+		}
+		if (type_c->debug)
+			dev_dbg(dev, "%s: ###NO change### Status: IN %s mode %s %s "
+				    "(at %s interrupt) int_status=0x%x, cc_status=0x%x",
+				__func__,
+				type_c->in_host_mode?"host":"device",
+				type_c->in_host_mode?
+					(type_c->is_attach?"attach":"detach"):
+					(type_c->is_attach?"connect":"disconnect"),
+				type_c->in_host_mode?"device":"host",
+				type_c->at_cc1?"cc1":"cc2", type_c->int_status, type_c->cc_status);
 	}
 
 	spin_unlock_irqrestore(&type_c->lock, flags);
@@ -860,76 +995,87 @@ static int type_c_parameter_show(struct seq_file *s, void *unused)
 
 	seq_printf(s, "Rd control gpio: %d\n", type_c->rd_ctrl_gpio);
 	seq_printf(s, "cc_dfp_mode %s\n",
-				({ char *tmp;
-				 switch (type_c->cc_dfp_mode) {
-				 case CC_MODE_DFP_USB: tmp = "CC_MODE_DFP_USB"; break;
-				 case CC_MODE_DFP_1_5: tmp = "CC_MODE_DFP_1_5"; break;
-				 case CC_MODE_DFP_3_0: tmp = "CC_MODE_DFP_3_0"; break;
-				 default: tmp = "?"; break;
-				 } tmp;}));
+		    ({ char *tmp;
+		     switch (type_c->cc_dfp_mode) {
+		     case CC_MODE_DFP_USB: tmp = "CC_MODE_DFP_USB"; break;
+		     case CC_MODE_DFP_1_5: tmp = "CC_MODE_DFP_1_5"; break;
+		     case CC_MODE_DFP_3_0: tmp = "CC_MODE_DFP_3_0"; break;
+		     default: tmp = "?"; break;
+		     } tmp;}));
 	seq_printf(s, "cc1_rp 0x%x\n", type_c->cc1_rp);
 	seq_printf(s, "cc1_rp_code 0x%x\n",
-				({ int tmp;
-				 switch (type_c->cc_dfp_mode) {
-				 case CC_MODE_DFP_USB: tmp = code_rp12k(type_c->cc1_rp_code); break;
-				 case CC_MODE_DFP_1_5: tmp = code_rp36k(type_c->cc1_rp_code); break;
-				 case CC_MODE_DFP_3_0: tmp = code_rp4pk(type_c->cc1_rp_code); break;
-				 default: tmp = -1; break;
-				 } tmp;}));
-	seq_printf(s, "cc1_rd_code 0x%x (using %s Rd)\n", code_rd(type_c->cc1_rd_code),
-					type_c->rd_config?"internal":"external");
-	seq_printf(s, "cc1_vref_ufp     vref_1p23v 0x%x vref_0p66v 0x%x vref_0p2v 0x%x\n",
-					decode_1p23v(type_c->cc1_vref_ufp),
-					decode_0p66v(type_c->cc1_vref_ufp),
-					decode_0p2v(type_c->cc1_vref_ufp));
+		    ({ int tmp;
+		     switch (type_c->cc_dfp_mode) {
+		     case CC_MODE_DFP_USB:
+		        tmp = code_rp12k(type_c->cc1_rp_code); break;
+		     case CC_MODE_DFP_1_5:
+		        tmp = code_rp36k(type_c->cc1_rp_code); break;
+		     case CC_MODE_DFP_3_0:
+		        tmp = code_rp4pk(type_c->cc1_rp_code); break;
+		     default: tmp = -1; break;
+		    } tmp;}));
+	seq_printf(s, "cc1_rd_code 0x%x (using %s Rd)\n",
+		    code_rd(type_c->cc1_rd_code),
+		    type_c->rd_config?"internal":"external");
+	seq_printf(s, "cc1_vref_ufp     vref_1p23v 0x%x vref_0p66v 0x%x "
+		    "vref_0p2v 0x%x\n",
+		    decode_1p23v(type_c->cc1_vref_ufp),
+		    decode_0p66v(type_c->cc1_vref_ufp),
+		    decode_0p2v(type_c->cc1_vref_ufp));
 	seq_printf(s, "cc1_vref_dfp_usb vref_0_1p6v 0x%x vref_0p2v 0x%x\n",
-					decode_0_1p6v(type_c->cc1_vref_dfp_usb),
-					decode_0p2v(type_c->cc1_vref_dfp_usb));
-	seq_printf(s, "cc1_vref_dfp_1_5 vref_1_1p6v 0x%x vref_0p4v 0x%x vref_0p2v 0x%x\n",
-					decode_1_1p6v(type_c->cc1_vref_dfp_1_5),
-					decode_0p4v(type_c->cc1_vref_dfp_1_5),
-					decode_0p2v(type_c->cc1_vref_dfp_1_5));
-	seq_printf(s, "cc1_vref_dfp_3_0 vref_2p6v   0x%x vref_0p8v 0x%x vref_0p2v 0x%x\n",
-					decode_2p6v(type_c->cc1_vref_dfp_3_0),
-					decode_0p8v(type_c->cc1_vref_dfp_3_0),
-					decode_0p2v(type_c->cc1_vref_dfp_3_0));
+		    decode_0_1p6v(type_c->cc1_vref_dfp_usb),
+		    decode_0p2v(type_c->cc1_vref_dfp_usb));
+	seq_printf(s, "cc1_vref_dfp_1_5 vref_1_1p6v 0x%x vref_0p4v 0x%x "
+		    "vref_0p2v 0x%x\n",
+		    decode_1_1p6v(type_c->cc1_vref_dfp_1_5),
+		    decode_0p4v(type_c->cc1_vref_dfp_1_5),
+		    decode_0p2v(type_c->cc1_vref_dfp_1_5));
+	seq_printf(s, "cc1_vref_dfp_3_0 vref_2p6v   0x%x vref_0p8v 0x%x "
+		    "vref_0p2v 0x%x\n",
+		    decode_2p6v(type_c->cc1_vref_dfp_3_0),
+		    decode_0p8v(type_c->cc1_vref_dfp_3_0),
+		    decode_0p2v(type_c->cc1_vref_dfp_3_0));
 	seq_printf(s, "cc2_rp 0x%x\n", type_c->cc2_rp);
 	seq_printf(s, "cc2_rp_code 0x%x\n",
-				({ int tmp;
-				 switch (type_c->cc_dfp_mode) {
-				 case CC_MODE_DFP_USB: tmp = code_rp12k(type_c->cc2_rp_code); break;
-				 case CC_MODE_DFP_1_5: tmp = code_rp36k(type_c->cc2_rp_code); break;
-				 case CC_MODE_DFP_3_0: tmp = code_rp4pk(type_c->cc2_rp_code); break;
-				 default: tmp = -1; break;
-				 } tmp;}));
-	seq_printf(s, "cc2_rd_code 0x%x (using %s Rd)\n", code_rd(type_c->cc2_rd_code),
-					type_c->rd_config?"internal":"external");
-	seq_printf(s, "cc2_vref_ufp     vref_1p23v 0x%x vref_0p66v 0x%x vref_0p2v 0x%x\n",
-					decode_1p23v(type_c->cc2_vref_ufp),
-					decode_0p66v(type_c->cc2_vref_ufp),
-					decode_0p2v(type_c->cc2_vref_ufp));
+		    ({ int tmp;
+		     switch (type_c->cc_dfp_mode) {
+		     case CC_MODE_DFP_USB: tmp = code_rp12k(type_c->cc2_rp_code); break;
+		     case CC_MODE_DFP_1_5: tmp = code_rp36k(type_c->cc2_rp_code); break;
+		     case CC_MODE_DFP_3_0: tmp = code_rp4pk(type_c->cc2_rp_code); break;
+		     default: tmp = -1; break;
+		    } tmp;}));
+	seq_printf(s, "cc2_rd_code 0x%x (using %s Rd)\n",
+		    code_rd(type_c->cc2_rd_code),
+		    type_c->rd_config?"internal":"external");
+	seq_printf(s, "cc2_vref_ufp     vref_1p23v 0x%x vref_0p66v 0x%x "
+		    "vref_0p2v 0x%x\n",
+		    decode_1p23v(type_c->cc2_vref_ufp),
+		    decode_0p66v(type_c->cc2_vref_ufp),
+		    decode_0p2v(type_c->cc2_vref_ufp));
 	seq_printf(s, "cc2_vref_dfp_usb vref_0_1p6v 0x%x vref_0p2v 0x%x\n",
-					decode_0_1p6v(type_c->cc2_vref_dfp_usb),
-					decode_0p2v(type_c->cc2_vref_dfp_usb));
-	seq_printf(s, "cc2_vref_dfp_1_5 vref_1_1p6v 0x%x vref_0p4v 0x%x vref_0p2v 0x%x\n",
-					decode_1_1p6v(type_c->cc2_vref_dfp_1_5),
-					decode_0p4v(type_c->cc2_vref_dfp_1_5),
-					decode_0p2v(type_c->cc2_vref_dfp_1_5));
-	seq_printf(s, "cc2_vref_dfp_3_0 vref_2p6v   0x%x vref_0p8v 0x%x vref_0p2v 0x%x\n",
-					decode_2p6v(type_c->cc2_vref_dfp_3_0),
-					decode_0p8v(type_c->cc2_vref_dfp_3_0),
-					decode_0p2v(type_c->cc2_vref_dfp_3_0));
+		    decode_0_1p6v(type_c->cc2_vref_dfp_usb),
+		    decode_0p2v(type_c->cc2_vref_dfp_usb));
+	seq_printf(s, "cc2_vref_dfp_1_5 vref_1_1p6v 0x%x vref_0p4v 0x%x "
+		    "vref_0p2v 0x%x\n",
+		    decode_1_1p6v(type_c->cc2_vref_dfp_1_5),
+		    decode_0p4v(type_c->cc2_vref_dfp_1_5),
+		    decode_0p2v(type_c->cc2_vref_dfp_1_5));
+	seq_printf(s, "cc2_vref_dfp_3_0 vref_2p6v   0x%x vref_0p8v 0x%x "
+		    "vref_0p2v 0x%x\n",
+		    decode_2p6v(type_c->cc2_vref_dfp_3_0),
+		    decode_0p8v(type_c->cc2_vref_dfp_3_0),
+		    decode_0p2v(type_c->cc2_vref_dfp_3_0));
 	seq_printf(s, "debounce_val 0x%x\n", type_c->debounce_val);
 	seq_printf(s, "\n");
 
 	seq_printf(s, "dwc3_mode %s (%s)\n",
-				({ char *tmp;
-				 switch (type_c->dwc3_mode) {
-				 case USB_DR_MODE_PERIPHERAL: tmp = "USB_DR_MODE_PERIPHERAL"; break;
-				 case USB_DR_MODE_HOST: tmp = "USB_DR_MODE_HOST"; break;
-				 default: tmp = "USB_DR_MODE_UNKNOWN"; break;
-				 } tmp;}),
-				type_c->support_drd_mode?"is DRD":"Not DRD");
+		    ({ char *tmp;
+		     switch (type_c->dwc3_mode) {
+		     case USB_DR_MODE_PERIPHERAL: tmp = "USB_DR_MODE_PERIPHERAL"; break;
+		     case USB_DR_MODE_HOST: tmp = "USB_DR_MODE_HOST"; break;
+		     default: tmp = "USB_DR_MODE_UNKNOWN"; break;
+		    } tmp;}),
+		    type_c->support_drd_mode?"is DRD":"Not DRD");
 
 	spin_unlock_irqrestore(&type_c->lock, flags);
 
@@ -950,9 +1096,10 @@ static const struct file_operations type_c_parameter_fops = {
 
 static int type_c_set_parameter_show(struct seq_file *s, void *unused)
 {
-	struct type_c_data		*type_c = s->private;
+	//struct type_c_data		*type_c = s->private;
 
-	seq_printf(s, "cc_dfp_mode [CC_MODE_DFP_USB|CC_MODE_DFP_1_5|CC_MODE_DFP_3_0]\n");
+	seq_printf(s, "cc_dfp_mode [CC_MODE_DFP_USB|CC_MODE_DFP_1_5|"
+		    "CC_MODE_DFP_3_0]\n");
 	seq_printf(s, "rd_config [internal|external]");
 	seq_printf(s, "cc1_rp_code 0x_value\n");
 	seq_printf(s, "cc1_rd_code 0x_value\n");
@@ -1025,13 +1172,13 @@ static ssize_t type_c_set_parameter_write(struct file *file,
 	} else if (!strncmp(buf, "rd_config", 9)) {
 		buf = buf + 9;
 		buf = skip_spaces(buf);
-		if (!strncmp(buf, "internal", 8)) {
+		if (!strncmp(buf, "internal", 8))
 			type_c->rd_config = INTERNAL_Rd;
-		} else if (!strncmp(buf, "external", 8)) {
+		else if (!strncmp(buf, "external", 8))
 			type_c->rd_config = EXTERNAL_Rd;
-		} else {
+		else
 			dev_err(type_c->dev, "rd_config UNKNOWN (%s)", buf);
-		}
+
 	} else if (!strncmp(buf, "cc1_rp_code", 11)) {
 		buf = buf + 11;
 		buf = skip_spaces(buf);
@@ -1051,57 +1198,68 @@ static ssize_t type_c_set_parameter_write(struct file *file,
 		buf = buf + 23;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_ufp = (type_c->cc1_vref_ufp & (~vref_1p23v(0xf))) | vref_1p23v(value);
+		type_c->cc1_vref_ufp = (type_c->cc1_vref_ufp & (~vref_1p23v(0xf))) |
+			    vref_1p23v(value);
 	} else if (!strncmp(buf, "cc1_vref_ufp_vref_0p66v", 23)) {
 		buf = buf + 23;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_ufp = (type_c->cc1_vref_ufp & (~vref_0p66v(0xf))) | vref_0p66v(value);
+		type_c->cc1_vref_ufp = (type_c->cc1_vref_ufp & (~vref_0p66v(0xf))) |
+			    vref_0p66v(value);
 	} else if (!strncmp(buf, "cc1_vref_ufp_vref_0p2v", 22)) {
 		buf = buf + 22;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_ufp = (type_c->cc1_vref_ufp & (~vref_0p2v(0x7))) | vref_0p2v(value);
+		type_c->cc1_vref_ufp = (type_c->cc1_vref_ufp & (~vref_0p2v(0x7))) |
+			    vref_0p2v(value);
 	} else if (!strncmp(buf, "cc1_vref_dfp_usb_vref_1p6v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_dfp_usb = (type_c->cc1_vref_dfp_usb & (~vref_0_1p6v(0xf))) | vref_0_1p6v(value);
+		type_c->cc1_vref_dfp_usb = (type_c->cc1_vref_dfp_usb &
+			    (~vref_0_1p6v(0xf))) | vref_0_1p6v(value);
 	} else if (!strncmp(buf, "cc1_vref_dfp_usb_vref_0p2v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_dfp_usb = (type_c->cc1_vref_dfp_usb & (~vref_0p2v(0x7))) | vref_0p2v(value);
+		type_c->cc1_vref_dfp_usb = (type_c->cc1_vref_dfp_usb &
+			    (~vref_0p2v(0x7))) | vref_0p2v(value);
 	} else if (!strncmp(buf, "cc1_vref_dfp_1_5_vref_1p6v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_dfp_1_5 = (type_c->cc1_vref_dfp_1_5 & (~vref_1_1p6v(0xf))) | vref_1_1p6v(value);
+		type_c->cc1_vref_dfp_1_5 = (type_c->cc1_vref_dfp_1_5 &
+			    (~vref_1_1p6v(0xf))) | vref_1_1p6v(value);
 	} else if (!strncmp(buf, "cc1_vref_dfp_1_5_vref_0p4v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_dfp_1_5 = (type_c->cc1_vref_dfp_1_5 & (~vref_0p4v(0x7))) | vref_0p4v(value);
+		type_c->cc1_vref_dfp_1_5 = (type_c->cc1_vref_dfp_1_5 &
+			    (~vref_0p4v(0x7))) | vref_0p4v(value);
 	} else if (!strncmp(buf, "cc1_vref_dfp_1_5_vref_0p2v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_dfp_1_5 = (type_c->cc1_vref_dfp_1_5 & (~vref_0p2v(0x7))) | vref_0p2v(value);
+		type_c->cc1_vref_dfp_1_5 = (type_c->cc1_vref_dfp_1_5 &
+			    (~vref_0p2v(0x7))) | vref_0p2v(value);
 	} else if (!strncmp(buf, "cc1_vref_dfp_3_0_vref_2p6v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_ufp = (type_c->cc1_vref_dfp_1_5 & (~vref_2p6v(0x7))) | vref_2p6v(value);
+		type_c->cc1_vref_ufp = (type_c->cc1_vref_dfp_1_5 & (~vref_2p6v(0x7))) |
+			    vref_2p6v(value);
 	} else if (!strncmp(buf, "cc1_vref_dfp_3_0_vref_0p8v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_dfp_3_0 = (type_c->cc1_vref_dfp_3_0 & (~vref_0p8v(0xf))) | vref_0p8v(value);
+		type_c->cc1_vref_dfp_3_0 = (type_c->cc1_vref_dfp_3_0 &
+			    (~vref_0p8v(0xf))) | vref_0p8v(value);
 	} else if (!strncmp(buf, "cc1_vref_dfp_3_0_vref_0p2v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc1_vref_dfp_3_0 = (type_c->cc1_vref_dfp_3_0 & (~vref_0p2v(0x7))) | vref_0p2v(value);
+		type_c->cc1_vref_dfp_3_0 = (type_c->cc1_vref_dfp_3_0 &
+			    (~vref_0p2v(0x7))) | vref_0p2v(value);
 	} else if (!strncmp(buf, "cc2_rp_code", 11)) {
 		buf = buf + 11;
 		buf = skip_spaces(buf);
@@ -1121,57 +1279,68 @@ static ssize_t type_c_set_parameter_write(struct file *file,
 		buf = buf + 23;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_ufp = (type_c->cc2_vref_ufp & (~vref_1p23v(0xf))) | vref_1p23v(value);
+		type_c->cc2_vref_ufp = (type_c->cc2_vref_ufp & (~vref_1p23v(0xf))) |
+			    vref_1p23v(value);
 	} else if (!strncmp(buf, "cc2_vref_ufp_vref_0p66v", 23)) {
 		buf = buf + 23;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_ufp = (type_c->cc2_vref_ufp & (~vref_0p66v(0xf))) | vref_0p66v(value);
+		type_c->cc2_vref_ufp = (type_c->cc2_vref_ufp & (~vref_0p66v(0xf))) |
+			    vref_0p66v(value);
 	} else if (!strncmp(buf, "cc2_vref_ufp_vref_0p2v", 22)) {
 		buf = buf + 22;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_ufp = (type_c->cc2_vref_ufp & (~vref_0p2v(0x7))) | vref_0p2v(value);
+		type_c->cc2_vref_ufp = (type_c->cc2_vref_ufp & (~vref_0p2v(0x7))) |
+			    vref_0p2v(value);
 	} else if (!strncmp(buf, "cc2_vref_dfp_usb_vref_1p6v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_dfp_usb = (type_c->cc2_vref_dfp_usb & (~vref_0_1p6v(0xf))) | vref_0_1p6v(value);
+		type_c->cc2_vref_dfp_usb = (type_c->cc2_vref_dfp_usb &
+			    (~vref_0_1p6v(0xf))) | vref_0_1p6v(value);
 	} else if (!strncmp(buf, "cc2_vref_dfp_usb_vref_0p2v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_dfp_usb = (type_c->cc2_vref_dfp_usb & (~vref_0p2v(0x7))) | vref_0p2v(value);
+		type_c->cc2_vref_dfp_usb = (type_c->cc2_vref_dfp_usb &
+			    (~vref_0p2v(0x7))) | vref_0p2v(value);
 	} else if (!strncmp(buf, "cc2_vref_dfp_1_5_vref_1p6v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_dfp_1_5 = (type_c->cc2_vref_dfp_1_5 & (~vref_1_1p6v(0xf))) | vref_1_1p6v(value);
+		type_c->cc2_vref_dfp_1_5 = (type_c->cc2_vref_dfp_1_5 &
+			    (~vref_1_1p6v(0xf))) | vref_1_1p6v(value);
 	} else if (!strncmp(buf, "cc2_vref_dfp_1_5_vref_0p4v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_dfp_1_5 = (type_c->cc2_vref_dfp_1_5 & (~vref_0p4v(0x7))) | vref_0p4v(value);
+		type_c->cc2_vref_dfp_1_5 = (type_c->cc2_vref_dfp_1_5 &
+			    (~vref_0p4v(0x7))) | vref_0p4v(value);
 	} else if (!strncmp(buf, "cc2_vref_dfp_1_5_vref_0p2v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_dfp_1_5 = (type_c->cc2_vref_dfp_1_5 & (~vref_0p2v(0x7))) | vref_0p2v(value);
+		type_c->cc2_vref_dfp_1_5 = (type_c->cc2_vref_dfp_1_5 &
+			    (~vref_0p2v(0x7))) | vref_0p2v(value);
 	} else if (!strncmp(buf, "cc2_vref_dfp_3_0_vref_2p6v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_dfp_3_0 = (type_c->cc2_vref_dfp_3_0 & (~vref_2p6v(0x7))) | vref_2p6v(value);
+		type_c->cc2_vref_dfp_3_0 = (type_c->cc2_vref_dfp_3_0 &
+			    (~vref_2p6v(0x7))) | vref_2p6v(value);
 	} else if (!strncmp(buf, "cc2_vref_dfp_3_0_vref_0p8v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_dfp_3_0 = (type_c->cc2_vref_dfp_3_0 & (~vref_0p8v(0xf))) | vref_0p8v(value);
+		type_c->cc2_vref_dfp_3_0 = (type_c->cc2_vref_dfp_3_0 &
+			    (~vref_0p8v(0xf))) | vref_0p8v(value);
 	} else if (!strncmp(buf, "cc2_vref_dfp_3_0_vref_0p2v", 26)) {
 		buf = buf + 26;
 		buf = skip_spaces(buf);
 		sscanf(buf, "%x", &value);
-		type_c->cc2_vref_dfp_3_0 = (type_c->cc2_vref_dfp_3_0 & (~vref_0p2v(0x7))) | vref_0p2v(value);
+		type_c->cc2_vref_dfp_3_0 = (type_c->cc2_vref_dfp_3_0 &
+			    (~vref_0p2v(0x7))) | vref_0p2v(value);
 	} else if (!strncmp(buf, "debounce_val", 12)) {
 		buf = buf + 12;
 		buf = skip_spaces(buf);
@@ -1199,7 +1368,7 @@ static int type_c_status_show(struct seq_file *s, void *unused)
 
 	spin_lock_irqsave(&type_c->lock, flags);
 
-	seq_printf(s, "Set %s DRD mode and dwc3_mode is %s (set by dwc3 deiver)\n",
+	seq_printf(s, "Set %s DRD mode and dwc3_mode is %s (set by dwc3 driver)\n",
 		    type_c->support_drd_mode?"support":"not support",
 		    ({ char *tmp;
 		     switch (type_c->dwc3_mode) {
@@ -1219,11 +1388,25 @@ static int type_c_status_show(struct seq_file *s, void *unused)
 		    } tmp;}), type_c->is_role_swap == ROLE_SWAP?"":" not");
 
 	seq_printf(s, "In %s mode %s %s at %s (cc_status=0x%x)\n",
-				type_c->in_host_mode?"host":"device",
-				type_c->in_host_mode?
-					(type_c->is_attach?"attach":"detach"):
-					(type_c->is_attach?"connect":"disconnect"),
-				type_c->in_host_mode?"device":"host", type_c->at_cc1?"cc1":"cc2", type_c->cc_status);
+		    type_c->in_host_mode?"host":"device",
+		    type_c->in_host_mode?
+		        (type_c->is_attach?"attach":"detach"):
+		        (type_c->is_attach?"connect":"disconnect"),
+		    type_c->in_host_mode?"device":"host",
+		    type_c->at_cc1?"cc1":"cc2", type_c->cc_status);
+
+	seq_printf(s, "Read Register (type_c_ctrl_cc1_0=0x%x)\n",
+		    readl(type_c->type_c_reg_base + 0x0));
+	seq_printf(s, "Read Register (type_c_ctrl_cc1_1=0x%x)\n",
+		    readl(type_c->type_c_reg_base + 0x4));
+	seq_printf(s, "Read Register (type_c_ctrl_cc2_0=0x%x)\n",
+		    readl(type_c->type_c_reg_base + 0x8));
+	seq_printf(s, "Read Register (type_c_ctrl_cc2_1=0x%x)\n",
+		    readl(type_c->type_c_reg_base + 0xc));
+	seq_printf(s, "Read Register (type_c_status=0x%x)\n",
+		    readl(type_c->type_c_reg_base + 0x10));
+	seq_printf(s, "Read Register (type_c_ctrl=0x%x)\n",
+		    readl(type_c->type_c_reg_base + 0x14));
 
 	spin_unlock_irqrestore(&type_c->lock, flags);
 
@@ -1262,7 +1445,6 @@ static ssize_t type_c_debug_write(struct file *file,
 {
 	struct seq_file		*s = file->private_data;
 	struct type_c_data		*type_c = s->private;
-	unsigned long		flags;
 	char			buf[32];
 
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
@@ -1284,30 +1466,32 @@ static const struct file_operations type_c_debug_fops = {
 	.release		= single_release,
 };
 
-static inline void create_debug_files(struct type_c_data *type_c) {
-
+static inline void create_debug_files(struct type_c_data *type_c)
+{
 	dev_err(type_c->dev, "%s", __func__);
 
 	type_c->debug_dir = debugfs_create_dir("type_c", usb_debug_root);
 	if (!type_c->debug_dir) {
-		dev_err(type_c->dev, "Error debug_dir is NULL", __func__);
+		dev_err(type_c->dev, "%s Error debug_dir is NULL", __func__);
 		return;
 	}
 
 	if (!debugfs_create_file("parameter", S_IRUGO, type_c->debug_dir, type_c,
-						&type_c_parameter_fops))
+		    &type_c_parameter_fops))
 		goto file_error;
 
-	if (!debugfs_create_file("set_parameter", S_IRUGO | S_IWUSR, type_c->debug_dir, type_c,
-						&type_c_set_parameter_fops))
+	if (!debugfs_create_file("set_parameter", S_IRUGO | S_IWUSR,
+		    type_c->debug_dir, type_c,
+		    &type_c_set_parameter_fops))
 		goto file_error;
 
 	if (!debugfs_create_file("status", S_IRUGO, type_c->debug_dir, type_c,
-						&type_c_status_fops))
+		    &type_c_status_fops))
 		goto file_error;
 
-	if (!debugfs_create_file("debug", S_IRUGO | S_IWUSR, type_c->debug_dir, type_c,
-						&type_c_debug_fops))
+	if (!debugfs_create_file("debug", S_IRUGO | S_IWUSR,
+		    type_c->debug_dir, type_c,
+		    &type_c_debug_fops))
 		goto file_error;
 
 	return;
@@ -1317,18 +1501,107 @@ file_error:
 }
 #endif //CONFIG_DYNAMIC_DEBUG
 
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+static enum dual_role_property fusb_drp_properties[] = {
+	DUAL_ROLE_PROP_MODE,
+	DUAL_ROLE_PROP_PR,
+	DUAL_ROLE_PROP_DR,
+};
+
+static int dual_role_get_local_prop(struct dual_role_phy_instance *drp,
+				enum dual_role_property prop,
+				unsigned int *val)
+{
+	struct type_c_data *type_c = dual_role_get_drvdata(drp);
+
+	if (!type_c) {
+		pr_err("driver data not ready\n");
+		return -1;
+	}
+
+	if(type_c->cur_mode == USB_DR_MODE_PERIPHERAL) {
+		if (prop == DUAL_ROLE_PROP_MODE)
+			*val = DUAL_ROLE_PROP_MODE_UFP;
+		else if(prop == DUAL_ROLE_PROP_PR)
+			*val = DUAL_ROLE_PROP_PR_SNK;
+		else if(prop == DUAL_ROLE_PROP_DR)
+			*val = DUAL_ROLE_PROP_DR_DEVICE;
+		else
+			return -EINVAL;
+	} else if(type_c->cur_mode == USB_DR_MODE_HOST) {
+		if (prop == DUAL_ROLE_PROP_MODE)
+			*val = DUAL_ROLE_PROP_MODE_DFP;
+		else if (prop == DUAL_ROLE_PROP_PR)
+			*val = DUAL_ROLE_PROP_PR_SRC;
+		else if (prop == DUAL_ROLE_PROP_DR)
+			*val = DUAL_ROLE_PROP_DR_HOST;
+		else
+			return -EINVAL;
+	} else {
+		if (prop == DUAL_ROLE_PROP_MODE)
+			*val = DUAL_ROLE_PROP_MODE_NONE;
+		else if (prop == DUAL_ROLE_PROP_PR)
+			*val = DUAL_ROLE_PROP_PR_NONE;
+		else if (prop == DUAL_ROLE_PROP_DR)
+			*val = DUAL_ROLE_PROP_DR_NONE;
+		else
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int dual_role_is_writeable(struct dual_role_phy_instance *drp,
+				enum dual_role_property prop)
+{
+	if (prop == DUAL_ROLE_PROP_MODE)
+		return 1;
+	else
+		return 0;
+}
+#if 0
+static int dual_role_set_mode_prop(struct dual_role_phy_instance *drp,
+				enum dual_role_property prop,
+				const unsigned int *val)
+{
+	pr_err("%s\n", __func__);
+	return 0;
+}
+
+static int dual_role_set_prop(struct dual_role_phy_instance *drp,
+				enum dual_role_property prop,
+				const unsigned int *val)
+{
+	if (prop == DUAL_ROLE_PROP_MODE)
+		return dual_role_set_mode_prop(drp, prop, val);
+	else
+		return -EINVAL;
+}
+#endif
+#endif
+
 /* Init and probe */
 static int dwc3_rtk_type_c_init(struct type_c_data *type_c)
 {
 	struct device		*dev = type_c->dev;
 	u32 debounce_val = type_c->debounce_val;// 1b,1us 7f,4.7us
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+	struct dual_role_phy_desc *desc;
+	struct dual_role_phy_instance *dual_role;
+#endif
 
-	enable_writel(debounce_val<<1, type_c->wrap_base + USB_TYPEC_CTRL);
+	enable_writel(debounce_val<<1,
+		    type_c->type_c_reg_base + USB_TYPEC_CTRL);
 	dev_info(dev, "%s set debounce = 0x%x (check--> 0x%x)\n",
-				__func__, debounce_val, readl(type_c->wrap_base + USB_TYPEC_CTRL));
+		    __func__, debounce_val,
+		    readl(type_c->type_c_reg_base + USB_TYPEC_CTRL));
 
-	if ((type_c->rd_ctrl_gpio != -1) && gpio_request(type_c->rd_ctrl_gpio, dev->of_node->name))
-		dev_err(dev, "%s ERROR Request rd_ctrl_gpio  (id=%d) fail\n",__func__, type_c->rd_ctrl_gpio);
+	if ((type_c->rd_ctrl_gpio != -1) &&
+		    gpio_request(type_c->rd_ctrl_gpio, dev->of_node->name))
+		dev_err(dev, "%s ERROR Request rd_ctrl_gpio  (id=%d) fail\n",
+			   __func__, type_c->rd_ctrl_gpio);
+
+	rtk_type_c_init(type_c);
 
 	if (type_c->cur_mode == USB_DR_MODE_UNKNOWN)
 		switch_dwc3_mode(type_c, 0);
@@ -1348,9 +1621,8 @@ static int dwc3_rtk_type_c_init(struct type_c_data *type_c)
 
 		spin_unlock_irqrestore(&type_c->lock, flags);
 
-		detect_type_c_state(type_c);
-
-		schedule_delayed_work(&type_c->delayed_work, msecs_to_jiffies(0));
+		schedule_delayed_work(&type_c->delayed_work,
+			    msecs_to_jiffies(0));
 	} else if (type_c->dwc3_mode == USB_DR_MODE_PERIPHERAL) {
 		unsigned long		flags;
 
@@ -1362,41 +1634,68 @@ static int dwc3_rtk_type_c_init(struct type_c_data *type_c)
 		type_c->is_attach = IN_DETACH;
 		type_c->connect_change = CONNECT_NO_CHANGE;
 		type_c->cur_mode = USB_DR_MODE_PERIPHERAL;
-		type_c->check_at_boot = false;
+		if (type_c->boot_check_time < 0)
+			type_c->check_at_boot = false;
+		else
+			type_c->check_at_boot= true;
+		dev_info(dev, "First time device mode check is %s",
+				type_c->check_at_boot?"Enable":"Diable");
 
 		detect_host(type_c);
 
 		spin_unlock_irqrestore(&type_c->lock, flags);
 
-		detect_type_c_state(type_c);
-
-		schedule_delayed_work(&type_c->delayed_work, msecs_to_jiffies(0));
+		schedule_delayed_work(&type_c->delayed_work,
+			    msecs_to_jiffies(0));
 	} else {
 		dev_err(dev, "DWC3_DRD is USB_DR_MODE_UNKNOWN");
 	}
+
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+	if (type_c->drp == NULL) {
+		desc = devm_kzalloc(dev, sizeof(struct dual_role_phy_desc), GFP_KERNEL);
+		if (!desc) {
+			dev_err(dev, "%s, dual role descriptor malloc fail\n", __func__);
+			return 0;
+		}
+		desc->name = "dwc3_otg";
+		desc->supported_modes = DUAL_ROLE_SUPPORTED_MODES_DFP_AND_UFP;
+		desc->get_property = dual_role_get_local_prop;
+//		desc->set_property = dual_role_set_prop;
+		desc->properties = fusb_drp_properties;
+		desc->num_properties = ARRAY_SIZE(fusb_drp_properties);
+		desc->property_is_writeable = dual_role_is_writeable;
+		dual_role = devm_dual_role_instance_register(dev, desc);
+		dual_role->drv_data = type_c;
+		type_c->drp = dual_role;
+	}
+#endif
+
 	return 0;
 }
 
-extern int rtk_usb_power_manager_schedule_work(struct device *usb_dev, struct work_struct *work);
-
-static void dwc3_rtk_type_c_probe_work(struct work_struct *work) {
-	struct type_c_data *type_c = container_of(work, struct type_c_data, start_work);
+static void dwc3_rtk_type_c_probe_work(struct work_struct *work)
+{
+	struct type_c_data *type_c = container_of(work,
+		    struct type_c_data, start_work);
 	struct device		*dev = type_c->dev;
 	int    ret = 0;
 
 	unsigned long probe_time = jiffies;
 
-	dev_info(dev, "%s Start ...\n",__func__);
+	dev_info(dev, "%s Start ...\n", __func__);
 
 	ret = dwc3_rtk_type_c_init(type_c);
 
 	if (ret)
 		dev_err(dev, "%s failed to init type_c\n", __func__);
 
-	dev_info(dev, "%s End ... ok! (take %d ms)\n", __func__, jiffies_to_msecs(jiffies - probe_time));
+	dev_info(dev, "%s End ... ok! (take %d ms)\n", __func__,
+		    jiffies_to_msecs(jiffies - probe_time));
 }
 
-static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
+static int dwc3_rtk_type_c_probe(struct platform_device *pdev)
+{
 	struct device		*dev = &pdev->dev;
 	struct device_node	*node = dev->of_node;
 	struct type_c_data 	*type_c;
@@ -1416,6 +1715,15 @@ static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
 		ret = -EFAULT;
 		goto err1;
 	}
+
+	type_c->type_c_reg_base = of_iomap(pdev->dev.of_node, 1);
+	if (type_c->type_c_reg_base == NULL) {
+		type_c->type_c_reg_base = type_c->wrap_base + 0x14C; // for Kylin case
+		dev_warn(&pdev->dev, "No mapping memory for type_c_reg_base!\n");
+		dev_warn(&pdev->dev, "Let type_c_reg_base = %p\n",
+			    type_c->type_c_reg_base);
+	}
+
 	type_c->dev = dev;
 
 	irq = irq_of_parse_and_map(pdev->dev.of_node, 0);
@@ -1429,6 +1737,10 @@ static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
 	ret = request_irq(irq, type_c_detect_irq,
 			IRQF_SHARED, "type_c_detect", type_c);
 
+	spin_lock_init(&type_c->lock);
+	type_c->chip_id = get_rtd_chip_id();
+	type_c->chip_revision = get_rtd_chip_revision();
+
 	if (node && of_device_is_available(node)) {
 		gpio = of_get_named_gpio(node, "realtek,rd_ctrl-gpio", 0);
 
@@ -1436,27 +1748,57 @@ static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
 			type_c->rd_ctrl_gpio = gpio;
 			dev_info(dev, "%s get rd_ctrl-gpio (id=%d) OK\n", __func__, gpio);
 		} else {
-			dev_err(dev, "Error rd_ctrl-gpio no found");
 			type_c->rd_ctrl_gpio = -1;
+			if ((type_c->chip_id & 0xFFF0) == CHIP_ID_RTD129X)
+				dev_err(dev, "Error rd_ctrl-gpio no found for RTD%x",
+					    type_c->chip_id);
 		}
+
+		ret = of_property_read_u32(node, "boot_check_time",
+			&type_c->boot_check_time);
+		if (ret) {
+			type_c->boot_check_time = -1; //ms
+		}
+		dev_info(dev, "Set device mode boot_check_time %d ms "
+			    "==> (%s to check)\n",
+			    type_c->boot_check_time,
+			    type_c->boot_check_time<0?"Disable":"Enable");
+
+		if (of_property_read_bool(node, "filter_config_channel_signal"))
+			type_c->filter_config_channel_signal = true;
+		else
+			type_c->filter_config_channel_signal = false;
+		dev_info(dev, "Set filter_config_channel_signal is %s\n",
+			    type_c->filter_config_channel_signal?"True":"False");
+
 	}
 
 	if (node && of_device_is_available(node)) {
 		const char *str;
 		u32 val;
 		struct device_node *sub_node;
-		char array_vals[3];
+		u8 array_vals[3];
+		u32 u32_vals[3];
+		u32 default_revision;
+		char revision[4] = {0};
 
-		if (RTD129x_CHIP_REVISION_A00 == get_rtd129x_cpu_revision()) {
-			dev_info(dev, "Chip revision is A00");
-			sub_node = of_get_child_by_name(node, "A00");
-		} else if (RTD129x_CHIP_REVISION_A01 == get_rtd129x_cpu_revision()) {
-			dev_info(dev, "Chip revision is A01");
-			sub_node = of_get_child_by_name(node, "A01");
-		} else {
-			dev_info(dev, "Chip revision is %x, use A01 setting", get_rtd129x_cpu_revision());
-			sub_node = of_get_child_by_name(node, "A01");
+		ret = of_property_read_u32(node, "default_revision",
+			    &default_revision);
+		if (ret) {
+			default_revision = 0xA00;
+			dev_info(dev, "%s: No set default_revision (use %x)\n",
+				    __func__, default_revision);
 		}
+
+		if (type_c->chip_revision > default_revision)
+			snprintf(revision, 4, "%X", default_revision);
+		else
+			snprintf(revision, 4, "%X", type_c->chip_revision);
+		dev_info(dev, "Chip %x revision is %x (support revision %x) "
+			    "to load %s parameter\n",
+			    type_c->chip_id, type_c->chip_revision,
+			    default_revision, revision);
+		sub_node = of_get_child_by_name(node, revision);
 
 		ret = of_property_read_string(sub_node, "cc_dfp_mode", &str);
 		if (ret) {
@@ -1480,24 +1822,27 @@ static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
 		}
 
 		//cc1 parameters
-		ret = of_property_read_u32(sub_node, "cc1_rp_4p7k_code", &array_vals[0]);
+		ret = of_property_read_u32(sub_node, "cc1_rp_4p7k_code", &u32_vals[0]);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc1_rp_4p7k_code error(%d)\n", __func__, array_vals[0]);
+			dev_err(&pdev->dev, "%s: cc1_rp_4p7k_code error(%d)\n",
+				    __func__, u32_vals[0]);
 			goto err1;
 		}
-		ret = of_property_read_u32(sub_node, "cc1_rp_36k_code", &array_vals[1]);
+		ret = of_property_read_u32(sub_node, "cc1_rp_36k_code", &u32_vals[1]);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc1_rp_36k_code error(%d)\n", __func__, array_vals[1]);
+			dev_err(&pdev->dev, "%s: cc1_rp_36k_code error(%d)\n", __func__,
+				    u32_vals[1]);
 			goto err1;
 		}
-		ret = of_property_read_u32(sub_node, "cc1_rp_12k_code", &array_vals[2]);
+		ret = of_property_read_u32(sub_node, "cc1_rp_12k_code", &u32_vals[2]);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc1_rp_12k_code error(%d)\n", __func__, array_vals[2]);
+			dev_err(&pdev->dev, "%s: cc1_rp_12k_code error(%d)\n",
+				    __func__, u32_vals[2]);
 			goto err1;
 		}
-		type_c->cc1_rp_code = rp4pk_code(array_vals[0])
-							| rp36k_code(array_vals[1])
-							| rp12k_code(array_vals[2]);
+		type_c->cc1_rp_code = rp4pk_code(u32_vals[0])
+				| rp36k_code(u32_vals[1])
+				| rp12k_code(u32_vals[2]);
 
 		ret = of_property_read_string(sub_node, "rd_config", &str);
 		if (ret) {
@@ -1516,55 +1861,70 @@ static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
 			type_c->rd_config = EXTERNAL_Rd;
 			type_c->cc1_rd_code = 0x0;
 		} else {
-			dev_err(&pdev->dev, "%s: unknown rd_config %s, cc1_rd_code=%d\n", __func__, str, val);
+			dev_err(&pdev->dev, "%s: unknown rd_config %s, cc1_rd_code=%d\n",
+				    __func__, str, val);
 		}
-		ret = of_property_read_u8_array(sub_node, "cc1_vref_ufp", array_vals, 3);
+		ret = of_property_read_u8_array(sub_node, "cc1_vref_ufp",
+			    array_vals, 3);
 		if (ret) {
 			dev_err(&pdev->dev, "%s: cc1_vref_ufp error(%d)\n", __func__, ret);
 			goto err1;
 		}
-		type_c->cc1_vref_ufp = vref_1p23v(array_vals[0]) | vref_0p66v(array_vals[1]) | vref_0p2v(array_vals[2]);
+		type_c->cc1_vref_ufp = vref_1p23v(array_vals[0]) |
+			    vref_0p66v(array_vals[1]) | vref_0p2v(array_vals[2]);
 
-		ret = of_property_read_u8_array(sub_node, "cc1_vref_dfp_usb", array_vals, 3);
+		ret = of_property_read_u8_array(sub_node, "cc1_vref_dfp_usb",
+			    array_vals, 3);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc1_vref_dfp_usb error(%d)\n", __func__, ret);
+			dev_err(&pdev->dev, "%s: cc1_vref_dfp_usb error(%d)\n",
+				    __func__, ret);
 			goto err1;
 		}
-		type_c->cc1_vref_dfp_usb = vref_0_1p6v(array_vals[0]) | vref_0p2v(array_vals[1]);
+		type_c->cc1_vref_dfp_usb = vref_0_1p6v(array_vals[0]) |
+			    vref_0p2v(array_vals[1]);
 
-		ret = of_property_read_u8_array(sub_node, "cc1_vref_dfp_1_5", array_vals, 3);
+		ret = of_property_read_u8_array(sub_node, "cc1_vref_dfp_1_5",
+			    array_vals, 3);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc1_vref_dfp_1_5 error(%d)\n", __func__, ret);
+			dev_err(&pdev->dev, "%s: cc1_vref_dfp_1_5 error(%d)\n",
+				    __func__, ret);
 			goto err1;
 		}
-		type_c->cc1_vref_dfp_1_5 = vref_1_1p6v(array_vals[0]) | vref_0p4v(array_vals[1]) | vref_0p2v(array_vals[2]);
+		type_c->cc1_vref_dfp_1_5 = vref_1_1p6v(array_vals[0]) |
+			     vref_0p4v(array_vals[1]) | vref_0p2v(array_vals[2]);
 
-		ret = of_property_read_u8_array(sub_node, "cc1_vref_dfp_3_0", array_vals, 3);
+		ret = of_property_read_u8_array(sub_node, "cc1_vref_dfp_3_0",
+			    array_vals, 3);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc1_vref_dfp_3_0 error(%d)\n", __func__, ret);
+			dev_err(&pdev->dev, "%s: cc1_vref_dfp_3_0 error(%d)\n",
+				    __func__, ret);
 			goto err1;
 		}
-		type_c->cc1_vref_dfp_3_0 = vref_2p6v(array_vals[0]) | vref_0p8v(array_vals[1]) | vref_0p2v(array_vals[2]);
+		type_c->cc1_vref_dfp_3_0 = vref_2p6v(array_vals[0]) |
+			    vref_0p8v(array_vals[1]) | vref_0p2v(array_vals[2]);
 
 		//cc2 parameters
-		ret = of_property_read_u32(sub_node, "cc2_rp_4p7k_code", &array_vals[0]);
+		ret = of_property_read_u32(sub_node, "cc2_rp_4p7k_code", &u32_vals[0]);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc2_rp_4p7k_code error(%d)\n", __func__, ret);
+			dev_err(&pdev->dev, "%s: cc2_rp_4p7k_code error(%d)\n",
+				    __func__, ret);
 			goto err1;
 		}
-		ret = of_property_read_u32(sub_node, "cc2_rp_36k_code", &array_vals[1]);
+		ret = of_property_read_u32(sub_node, "cc2_rp_36k_code", &u32_vals[1]);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc2_rp_36k_code error(%d)\n", __func__, ret);
+			dev_err(&pdev->dev, "%s: cc2_rp_36k_code error(%d)\n",
+				    __func__, ret);
 			goto err1;
 		}
-		ret = of_property_read_u32(sub_node, "cc2_rp_12k_code", &array_vals[2]);
+		ret = of_property_read_u32(sub_node, "cc2_rp_12k_code", &u32_vals[2]);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc2_rp_12k_code error(%d)\n", __func__, ret);
+			dev_err(&pdev->dev, "%s: cc2_rp_12k_code error(%d)\n",
+				    __func__, ret);
 			goto err1;
 		}
 		type_c->cc2_rp_code = rp4pk_code(array_vals[0])
-							| rp36k_code(array_vals[1])
-							| rp12k_code(array_vals[2]);
+				| rp36k_code(array_vals[1])
+				| rp12k_code(array_vals[2]);
 
 		ret = of_property_read_string(sub_node, "rd_config", &str);
 		if (ret) {
@@ -1581,57 +1941,70 @@ static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
 		} else if (!strcmp(str, "external")) {
 			type_c->cc2_rd_code = 0x0;
 		} else {
-			dev_err(&pdev->dev, "%s: unknown rd_code %s, cc2_rd_code=%d\n", __func__, str, val);
+			dev_err(&pdev->dev, "%s: unknown rd_code %s, cc2_rd_code=%d\n",
+				    __func__, str, val);
 		}
 
-		ret = of_property_read_u8_array(sub_node, "cc2_vref_ufp", array_vals, 3);
+		ret = of_property_read_u8_array(sub_node, "cc2_vref_ufp",
+			    array_vals, 3);
 		if (ret) {
 			dev_err(&pdev->dev, "%s: cc2_vref_ufp error(%d)\n", __func__, ret);
 			goto err1;
 		}
-		type_c->cc2_vref_ufp = vref_1p23v(array_vals[0]) | vref_0p66v(array_vals[1]) | vref_0p2v(array_vals[2]);
+		type_c->cc2_vref_ufp = vref_1p23v(array_vals[0]) |
+			    vref_0p66v(array_vals[1]) | vref_0p2v(array_vals[2]);
 
-		ret = of_property_read_u8_array(sub_node, "cc2_vref_dfp_usb", array_vals, 3);
+		ret = of_property_read_u8_array(sub_node, "cc2_vref_dfp_usb",
+			    array_vals, 3);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc2_vref_dfp_usb error(%d)\n", __func__, ret);
+			dev_err(&pdev->dev, "%s: cc2_vref_dfp_usb error(%d)\n",
+				    __func__, ret);
 			goto err1;
 		}
-		type_c->cc2_vref_dfp_usb = vref_0_1p6v(array_vals[0]) | vref_0p2v(array_vals[1]);
+		type_c->cc2_vref_dfp_usb = vref_0_1p6v(array_vals[0]) |
+			    vref_0p2v(array_vals[1]);
 
-		ret = of_property_read_u8_array(sub_node, "cc2_vref_dfp_1_5", array_vals, 3);
+		ret = of_property_read_u8_array(sub_node, "cc2_vref_dfp_1_5",
+			    array_vals, 3);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc2_vref_dfp_1_5 error(%d)\n", __func__, ret);
+			dev_err(&pdev->dev, "%s: cc2_vref_dfp_1_5 error(%d)\n",
+				    __func__, ret);
 			goto err1;
 		}
-		type_c->cc2_vref_dfp_1_5 = vref_1_1p6v(array_vals[0]) | vref_0p4v(array_vals[1]) | vref_0p2v(array_vals[2]);
+		type_c->cc2_vref_dfp_1_5 = vref_1_1p6v(array_vals[0]) |
+			    vref_0p4v(array_vals[1]) | vref_0p2v(array_vals[2]);
 
-		ret = of_property_read_u8_array(sub_node, "cc2_vref_dfp_3_0", array_vals, 3);
+		ret = of_property_read_u8_array(sub_node, "cc2_vref_dfp_3_0",
+			    array_vals, 3);
 		if (ret) {
-			dev_err(&pdev->dev, "%s: cc2_vref_dfp_3_0 error(%d)\n", __func__, ret);
+			dev_err(&pdev->dev, "%s: cc2_vref_dfp_3_0 error(%d)\n",
+				    __func__, ret);
 			goto err1;
 		}
-		type_c->cc2_vref_dfp_3_0 = vref_2p6v(array_vals[0]) | vref_0p8v(array_vals[1]) | vref_0p2v(array_vals[2]);
+		type_c->cc2_vref_dfp_3_0 = vref_2p6v(array_vals[0]) |
+			    vref_0p8v(array_vals[1]) | vref_0p2v(array_vals[2]);
 
 		type_c->debounce_val = 0x7f;// 1b,1us 7f,4.7us
 	}
 
 	if (true) {
-		struct device_node	*_node;
+		struct device_node	*parent_node;
 		struct device_node	*next_node;
 
-		_node =  of_find_compatible_node(NULL, NULL, "Realtek,rtd129x-dwc3-drd");
-		next_node = of_get_next_child(_node, NULL);
+		parent_node = of_get_parent(node);
+		next_node = of_get_next_child(parent_node, NULL);
 		if (next_node != NULL) {
-			type_c->dwc = platform_get_drvdata(of_find_device_by_node(next_node));
+			type_c->dwc = platform_get_drvdata(
+				    of_find_device_by_node(next_node));
 		} else {
-			dev_err(dev, "No find rtd129x-dwc-drd");
+			dev_err(dev, "%s No find dwc3_drd", __func__);
 			ret = -ENODEV;
 			goto err1;
 		}
 		if (type_c->dwc) {
 			type_c->dwc3_mode = type_c->dwc->dr_mode;
 		} else {
-			dev_err(dev, "rtd129x-dwc-drd dwc is NULL");
+			dev_err(dev, "%s dwc3_drd device dwc is NULL", __func__);
 			ret = -ENODEV;
 			goto err1;
 		}
@@ -1646,10 +2019,12 @@ static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
 			type_c->support_drd_mode = true;
 			dev_info(dev, "DWC3_DRD is DRD mode");
 		} else {
-			dev_info(dev, "DWC3_DRD is not DRD mode, due to dwc3_mode=USB_DR_MODE_HOST");
+			dev_info(dev, "DWC3_DRD is not DRD mode, "
+				   "due to dwc3_mode=USB_DR_MODE_HOST");
 		}
 	} else {
-		dev_dbg(dev, "DWC3_DRD is no drd_mode, and dwc3_mode=%d", type_c->dwc3_mode);
+		dev_dbg(dev, "DWC3_DRD is no drd_mode, and dwc3_mode=%d",
+			    type_c->dwc3_mode);
 	}
 
 	if (of_property_read_bool(node, "debug")) {
@@ -1667,7 +2042,7 @@ static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
 			INIT_WORK(&type_c->start_work, dwc3_rtk_type_c_probe_work);
 
 			if (of_property_read_bool(node, "ordered_probe"))
-				rtk_usb_power_manager_schedule_work(dev, &type_c->start_work);
+				rtk_usb_manager_schedule_work(dev, &type_c->start_work);
 			else
 				schedule_work(&type_c->start_work);
 		} else {
@@ -1691,7 +2066,8 @@ static int dwc3_rtk_type_c_probe(struct platform_device *pdev) {
 	create_debug_files(type_c);
 #endif
 
-	dev_info(&pdev->dev, "Exit %s OK (take %d ms)\n", __func__, jiffies_to_msecs(jiffies - probe_time));
+	dev_info(&pdev->dev, "Exit %s OK (take %d ms)\n", __func__,
+		    jiffies_to_msecs(jiffies - probe_time));
 	return 0;
 
 err1:
@@ -1700,7 +2076,8 @@ err1:
 	return ret;
 }
 
-static int dwc3_rtk_type_c_remove(struct platform_device *pdev) {
+static int dwc3_rtk_type_c_remove(struct platform_device *pdev)
+{
 	struct device		*dev = &pdev->dev;
 	struct type_c_data *type_c = dev_get_drvdata(dev);
 	u32 default_ctrl;
@@ -1724,18 +2101,19 @@ static int dwc3_rtk_type_c_remove(struct platform_device *pdev) {
 
 	spin_lock_irqsave(&type_c->lock, flags);
 	//disable interrupt
-	default_ctrl = readl(type_c->wrap_base + USB_TYPEC_CTRL) &
+	default_ctrl = readl(type_c->type_c_reg_base + USB_TYPEC_CTRL) &
 		    debounce_time_MASK;
-	writel(default_ctrl, type_c->wrap_base + USB_TYPEC_CTRL);
+	writel(default_ctrl, type_c->type_c_reg_base + USB_TYPEC_CTRL);
 
 	spin_unlock_irqrestore(&type_c->lock, flags);
 
-	dev_info(dev, "%s\n", __func__);
+	dev_info(&pdev->dev, "[USB] Exit %s\n", __func__);
 	return 0;
 }
 
 #ifdef CONFIG_OF
 static const struct of_device_id rtk_dwc3_type_c_match[] = {
+	{ .compatible = "Realtek,dwc3-type_c" },
 	{ .compatible = "Realtek,rtd1295-dwc3-type_c" },
 	{ .compatible = "Realtek,rtd1296-dwc3-type_c" },
 	{},
@@ -1744,11 +2122,20 @@ MODULE_DEVICE_TABLE(of, rtk_dwc3_type_c_match);
 #endif
 
 #ifdef CONFIG_PM_SLEEP
-static int dwc3_rtk_type_c_suspend(struct device *dev) {
+static int dwc3_rtk_type_c_prepare(struct device *dev) {
 	struct type_c_data *type_c = dev_get_drvdata(dev);
 	u32 default_ctrl;
 	unsigned long		flags;
-	dev_info(dev, "[USB] Enter %s", __func__);
+	int ret = 0;
+
+	dev_info(dev, "[USB] Enter %s\n", __func__);
+
+	if (RTK_PM_STATE == PM_SUSPEND_STANDBY){
+		//For idle mode
+		dev_info(dev, "[USB] %s Idle mode\n", __func__);
+	} else {
+		dev_info(dev,  "[USB] %s Suspend mode\n", __func__);
+	}
 
 	cancel_delayed_work_sync(&type_c->delayed_work);
 	flush_delayed_work(&type_c->delayed_work);
@@ -1760,18 +2147,58 @@ static int dwc3_rtk_type_c_suspend(struct device *dev) {
 
 	spin_lock_irqsave(&type_c->lock, flags);
 	//disable interrupt
-	default_ctrl = readl(type_c->wrap_base + USB_TYPEC_CTRL) & debounce_time_MASK;
-	writel(default_ctrl, type_c->wrap_base + USB_TYPEC_CTRL);
+	default_ctrl = readl(type_c->type_c_reg_base + USB_TYPEC_CTRL) &
+		    debounce_time_MASK;
+	writel(default_ctrl, type_c->type_c_reg_base + USB_TYPEC_CTRL);
 
 	spin_unlock_irqrestore(&type_c->lock, flags);
 
+	dev_info(dev, "[USB] Exit %s\n", __func__);
+	return ret;
+}
+
+static void dwc3_rtk_type_c_complete(struct device *dev) {
+	struct type_c_data *type_c = dev_get_drvdata(dev);
+	unsigned long		flags;
+
+	dev_info(dev, "[USB] Enter %s\n", __func__);
 	if (RTK_PM_STATE == PM_SUSPEND_STANDBY){
+		//For idle mode
+		dev_info(dev, "[USB] %s S1 (Standby mode)\n", __func__);
+
+		spin_lock_irqsave(&type_c->lock, flags);
+		//enable interrupt
+		if (type_c->is_attach == IN_ATTACH)
+			enable_writel(ENABLE_TYPE_C_DETECT,
+				    type_c->type_c_reg_base + USB_TYPEC_CTRL);
+
+		schedule_delayed_work(&type_c->delayed_work, msecs_to_jiffies(1));
+		spin_unlock_irqrestore(&type_c->lock, flags);
+	} else {
+		dev_info(dev, "[USB] %s S3 (Suspend-to-RAM mode)\n", __func__);
+	}
+
+	dev_info(dev, "[USB] Exit %s\n", __func__);
+}
+
+static int dwc3_rtk_type_c_suspend(struct device *dev)
+{
+	struct type_c_data *type_c = dev_get_drvdata(dev);
+	unsigned long		flags;
+
+	dev_info(dev, "[USB] Enter %s", __func__);
+
+	if (RTK_PM_STATE == PM_SUSPEND_STANDBY) {
 		//For idle mode
 		dev_info(dev, "[USB] %s Idle mode\n", __func__);
 		goto out;
 	}
 	//For suspend mode
 	dev_info(dev,  "[USB] %s Suspend mode\n", __func__);
+
+	if (!rtk_usb_manager_is_iso_mode(type_c->dev)) {
+		rtk_usb_type_c_power_on_off(type_c->dev, false);
+	}
 
 	if (type_c->rd_ctrl_gpio != -1)
 		gpio_free(type_c->rd_ctrl_gpio);
@@ -1781,23 +2208,55 @@ out:
 	return 0;
 }
 
-static int dwc3_rtk_type_c_resume(struct device *dev) {
+static int dwc3_rtk_type_c_resume(struct device *dev)
+{
 	struct type_c_data *type_c = dev_get_drvdata(dev);
 	unsigned long		flags;
+	bool reinit = false;
+
+
 	dev_info(dev, "[USB] Enter %s", __func__);
 
-	if (RTK_PM_STATE == PM_SUSPEND_STANDBY){
+	if (RTK_PM_STATE == PM_SUSPEND_STANDBY) {
 		//For idle mode
 		dev_info(dev, "[USB] %s Idle mode\n", __func__);
-		spin_lock_irqsave(&type_c->lock, flags);
-		schedule_delayed_work(&type_c->delayed_work, msecs_to_jiffies(1));
-		spin_unlock_irqrestore(&type_c->lock, flags);
 		goto out;
 	}
-	//For suspend mode
-	dev_info(dev,  "[USB] %s Suspend mode\n", __func__);
 
-	dwc3_rtk_type_c_init(type_c);
+	//For suspend mode
+	dev_info(dev, "[USB] %s Suspend mode\n", __func__);
+
+	if (rtk_usb_manager_is_iso_mode(type_c->dev)) {
+		spin_lock_irqsave(&type_c->lock, flags);
+		//enable interrupt
+		if (type_c->is_attach == IN_ATTACH)
+			enable_writel(ENABLE_TYPE_C_DETECT,
+			    type_c->type_c_reg_base + USB_TYPEC_CTRL);
+		else
+			reinit = true;
+		spin_unlock_irqrestore(&type_c->lock, flags);
+	} else {
+		dev_info(dev, "[USB] %s reinit dwc3_rtk_type_c_init (Not iso mode\n)",
+			    __func__);
+
+		if (type_c->is_attach == IN_ATTACH) {
+			u32 enable_cc;
+
+			rtk_type_c_init(type_c);
+			enable_writel(ENABLE_TYPE_C_DETECT,
+			    type_c->type_c_reg_base + USB_TYPEC_CTRL);
+			enable_cc = type_c->at_cc1?enable_cc1:enable_cc2;
+			switch_type_c_plug_config(type_c, type_c->cur_mode, enable_cc);
+
+			if (type_c->cur_mode == USB_DR_MODE_HOST)
+				rtk_usb_type_c_power_on_off(type_c->dev, true);
+		} else {
+			reinit = true;
+		}
+	}
+
+	if (reinit)
+		dwc3_rtk_type_c_init(type_c);
 
 out:
 	dev_info(dev, "[USB] Exit %s\n", __func__);
@@ -1805,7 +2264,9 @@ out:
 }
 
 static const struct dev_pm_ops dwc3_rtk_type_c_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(dwc3_rtk_type_c_suspend, dwc3_rtk_type_c_resume)
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(dwc3_rtk_type_c_suspend, dwc3_rtk_type_c_resume)
+	.prepare = dwc3_rtk_type_c_prepare,
+	.complete = dwc3_rtk_type_c_complete,
 };
 
 #define DEV_PM_OPS	(&dwc3_rtk_type_c_pm_ops)
@@ -1823,20 +2284,14 @@ static struct platform_driver dwc3_rtk_type_c_driver = {
 	},
 };
 
-//module_platform_driver(dwc3_rtk_type_c_driver);
-static int __init dwc3_rtk_type_c_driver_init(void) {
-	void __iomem *efuse_addr = ioremap(0x980171d8, 0x4);
-	int val = readl(efuse_addr) & 0x3;
-	int ret = 0;
-	if (val != 0x1) {
-		ret =  platform_driver_register(&(dwc3_rtk_type_c_driver));
-	}
-	__iounmap(efuse_addr);
-	return ret;
+static int __init dwc3_rtk_type_c_driver_init(void)
+{
+	return platform_driver_register(&(dwc3_rtk_type_c_driver));
 }
 module_init(dwc3_rtk_type_c_driver_init);
 
-static void __exit dwc3_rtk_type_c_driver_exit(void) {
+static void __exit dwc3_rtk_type_c_driver_exit(void)
+{
 	platform_driver_unregister(&(dwc3_rtk_type_c_driver));
 }
 module_exit(dwc3_rtk_type_c_driver_exit);

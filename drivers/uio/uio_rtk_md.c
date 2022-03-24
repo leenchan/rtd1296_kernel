@@ -16,8 +16,10 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/uio_driver.h>
+#include <linux/pm_runtime.h>
 #include "reg_md.h"
 #include "uio_rtk_md.h"
+#include "uio_helper.h"
 
 struct md_uio_info {
 	struct uio_info info;
@@ -130,6 +132,43 @@ static inline void print_uio_mem(struct device *dev, struct uio_info *info,
 		umem->memtype, umem->name);
 }
 
+static int rtk_md_runtime_suspend(struct device *dev)
+{
+	struct md_uio_info *priv = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "%s\n", __func__);
+	clk_disable_unprepare(priv->clk);
+	return 0;
+}
+
+static int rtk_md_runtime_resume(struct device *dev)
+{
+	struct md_uio_info *priv = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "%s\n", __func__);
+	clk_prepare_enable(priv->clk);
+	return 0;
+}
+
+static const struct dev_pm_ops rtk_md_pm_ops = {
+	SET_RUNTIME_PM_OPS(rtk_md_runtime_suspend, rtk_md_runtime_resume, NULL)
+};
+
+static int rtk_md_open(struct uio_info *info, struct inode *inode)
+{
+	struct md_uio_info *priv = info->priv;
+
+	pm_runtime_get_sync(priv->dev);
+	return 0;
+}
+
+static int rtk_md_release(struct uio_info *info, struct inode *inode)
+{
+	struct md_uio_info *priv = info->priv;
+
+	pm_runtime_put_sync(priv->dev);
+	return 0;
+}
 
 static int rtk_md_probe(struct platform_device *pdev)
 {
@@ -137,78 +176,55 @@ static int rtk_md_probe(struct platform_device *pdev)
 	struct md_uio_info *priv;
 	struct uio_info *info;
 	int ret;
-	size_t size = 0;
-	void *virt = NULL;
-	dma_addr_t phys = 0;
-	struct resource res;
 
-	dev_info(dev, "[MD] %s\n", __func__);
-
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	priv->clk = clk_get(dev, NULL);
+	priv->clk = devm_clk_get(dev, NULL);
 	if (IS_ERR(priv->clk)) {
-		dev_warn(dev, "failed to get clk: %ld.\n", PTR_ERR(priv->clk));
+		dev_warn(dev, "clk_get() returns %ld\n", PTR_ERR(priv->clk));
 		priv->clk = NULL;
-	}
-
-	ret = of_address_to_resource(pdev->dev.of_node, 0, &res);
-	if (ret) {
-		dev_err(dev, "failed to get resource.\n");
-		goto free_priv;
 	}
 
 	ret = platform_get_irq(pdev, 0);
 	if (ret < 0) {
-		dev_err(dev, "failed to get irq.\n");
-		goto free_priv;
+		dev_err(dev, "platform_get_irq() returns %d\n", ret);
+		return ret;
 	}
 	priv->irq = ret;
+
 	priv->dev = dev;
-	priv->base = ioremap(res.start, resource_size(&res));
-
-	dev_info(dev, "resouce: %pr\n", &res);
-	dev_info(dev, "irq: %d\n", priv->irq);
-
 	info = &priv->info;
 
-	/* md register space */
 	info->mem[0].name = "MD reg space";
-	info->mem[0].addr = res.start;
-	info->mem[0].size = ALIGN(resource_size(&res), PAGE_SIZE);
-	info->mem[0].internal_addr = priv->base;
-	info->mem[0].memtype = UIO_MEM_PHYS;
-	print_uio_mem(dev, info, 0);
-
-	/* md driver data */
-	size = ALIGN(sizeof(struct md_hw), PAGE_SIZE);
-	virt = dma_alloc_coherent(dev, size, &phys, GFP_KERNEL);
-	if (!virt) {
-		ret = -ENOMEM;
-		goto free_base;
+	ret = uio_mem_of_iomap(dev, &info->mem[0], 0);
+	if (ret) {
+		dev_err(dev, "mem0: uio_mem_of_iomap() returns %d\n", ret);
+		goto free_uio_mem;
 	}
+	priv->base = info->mem[0].internal_addr;
+
 	info->mem[1].name = "MD driver data";
-	info->mem[1].addr = phys;
-	info->mem[1].size = size;
-	info->mem[1].internal_addr = virt;
-	info->mem[1].memtype = UIO_MEM_PHYS;
-	print_uio_mem(dev, info, 1);
-
-	/* md command queue */
-	size = ALIGN(MD_CMDBUF_SIZE * MD_NUM_ENGINES, PAGE_SIZE);
-	virt = dma_alloc_coherent(dev, size, &phys, GFP_KERNEL | GFP_DMA);
-	if (!virt) {
-		ret = -ENOMEM;
-		goto free_drv_data;
+	ret = uio_mem_dma_alloc(dev, &info->mem[1], sizeof(struct md_hw),
+		GFP_KERNEL);
+	if (ret) {
+		dev_err(dev, "mem1: uio_mem_dma_alloc() returns %d\n", ret);
+		goto free_uio_mem;
 	}
+
 	info->mem[2].name = "MD command queue";
-	info->mem[2].addr = phys;
-	info->mem[2].size = size;
-	info->mem[2].internal_addr = virt;
-	info->mem[2].memtype = UIO_MEM_PHYS;
-	print_uio_mem(dev, info, 2);
+	ret = uio_mem_dma_alloc(dev, &info->mem[2],
+		MD_CMDBUF_SIZE * MD_NUM_ENGINES, GFP_KERNEL | GFP_DMA);
+	if (ret) {
+		dev_err(dev, "mem2: uio_mem_dma_alloc() returns %d\n", ret);
+		goto free_uio_mem;
+	}
+
+	dev_info(dev, "irq=%d\n", priv->irq);
+	uio_mem_print(dev, &info->mem[0]);
+	uio_mem_print(dev, &info->mem[1]);
+	uio_mem_print(dev, &info->mem[2]);
 
 #ifdef CONFIG_UIO_ASSIGN_MINOR
 	info->minor = 252;
@@ -218,31 +234,44 @@ static int rtk_md_probe(struct platform_device *pdev)
 	info->irq = priv->irq;
 	info->irq_flags = IRQF_SHARED;
 	info->handler = md_irq_handler;
+	info->open = rtk_md_open;
+	info->release = rtk_md_release;
+	info->priv = priv;
 
 	ret = uio_register_device(dev, info);
 	if (ret) {
-		dev_err(dev, "failed to register uio device.\n");
-		goto free_cmd_queue;
+		dev_err(dev, "uio_register_device() returns %d\n", ret);
+		goto free_uio_mem;
 	}
 
-	clk_prepare_enable(priv->clk);
+	ret = uio_reset_control_deassert(dev, NULL);
+	if (ret)
+		dev_warn(dev, "uio_reset_control_deassert() returns %d\n", ret);
 
 	platform_set_drvdata(pdev, priv);
 
+	/* enable runtime pm */
+	pm_runtime_set_suspended(dev);
+	pm_runtime_enable(dev);
+
+	/* init md */
+	pm_runtime_get_sync(dev);
+
 	rtk_md_init_drv(dev);
 
+	if (!of_property_read_bool(dev->of_node, "realtek,device-is-exclusive")) {
+		dev_info(dev, "shared mode\n");
+		pm_runtime_forbid(dev);
+	}
+	pm_runtime_put_sync(dev);
+
+	dev_info(dev, "initialized\n");
 	return 0;
-free_cmd_queue:
-	dma_free_coherent(dev, info->mem[2].size, info->mem[2].internal_addr,
-		info->mem[2].addr);
-free_drv_data:
-	dma_free_coherent(dev, info->mem[1].size, info->mem[1].internal_addr,
-		info->mem[1].addr);
-free_base:
-	iounmap(priv->base);
-	clk_put(priv->clk);
-free_priv:
-	kfree(priv);
+
+free_uio_mem:
+	uio_mem_dma_free(dev, &info->mem[2]);
+	uio_mem_dma_free(dev, &info->mem[1]);
+	uio_mem_iounmap(dev, &info->mem[0]);
 
 	return ret;
 }
@@ -253,18 +282,14 @@ static int rtk_md_remove(struct platform_device *pdev)
 	struct md_uio_info *priv = platform_get_drvdata(pdev);
 	struct uio_info *info = &priv->info;
 
-	dev_info(dev, "[MD] %s\n", __func__);
-
-	uio_unregister_device(info);
+	pm_runtime_disable(dev);
+	uio_reset_control_assert(dev, NULL);
 	platform_set_drvdata(pdev, NULL);
-	dma_free_coherent(dev, info->mem[2].size, info->mem[2].internal_addr,
-		info->mem[2].addr);
-	dma_free_coherent(dev, info->mem[1].size, info->mem[1].internal_addr,
-		info->mem[1].addr);
-	iounmap(info->mem[0].internal_addr);
-	clk_put(priv->clk);
-	kfree(priv);
-
+	uio_unregister_device(info);
+	uio_mem_dma_free(dev, &info->mem[2]);
+	uio_mem_dma_free(dev, &info->mem[1]);
+	uio_mem_iounmap(dev, &info->mem[0]);
+	dev_info(dev, "removed\n");
 	return 0;
 }
 
@@ -280,6 +305,7 @@ static struct platform_driver rtk_md_driver = {
 		.name = "rtk-md",
 		.owner = THIS_MODULE,
 		.of_match_table = rtk_md_ids,
+		.pm = &rtk_md_pm_ops,
 	},
 };
-module_platform_driver_probe(rtk_md_driver, rtk_md_probe);
+module_platform_driver(rtk_md_driver);

@@ -20,13 +20,17 @@
 
 typedef struct {
 	char *name;
-	struct miscdevice  miscdev;
+	struct miscdevice miscdev;
 	struct switch_dev sdev;
-    struct device dev;
+	struct device dev;
 	void __iomem *reg_base;
+	struct reset_control *reset_hdmi;
+	struct clk *clk_hdmi;
 	int hpd_gpio;
-	int sel_gpio;
 	unsigned int hpd_irq;
+#if 1//def __LINUX_MEDIA_NAS__
+	wait_queue_head_t hpd_wait;
+#endif
 } hdmitx_device_t;
 
 
@@ -52,5 +56,5 @@ extern int rtk_hdmitx_switch_resume(void);
 
 int hdmitx_get_raw_edid(unsigned char *edid);
 
-#endif/* __HDMITX_DEV__H__ */
+#endif /* __HDMITX_DEV__H__ */
 

@@ -99,10 +99,6 @@ static const char *xen_hypercall_names[] = {
 	N(arch_5),
 	N(arch_6),
 	N(arch_7),
-
-#ifdef CONFIG_RTK_XEN_HYPERCALL
-	N(rtk_hypercall_op),
-#endif
 };
 #undef N
 

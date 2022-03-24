@@ -1,10 +1,10 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2008  
+* Copyright c                  Realtek Semiconductor Corporation, 2008
 * All rights reserved.
-* 
+*
 * Program : network interface driver header file
-* Abstract : 
-* Author : hyking (hyking_liu@realsil.com.cn)  
+* Abstract :
+* Author : hyking (hyking_liu@realsil.com.cn)
 *
 * This program is free software; you can redistribute it and/or modify
 * it under the terms of the GNU General Public License as published by
@@ -42,19 +42,19 @@ typedef struct _rtl865x_acl_chain_s
 typedef struct rtl865x_netif_local_s
 {
 	uint16 	vid; /*netif->vid*/
-	uint16 	mtu; /*netif's MTU*/	
+	uint16 	mtu; /*netif's MTU*/
 	uint16 	macAddrNumber; /*how many continuous mac is attached*/
 	uint16 	inAclStart, inAclEnd, outAclStart, outAclEnd; /*acl index*/
 	uint16 	enableRoute; /*enable route*/
 	uint32 	valid:1,	/*valid?*/
 		if_type:5, /*interface type, IF_ETHER, IF_PPPOE*/
-		refCnt:5, /*referenc count by other table entry*/			
+		refCnt:5, /*referenc count by other table entry*/
 		asicIdx:3, /*asic index, total 8 entrys in asic*/
 		is_wan:1, /*this interface is wan?*/
 		is_defaultWan:1, /*if there is multiple wan interface, which interface is default wan*/
 		dmz:1,	/*dmz interface?*/
 		is_slave:1; /*is slave interface*/
-	
+
 	ether_addr_t macAddr;
 	uint8	name[MAX_IFNAMESIZE];
 #ifdef CONFIG_RTL_LAYERED_DRIVER_ACL

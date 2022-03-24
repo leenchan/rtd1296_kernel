@@ -24,6 +24,10 @@
 #include <linux/of_address.h>
 #include <linux/of_gpio.h>
 
+#include <linux/reset.h>
+#include <linux/clk.h> /* clk_get */
+#include <linux/clk-provider.h>
+
 #include "hdmitx.h"
 #include "hdmitx_dev.h"
 #include "hdmitx_api.h"
@@ -37,7 +41,7 @@ static int __init rtk_hdmi_init(void);
 static void __exit rtk_hdmi_exit(void);
 
 static asoc_hdmi_t hdmi_data;
-static hdmitx_device_t tx_dev;
+hdmitx_device_t tx_dev;
 
 /**
  * hdmitx_get_raw_edid - get raw data of sink device EDID
@@ -73,17 +77,14 @@ int hdmitx_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-/*------------------------------------------------------------------
- * Func : hdmitx_ioctl
+/**
+ * hdmitx_ioctl -  ioctl function of hdmitx miscdev
+ * @file: my argument
+ * @cmd: control command
+ * @arg: arguments
  *
- * Desc : ioctl function of hdmitx miscdev
- *
- * Parm : file  : context of file
- *        cmd   : control command
- *        arg   : arguments
- *
- * Retn : 0 : success, others fail
- *------------------------------------------------------------------*/
+ * Return: 0 on success, -E* on failure
+ */
 static long hdmitx_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	hdmitx_device_t *dev = (hdmitx_device_t *) file->private_data;
@@ -155,28 +156,43 @@ static long hdmitx_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case HDMI_GET_OUTPUT_FORMAT:
 		return ops_get_output_format((void __user *)arg);
 
+	case HDMI_SET_VO_INTERFACE_TYPE:
+		return ops_set_interface_type((void __user *)arg);
+
+	case HDMI_GET_CONFIG_TV_SYSTEM:
+		return ops_get_config_tv_system((void __user *)arg);
+
+#if 1//def __LINUX_MEDIA_NAS__
+	case HDMI_HOTPLUG_DETECTION:
+		return ops_set_hotplug_detection((void __user *)arg, dev);
+
+	case HDMI_WAIT_HOTPLUG:
+		return ops_wait_hotplug((void __user *)arg, dev);
+#endif
 	default:
 		HDMI_DEBUG(" Unknown ioctl cmd %08x", cmd);
 		return -EFAULT;
 	}
 }
-/*------------------------------------------------------------------
- * hdmi misc device
- *------------------------------------------------------------------*/
+
 const struct file_operations hdmitx_fops = {
 	.owner			= THIS_MODULE,
 	.open			= hdmitx_open,
 	.unlocked_ioctl	= hdmitx_ioctl,
+#if !defined(CONFIG_COMPAT)
+	.compat_ioctl	= NULL,
+#else
 	.compat_ioctl	= compat_hdmitx_ioctl,
+#endif
 	.poll			= NULL,
 };
 
-/*------------------------------------------------------------------
- * Func : register_hdmitx_miscdev
- * Desc : register hdmitx miscdev
- * Parm : hdmitx device : hdmitx miscdev to be registered
- * Retn : 0
- *------------------------------------------------------------------*/
+/**
+ * register_hdmitx_miscdev - register hdmitx miscdev
+ * @device: hdmitx miscdev to be registered
+ *
+ * Return: 0 on success, -E* on failure
+ */
 int register_hdmitx_miscdev(hdmitx_device_t *device)
 {
 	struct miscdevice *miscdev = &device->miscdev;
@@ -189,19 +205,25 @@ int register_hdmitx_miscdev(hdmitx_device_t *device)
 	return misc_register(miscdev);
 }
 
-int deregister_hdmitx_miscdev(hdmitx_device_t *device)
+void deregister_hdmitx_miscdev(hdmitx_device_t *device)
 {
-	return misc_deregister(&device->miscdev);
+	misc_deregister(&device->miscdev);
 }
 
 static int rtk_hdmitx_suspend(struct device *dev)
 {
 	int ret_val;
+	int hpd_state;
 
 	HDMI_INFO("Enter %s", __func__);
 
 	ret_val = rtk_hdmitx_switch_suspend();
 	hdmitx_scdcrr_suspend();
+
+	/* Send no scramble for prevent HDMI 5V still exist after suspend */
+	hpd_state = hdmitx_switch_get_state();
+	if (hpd_state == 1)
+		hdmitx_send_scdc_TmdsConfig(0, 0, 0);
 
 	HDMI_INFO("Exit %s", __func__);
 	return ret_val;
@@ -213,15 +235,25 @@ static int rtk_hdmitx_resume(struct device *dev)
 
 	HDMI_INFO("Enter %s", __func__);
 
-	/* bpi, sel_gpio external pull high in sleep mode, change back to low level */
-	if(tx_dev.sel_gpio > 0)
-		gpio_direction_output(tx_dev.sel_gpio, 0);
-
 	hdmitx_scdcrr_resume();
 	ret_val = rtk_hdmitx_switch_resume();
 
 	HDMI_INFO("Exit %s", __func__);
 	return ret_val;
+}
+
+static void rtk_hdmitx_shutdown(struct platform_device *pdev)
+{
+	int hpd_state;
+
+	HDMI_INFO("Enter %s", __func__);
+
+	/* Send no scramble for prevent HDMI 5V still exist */
+	hpd_state = hdmitx_switch_get_state();
+	if (hpd_state == 1)
+		hdmitx_send_scdc_TmdsConfig(0, 0, 0);
+
+	HDMI_INFO("Exit %s", __func__);
 }
 
 static int rtk_hdmi_probe(struct platform_device *pdev)
@@ -240,6 +272,18 @@ static int rtk_hdmi_probe(struct platform_device *pdev)
 		goto end;
 	}
 
+	tx_dev.reset_hdmi = reset_control_get(&pdev->dev, "rstn_hdmi");
+	if (IS_ERR(tx_dev.reset_hdmi)) {
+		HDMI_ERROR("Can't get reset_control reset_hdmi");
+		goto end;
+	}
+
+	tx_dev.clk_hdmi = clk_get(&pdev->dev, "clk_en_hdmi");
+	if (IS_ERR(tx_dev.clk_hdmi)) {
+		HDMI_ERROR("Can't get clk clk_hdmi");
+		goto end;
+	}
+
 	if (register_hdmitx_miscdev(&tx_dev)) {
 		HDMI_ERROR("Could not register_hdmitx_miscdev");
 		goto end;
@@ -254,37 +298,14 @@ static int rtk_hdmi_probe(struct platform_device *pdev)
 		"gpio-hpd-detect", 0);
 
 	if (tx_dev.hpd_gpio < 0) {
-		HDMI_ERROR("Could not get hpd gpio from of");
+		HDMI_ERROR("Could not get gpio from of");
 		goto end;
 	} else {
 		HDMI_INFO("hotplug gpio(%d)", tx_dev.hpd_gpio);
-
-		if (gpio_is_valid(tx_dev.hpd_gpio)) {
-			if (gpio_request(tx_dev.hpd_gpio, pdev->dev.of_node->name))
-				HDMI_ERROR("Request hpd gpio(%d) fail", tx_dev.hpd_gpio);
-		}
 	}
 
-	/* Initial ts3dv642 sel2 gpio */
-	tx_dev.sel_gpio = of_get_named_gpio(pdev->dev.of_node,
-		"gpio-hdmitx-sel", 0);
-	if (tx_dev.sel_gpio < 0) {
-		HDMI_ERROR("Could not get sel gpio from of");
-		/*goto end;*/
-	} else {
-		HDMI_INFO("sel gpio(%d)", tx_dev.sel_gpio);
-
-		if (gpio_is_valid(tx_dev.sel_gpio)) {
-			if (gpio_request(tx_dev.sel_gpio, "hdmitx_sel")) {
-				HDMI_ERROR("Request sel gpio(%d) fail", tx_dev.sel_gpio);
-				tx_dev.sel_gpio = -1;
-			}
-		}
-		else {
-			HDMI_ERROR("sel gpio %d is not valid", tx_dev.sel_gpio);
-			tx_dev.sel_gpio = -1;
-		}
-	}
+	if (gpio_request(tx_dev.hpd_gpio, pdev->dev.of_node->name))
+		HDMI_ERROR("Request gpio(%d) fail", tx_dev.hpd_gpio);
 
 	/* Get hotplug gpio irq */
 	tx_dev.hpd_irq = gpio_to_irq(tx_dev.hpd_gpio);
@@ -299,7 +320,9 @@ static int rtk_hdmi_probe(struct platform_device *pdev)
 		HDMI_ERROR("Could not register_hdmitx_switchdev");
 		goto err_register;
 	}
-
+#if 1//__LINUX_MEDIA_NAS__
+	init_waitqueue_head(&tx_dev.hpd_wait);
+#endif
 	setup_mute_gpio(pdev->dev.of_node);
 
 	/* Initial SCDC read request */
@@ -316,11 +339,11 @@ static int rtk_hdmi_probe(struct platform_device *pdev)
 	register_support_list_sysfs(&pdev->dev);
 
 	/* HDMI clock always on if DisplayPort exist */
-	dptx_np = of_find_compatible_node(NULL, NULL, "Realtek,rtk129x-dptx");
+	dptx_np = of_find_compatible_node(NULL, NULL, "Realtek,rtk-dptx");
 	if (dptx_np) {
 		if (of_device_is_available(dptx_np)) {
-			HDMI_INFO("Found DP TX node, clock always on");
-			hdmi_clk_always_on = 1;
+			HDMI_INFO("Found DP TX node");
+			displayport_exist = 1;
 		}
 	}
 
@@ -335,7 +358,9 @@ end:
 }
 
 static const struct of_device_id rtk_hdmitx_dt_ids[] = {
-	{ .compatible = "Realtek,rtk119x-hdmitx", },
+	{ .compatible = "realtek,rtd119x-hdmitx", },
+	{ .compatible = "realtek,rtd129x-hdmitx", },
+	{ .compatible = "realtek,rtd161x-hdmitx", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, rtk_hdmitx_dt_ids);
@@ -343,6 +368,8 @@ MODULE_DEVICE_TABLE(of, rtk_hdmitx_dt_ids);
 static const struct dev_pm_ops rtk_hdmitx_pm_ops = {
 	.suspend    = rtk_hdmitx_suspend,
 	.resume     = rtk_hdmitx_resume,
+	.freeze     = rtk_hdmitx_suspend,
+	.thaw       = rtk_hdmitx_resume,
 };
 
 static struct platform_driver rtk_hdmi_driver = {
@@ -355,12 +382,9 @@ static struct platform_driver rtk_hdmi_driver = {
 		.pm = &rtk_hdmitx_pm_ops,
 #endif
 	},
+	.shutdown = rtk_hdmitx_shutdown,
 };
 
-/*-----------------------------------------------------------------------------
- * Function: hdmi_init
- *-----------------------------------------------------------------------------
- */
 static int __init rtk_hdmi_init(void)
 {
 	if (platform_driver_register(&rtk_hdmi_driver)) {
@@ -376,10 +400,6 @@ err_register:
 	return -EFAULT;
 }
 
-/*-----------------------------------------------------------------------------
- * Function: hdcp_exit
- *-----------------------------------------------------------------------------
- */
 static void __exit rtk_hdmi_exit(void)
 {
 #ifdef USE_ION_AUDIO_HEAP
@@ -390,9 +410,6 @@ static void __exit rtk_hdmi_exit(void)
 	platform_driver_unregister(&rtk_hdmi_driver);
 }
 
-/*-----------------------------------------------------------------------------
- *-----------------------------------------------------------------------------
- */
 module_init(rtk_hdmi_init);
 module_exit(rtk_hdmi_exit);
 MODULE_LICENSE("GPL");

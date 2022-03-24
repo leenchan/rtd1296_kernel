@@ -24,13 +24,12 @@
 
 #include "puwrap.h"
 
-
 #ifdef CONFIG_RTK_RESERVE_MEMORY
 #define USE_ION_ALLOCATOR
 #ifdef USE_ION_ALLOCATOR
 #define NUM_ION_STRUCT 256
 #include "../../../../staging/android/ion/ion.h"
-#include "../../../../staging/android/uapi/rtk_phoenix_ion.h"
+#include "../../../../staging/android/uapi/ion_rtk.h"
 struct rtkdrv_ion_buffer_t {
     unsigned int size;
     unsigned int inUse;
@@ -70,81 +69,96 @@ unsigned long pll_size_register = 0;
 #ifdef CONFIG_RTK_RESERVE_MEMORY
 int pu_alloc_dma_buffer(unsigned int size, unsigned long *phys_addr, unsigned long *base, unsigned int mem_type)
 {
+#ifdef USE_ION_ALLOCATOR
+    int ret = -1;
+
     if (!size)
         return -1;
 
-#ifdef USE_ION_ALLOCATOR
-    unsigned int i;
-    struct ion_handle *handle;
-    struct dma_buf *dmabuf;
-    ion_phys_addr_t dat;
-    size_t len;
-    int heap = RTK_PHOENIX_ION_HEAP_MEDIA_MASK;
-    int flags = (ION_FLAG_SCPUACC | ION_FLAG_HWIPACC | ION_FLAG_NONCACHED);
-
     mutex_lock(&s_pu_mutex);
-    for (i = 0; i < NUM_ION_STRUCT; i++)
-    {
-        if (pu_ion_buffer[i].inUse == 0)
-            break;
-    }
-    if (i == NUM_ION_STRUCT)
-    {
-        printk(KERN_ERR "[PUWRAP] NUM_ION_STRUCT is too small!!!");
-        mutex_unlock(&s_pu_mutex);
-        return -1;
-    }
+    do {
+        int i;
+        struct ion_handle *handle;
+        struct dma_buf *dmabuf;
+        ion_phys_addr_t dat;
+        size_t len;
+        int heap = RTK_PHOENIX_ION_HEAP_MEDIA_MASK;
+        int flags = (ION_FLAG_SCPUACC | ION_FLAG_HWIPACC | ION_FLAG_NONCACHED);
 
-    switch(mem_type)
-    {
-        case VE_SECURE_NORMAL:
+        for (i = 0; i < NUM_ION_STRUCT; i++)
         {
-            heap = RTK_PHOENIX_ION_HEAP_MEDIA_MASK;
-            flags = (ION_FLAG_SCPUACC | ION_FLAG_HWIPACC | ION_FLAG_NONCACHED | ION_FLAG_VE_SPEC);
+            if (pu_ion_buffer[i].inUse == 0)
+                break;
+        }
+        if (i == NUM_ION_STRUCT)
+        {
+            printk(KERN_ERR "[PUWRAP] NUM_ION_STRUCT is too small!!!");
             break;
         }
-        case VE_SECURE_PROTECTION:
+
+        switch(mem_type)
         {
-            heap = RTK_PHOENIX_ION_HEAP_SECURE_MASK;
-            flags = (ION_FLAG_HWIPACC | ION_FLAG_NONCACHED);
+            case VE_SECURE_NORMAL:
+                {
+                    heap = RTK_PHOENIX_ION_HEAP_MEDIA_MASK;
+                    flags = (ION_FLAG_SCPUACC | ION_FLAG_HWIPACC | ION_FLAG_NONCACHED | ION_FLAG_VE_SPEC);
+                    break;
+                }
+            case VE_SECURE_PROTECTION:
+                {
+                    heap = RTK_PHOENIX_ION_HEAP_SECURE_MASK;
+                    flags = (ION_FLAG_HWIPACC | ION_FLAG_NONCACHED);
+                    break;
+                }
+            default:
+                {
+                    heap = RTK_PHOENIX_ION_HEAP_MEDIA_MASK;
+                    flags = (ION_FLAG_SCPUACC | ION_FLAG_HWIPACC | ION_FLAG_NONCACHED);
+                    break;
+                }
+        }
+
+        handle = ion_alloc(pu_client, size, 1024, heap, flags);
+        if (IS_ERR(handle))
+        {
+            printk(KERN_ERR "[PUWRAP] ion_alloc allocation error size=%d\n", size);
             break;
         }
-        default:
+
+        if(ion_phys(pu_client, handle, &dat, &len) != 0)
         {
-            heap = RTK_PHOENIX_ION_HEAP_MEDIA_MASK;
-            flags = (ION_FLAG_SCPUACC | ION_FLAG_HWIPACC | ION_FLAG_NONCACHED);
+            ion_free(pu_client, handle);
+            printk(KERN_ERR "[PUWRAP] ion_alloc allocation error size=%d\n", size);
             break;
         }
-    }
 
-    handle = ion_alloc(pu_client, size, 1024, heap, flags);
-    if (IS_ERR(handle))
-    {
-        printk(KERN_ERR "[PUWRAP] ion_alloc allocation error size=%d\n", size);
-        mutex_unlock(&s_pu_mutex);
-        return -1;
-    }
+        dmabuf = ion_share_dma_buf(pu_client, handle);
+        if (IS_ERR(dmabuf)) {
+            ion_unmap_kernel(pu_client, handle);
+            ion_free(pu_client, handle);
+            printk(KERN_ERR "[PUWRAP] ion_share_dma_buf error %p (size=%d)\n", dmabuf, size);
+            break;
+        }
 
-    if(ion_phys(pu_client, handle, &dat, &len) != 0)
-    {
-        printk(KERN_ERR "[PUWRAP] ion_alloc allocation error size=%d\n", size);
-        mutex_unlock(&s_pu_mutex);
-        return -1;
-    }
+        *base = (unsigned long) dmabuf; // we didn't need base address on user space, but we also need it has value to do detection
+        *phys_addr = (unsigned long)dat;
 
-    *base = (unsigned long)ion_map_kernel(pu_client, handle);
-    *phys_addr = (unsigned long)dat;
-    dmabuf = ion_share_dma_buf(pu_client, handle);
+        pu_ion_buffer[i].size = size;
+        pu_ion_buffer[i].inUse = 1;
+        pu_ion_buffer[i].phys_addr = (unsigned long)*phys_addr;
+        pu_ion_buffer[i].dmabuf = (unsigned long)dmabuf;
+        pu_ion_buffer[i].pIonHandle = (unsigned long)handle;
 
-    pu_ion_buffer[i].size = size;
-    pu_ion_buffer[i].inUse = 1;
-    pu_ion_buffer[i].phys_addr = (unsigned long)*phys_addr;
-    pu_ion_buffer[i].dmabuf = (unsigned long)dmabuf;
-    pu_ion_buffer[i].pIonHandle = (unsigned long)handle;
-
+        ret = 0;
+        break;
+    } while (0);
     mutex_unlock(&s_pu_mutex);
+    return ret;
 
 #else /* else USE_ION_ALLOCATOR */
+    if (!size)
+        return -1;
+
     *phys_addr = (unsigned long)vmem_alloc(&s_mem, size, 0);
     if (*phys_addr  == (unsigned long)-1)
     {
@@ -153,10 +167,10 @@ int pu_alloc_dma_buffer(unsigned int size, unsigned long *phys_addr, unsigned lo
     }
 
     *base = (unsigned long)(s_memory.base + (*phys_addr - s_memory.phys_addr));
-#endif /* endif USE_ION_ALLOCATOR */
     //printk("[PUWARP] base:0x%lx, phy_addr:0x%lx, size:%d\n", *base, (unsigned long)*phys_addr, size);
 
     return 0;
+#endif /* endif USE_ION_ALLOCATOR */
 }
 
 void pu_free_dma_buffer(unsigned long base, unsigned long phys_addr)
@@ -165,40 +179,37 @@ void pu_free_dma_buffer(unsigned long base, unsigned long phys_addr)
         return;
 
 #ifdef USE_ION_ALLOCATOR
-    unsigned int i;
-    struct ion_handle *handle;
-    struct dma_buf *dmabuf;
     mutex_lock(&s_pu_mutex);
+    do {
+        int i;
+        struct ion_handle *handle;
+        struct dma_buf *dmabuf;
 
-    for (i = 0; i < NUM_ION_STRUCT; i++)
-    {
-        if (pu_ion_buffer[i].phys_addr == phys_addr)
+        for (i = 0; i < NUM_ION_STRUCT; i++)
+        {
+            if (pu_ion_buffer[i].phys_addr == phys_addr)
+                break;
+        }
+        if (i == NUM_ION_STRUCT)
+        {
+            printk(KERN_ERR "[PUWRAP] can't find phys_addr:0x%lx !!!\n", (unsigned long)phys_addr);
             break;
-    }
-    if (i == NUM_ION_STRUCT)
-    {
-        printk(KERN_ERR "[PUWRAP] can't find phys_addr:0x%lx !!!\n", (unsigned long)phys_addr);
-        mutex_unlock(&s_pu_mutex);
-        return;
-    }
+        }
 
-    dmabuf = (struct dma_buf *)pu_ion_buffer[i].dmabuf;
-    if (dmabuf != NULL)
-    {
-        dmabuf->ops->release(dmabuf);
-        list_del(&dmabuf->list_node);
-        if (dmabuf->resv == (struct reservation_object *)&dmabuf[1])
-            reservation_object_fini(dmabuf->resv);
-        kfree(dmabuf);
-    }
+        dmabuf = (struct dma_buf *)pu_ion_buffer[i].dmabuf;
+        if (dmabuf != NULL)
+        {
+            dma_buf_put(dmabuf);
+            pu_ion_buffer[i].dmabuf = (unsigned long) NULL;
+        }
 
-    handle = (struct ion_handle *)pu_ion_buffer[i].pIonHandle;
-    if(handle != NULL)
-    {
-        ion_unmap_kernel(pu_client, handle);
-        ion_free(pu_client, handle);
-    }
-    memset(&pu_ion_buffer[i], 0, sizeof(struct rtkdrv_ion_buffer_t));
+        handle = (struct ion_handle *)pu_ion_buffer[i].pIonHandle;
+        if(handle != NULL)
+        {
+            ion_free(pu_client, handle);
+        }
+        memset(&pu_ion_buffer[i], 0, sizeof(struct rtkdrv_ion_buffer_t));
+    } while (0);
     mutex_unlock(&s_pu_mutex);
 #else
     vmem_free(&s_mem, (unsigned long)phys_addr, 0);
@@ -236,6 +247,87 @@ int pu_mmap_dma_buffer(struct vm_area_struct *vm)
     return -EINVAL;
 #endif
 }
+
+unsigned long pu_mmap_kernel_buffer(unsigned long phys_addr, unsigned int size)
+{
+#ifdef USE_ION_ALLOCATOR
+    unsigned long ret = 0;
+
+    if (!size)
+        return 0;
+
+    mutex_lock(&s_pu_mutex);
+    do {
+        int i;
+        struct dma_buf *dmabuf;
+        void * virt_addr;
+
+        for (i = 0; i < NUM_ION_STRUCT; i++)
+        {
+            if (pu_ion_buffer[i].phys_addr == phys_addr)
+                break;
+        }
+        if (i == NUM_ION_STRUCT)
+        {
+            printk(KERN_ERR "[PUWRAP] can't find phys_addr:0x%lx !!!\n", (unsigned long)phys_addr);
+            break;
+        }
+
+        dmabuf = (struct dma_buf *)pu_ion_buffer[i].dmabuf;
+        if(dmabuf != NULL)
+        {
+            ret = dma_buf_begin_cpu_access(dmabuf, 0);
+            if (ret) {
+                printk(KERN_ERR "[PUWRAP] dma_buf_begin_cpu_access error ret=%d (size=%d) \n", ret, size);
+                break;
+            }
+            virt_addr = dma_buf_kmap(dmabuf, 0);
+            if (IS_ERR_OR_NULL(virt_addr)) {
+                printk(KERN_ERR "[PUWRAP] dma_buf_kmap error %p (size=%d) \n", virt_addr, size);
+                break;
+            }
+
+            ret = (unsigned long)virt_addr;
+        }
+    } while(0);
+    mutex_unlock(&s_pu_mutex);
+
+    return ret;
+#endif
+}
+
+void pu_unmap_kernel_buffer(unsigned long base, unsigned long phys_addr)
+{
+    if (!base)
+        return;
+
+#ifdef USE_ION_ALLOCATOR
+    mutex_lock(&s_pu_mutex);
+    do {
+        int i;
+        struct dma_buf *dmabuf;
+
+        for (i = 0; i < NUM_ION_STRUCT; i++)
+        {
+            if (pu_ion_buffer[i].phys_addr == phys_addr)
+                break;
+        }
+        if (i == NUM_ION_STRUCT)
+        {
+            printk(KERN_ERR "[PUWRAP] can't find phys_addr:0x%lx !!!\n", (unsigned long)phys_addr);
+            break;
+        }
+
+        dmabuf = (struct dma_buf *)pu_ion_buffer[i].dmabuf;
+        if(dmabuf != NULL)
+        {
+            dma_buf_kunmap(dmabuf, 0, (void *)base);
+            dma_buf_end_cpu_access(dmabuf, 0);
+        }
+    } while (0);
+    mutex_unlock(&s_pu_mutex);
+#endif
+}
 #endif //#ifdef CONFIG_RTK_RESERVE_MEMORY
 
 void pu_pll_setting(unsigned long offset, unsigned int value, unsigned int bOverwrite, unsigned int bEnable)
@@ -271,11 +363,12 @@ void pu_pll_setting(unsigned long offset, unsigned int value, unsigned int bOver
 static int pu_probe(struct platform_device *pdev)
 {
     struct resource res;
+    void __iomem *iobase;
+    struct device_node *node;
+
     printk(KERN_INFO "[PUWRAP] pu_probe\n");
 
-    void __iomem *iobase;
-    struct device_node *node = pdev->dev.of_node;
-
+    node = pdev->dev.of_node;
     of_address_to_resource(node, 0, &res);
     iobase = of_iomap(node, 0);
 
@@ -366,7 +459,7 @@ static struct platform_driver pu_driver = {
 };
 #endif
 
-static ssize_t pu_memsize_show(struct kobject *kobj, struct kobject_attribute *attr, char *buf)
+static ssize_t pu_memsize_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
     return sprintf(buf, "%d\n", (int)(get_num_physpages() << PAGE_SHIFT));
 }

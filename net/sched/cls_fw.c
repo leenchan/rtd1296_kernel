@@ -28,11 +28,6 @@
 #include <net/netlink.h>
 #include <net/act_api.h>
 #include <net/pkt_cls.h>
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-#include <net/rtl/rtl_types.h>
-#include <net/rtl/rtl865x_netif.h>
-#include <net/rtl/rtl865x_outputQueue.h>
-#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
 
 #define HTSIZE 256
 
@@ -61,64 +56,8 @@ static u32 fw_hash(u32 handle)
 	return handle % HTSIZE;
 }
 
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-static int fw_classifyMark(__u32 mark, struct tcf_proto *tp,
-			   struct tcf_result *res)
-{
-	struct fw_head *head;
-	struct fw_filter *f;
-	u32 id;
-
-	head = (struct fw_head*)tp->root;
-
-	if (head != NULL) {
-		id = mark & head->mask;
-		for (f = head->ht[fw_hash(id)]; f; f = f->next) {
-			if (f->id == id) {
-				*res = f->res;
-				return 0;
-			}
-		}
-	} else {
-		/* old method */
-		id = mark;
-		if (id && (TC_H_MAJ(id) == 0 || !(TC_H_MAJ(id ^ tp->q->handle)))) {
-			res->classid = id;
-			res->class = 0;
-			return 0;
-		}
-	}
-
-	return -1;
-}
-
-static int fw_arrange_rules(struct tcf_proto *tp)
-{
-	rtl865x_qos_rule_t *qosRule;
-	struct tcf_result res;
-
-	qosRule = rtl865x_qosRuleHead;
-	while (qosRule)
-	{
-		if (fw_classifyMark(qosRule->mark, tp, &res) == 0)
-		{
-			qosRule->handle = res.classid;
-		}
-		else if(TC_H_MAJ(qosRule->handle) == TC_H_MAJ(tp->classid))
-			qosRule->handle = 0;
-
-		qosRule = qosRule->next;
-	}
-
-	rtl865x_qosArrangeRuleByNetif();
-
-	return SUCCESS;
-}
-
-#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
-
 static int fw_classify(struct sk_buff *skb, const struct tcf_proto *tp,
-			  struct tcf_result *res)
+		       struct tcf_result *res)
 {
 	struct fw_head *head = rcu_dereference_bh(tp->root);
 	struct fw_filter *f;
@@ -183,10 +122,6 @@ static int fw_init(struct tcf_proto *tp)
 static void fw_delete_filter(struct rcu_head *head)
 {
 	struct fw_filter *f = container_of(head, struct fw_filter, rcu);
-
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-	fw_arrange_rules(f->tp);
-#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
 
 	tcf_exts_destroy(&f->exts);
 	kfree(f);
@@ -253,17 +188,20 @@ static const struct nla_policy fw_policy[TCA_FW_MAX + 1] = {
 
 static int
 fw_change_attrs(struct net *net, struct tcf_proto *tp, struct fw_filter *f,
-	struct nlattr **tb, struct nlattr **tca, unsigned long base, bool ovr)
+		struct nlattr **tb, struct nlattr **tca, unsigned long base,
+		bool ovr)
 {
 	struct fw_head *head = rtnl_dereference(tp->root);
 	struct tcf_exts e;
 	u32 mask;
 	int err;
 
-	tcf_exts_init(&e, TCA_FW_ACT, TCA_FW_POLICE);
-	err = tcf_exts_validate(net, tp, tb, tca[TCA_RATE], &e, ovr);
+	err = tcf_exts_init(&e, TCA_FW_ACT, TCA_FW_POLICE);
 	if (err < 0)
 		return err;
+	err = tcf_exts_validate(net, tp, tb, tca[TCA_RATE], &e, ovr);
+	if (err < 0)
+		goto errout;
 
 	if (tb[TCA_FW_CLASSID]) {
 		f->res.classid = nla_get_u32(tb[TCA_FW_CLASSID]);
@@ -292,9 +230,6 @@ fw_change_attrs(struct net *net, struct tcf_proto *tp, struct fw_filter *f,
 
 	tcf_exts_change(tp, &f->exts, &e);
 
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-	fw_arrange_rules(tp);
-#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
 	return 0;
 errout:
 	tcf_exts_destroy(&e);
@@ -303,9 +238,8 @@ errout:
 
 static int fw_change(struct net *net, struct sk_buff *in_skb,
 		     struct tcf_proto *tp, unsigned long base,
-		     u32 handle,
-		     struct nlattr **tca,
-		     unsigned long *arg, bool ovr)
+		     u32 handle, struct nlattr **tca, unsigned long *arg,
+		     bool ovr)
 {
 	struct fw_head *head = rtnl_dereference(tp->root);
 	struct fw_filter *f = (struct fw_filter *) *arg;
@@ -338,10 +272,15 @@ static int fw_change(struct net *net, struct sk_buff *in_skb,
 #endif /* CONFIG_NET_CLS_IND */
 		fnew->tp = f->tp;
 
-		tcf_exts_init(&fnew->exts, TCA_FW_ACT, TCA_FW_POLICE);
+		err = tcf_exts_init(&fnew->exts, TCA_FW_ACT, TCA_FW_POLICE);
+		if (err < 0) {
+			kfree(fnew);
+			return err;
+		}
 
 		err = fw_change_attrs(net, tp, fnew, tb, tca, base, ovr);
 		if (err < 0) {
+			tcf_exts_destroy(&fnew->exts);
 			kfree(fnew);
 			return err;
 		}
@@ -381,7 +320,9 @@ static int fw_change(struct net *net, struct sk_buff *in_skb,
 	if (f == NULL)
 		return -ENOBUFS;
 
-	tcf_exts_init(&f->exts, TCA_FW_ACT, TCA_FW_POLICE);
+	err = tcf_exts_init(&f->exts, TCA_FW_ACT, TCA_FW_POLICE);
+	if (err < 0)
+		goto errout;
 	f->id = handle;
 	f->tp = tp;
 
@@ -393,12 +334,10 @@ static int fw_change(struct net *net, struct sk_buff *in_skb,
 	rcu_assign_pointer(head->ht[fw_hash(handle)], f);
 
 	*arg = (unsigned long)f;
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-	fw_arrange_rules(tp);
-#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
 	return 0;
 
 errout:
+	tcf_exts_destroy(&f->exts);
 	kfree(f);
 	return err;
 }
@@ -484,9 +423,6 @@ nla_put_failure:
 static struct tcf_proto_ops cls_fw_ops __read_mostly = {
 	.kind		=	"fw",
 	.classify	=	fw_classify,
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-	.classifyMark	=	fw_classifyMark,
-#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
 	.init		=	fw_init,
 	.destroy	=	fw_destroy,
 	.get		=	fw_get,

@@ -49,9 +49,11 @@ struct hdmitx_scdc_data {
 	struct work_struct rr_work;
 };
 
-unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard, unsigned int dataInt0);
+unsigned char hdmitx_send_scdc_TmdsConfig(unsigned int standard,
+	unsigned int dataInt0, unsigned char data_byte1);
 void enable_hdmitx_scdcrr(unsigned char enable);
 void register_hdmitx_scdcrr(struct device_node *dev);
 void hdmitx_scdcrr_suspend(void);
 void hdmitx_scdcrr_resume(void);
+
 #endif /* _HDMITX_SCDC_H_ */

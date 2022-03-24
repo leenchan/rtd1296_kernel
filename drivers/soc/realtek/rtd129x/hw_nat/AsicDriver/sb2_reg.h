@@ -14,7 +14,7 @@
 // Naming Rule                   :  Module_Register_Name
 // Naming Rule                   : Module_Register_Name
 // Parse Option                  : Only Parse _op1
-// Parse Address Region          : All Address Region 
+// Parse Address Region          : All Address Region
 // Decode bit number             : 12 bits
 // Firmware Header Generate Date : 2015/7/29 16:34:45
 ***************************************************************/
@@ -23,13 +23,13 @@
 #ifndef _SB2_REG_H_INCLUDED_
 #define _SB2_REG_H_INCLUDED_
 #ifdef  _SB2_USE_STRUCT
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     Semaphore:1;
 }SB2_HD_SEM;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:25;
 unsigned int     swcivairq_en:1;
@@ -41,7 +41,7 @@ unsigned int     scivairq_en:1;
 unsigned int     write_data:1;
 }SB2_INV_INTEN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     swciva_int:1;
@@ -51,19 +51,19 @@ unsigned int     Sciva_int:1;
 unsigned int     write_data:1;
 }SB2_INV_INTSTAT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     Inv_adr:32;
 }SB2_INV_ADDR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:25;
 unsigned int     To_thr1:4;
 unsigned int     To_thr:3;
 }SB2_DEBUG_REG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:10;
 unsigned int     Wr_hold_cyc:4;
@@ -73,7 +73,7 @@ unsigned int     Wr_cyc:5;
 unsigned int     Rd_cyc:5;
 }SB2_FLASH_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:17;
 unsigned int     write_en13:1;
@@ -90,24 +90,24 @@ unsigned int     sc_in_order:1;
 unsigned int     reserved_2:2;
 }SB2_WRAPPER_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     enable:1;
 }SB2_SCPU_INT_CHECK;
 
-typedef struct 
+typedef struct
 {
 unsigned int     Sync:32;
 }SB2_SYNC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     Dbg_mode:5;
 }SB2_DBG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     write_enable3:1;
@@ -118,7 +118,7 @@ unsigned int     write_enable1:1;
 unsigned int     enable:1;
 }SB2_SB2_DEBUG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:12;
 unsigned int     pcie1_tostat:1;
@@ -132,14 +132,14 @@ unsigned int     pcie0_tostat_auto:1;
 unsigned int     etn_tostat_auto:1;
 }SB2_RBUS1_TOSTAT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     clk_gate_dis:1;
 unsigned int     speed_up:1;
 }SB2_LEXRA_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     int_aswc:1;
@@ -151,7 +151,7 @@ unsigned int     int_sa:1;
 unsigned int     write_data:1;
 }SB2_CPU_INT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     int_aswc_en:1;
@@ -163,7 +163,7 @@ unsigned int     int_sa_en:1;
 unsigned int     write_data:1;
 }SB2_CPU_INT_EN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     pending:1;
@@ -171,25 +171,25 @@ unsigned int     reserved_1:2;
 unsigned int     mask_id:3;
 }SB2_DREQ_MASK;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     Chip_id:16;
 }SB2_CHIP_ID;
 
-typedef struct 
+typedef struct
 {
 unsigned int     Revise_id:16;
 unsigned int     reserved_0:16;
 }SB2_CHIP_INFO;
 
-typedef struct 
+typedef struct
 {
 unsigned int     rom_remap:20;
 unsigned int     reserved_0:12;
 }SB2_ACPU_ROM_REMAP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     gnt_wr_delay:4;
 unsigned int     acc_write_delay:4;
@@ -201,7 +201,7 @@ unsigned int     reserved_2:4;
 unsigned int     addcmd:4;
 }SB2_ACPU_DELAY;
 
-typedef struct 
+typedef struct
 {
 unsigned int     cbustx_en:1;
 unsigned int     cbusiso_en:1;
@@ -237,7 +237,7 @@ unsigned int     tp_en:1;
 unsigned int     cp_en:1;
 }SB2_RBUS_ICG1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ve3_en:1;
@@ -258,7 +258,7 @@ unsigned int     vo_en:1;
 unsigned int     sys_en:1;
 }SB2_RBUS_ICG2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     tmp11:1;
@@ -279,14 +279,14 @@ unsigned int     rbus_en:1;
 unsigned int     spi_en:1;
 }SB2_RBUS_ICG3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     hif_rdata_swap:1;
 unsigned int     hif_wdata_swap:1;
 }SB2_HIF_CTRL1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     write_en6:1;
@@ -299,62 +299,62 @@ unsigned int     acpu_dbus_go:1;
 unsigned int     reserved_2:4;
 }SB2_PC_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     acpu_dbus_acc:32;
 }SB2_ACPU_DACC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:8;
 unsigned int     acpu_dreq_num:24;
 }SB2_ACPU_DREQ_NUM;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     acpu_dreq_max:16;
 }SB2_ACPU_DREQ_MAX;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:6;
 unsigned int     acpu_dreq_ack:26;
 }SB2_ACPU_DREQ_ACK;
 
-typedef struct 
+typedef struct
 {
 unsigned int     scpu_rbus_acc:32;
 }SB2_SCPU_RACC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     scpu_rreq_max:8;
 unsigned int     scpu_rreq_num:24;
 }SB2_SCPU_RREQ_RLT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     acpu_rbus_acc:32;
 }SB2_ACPU_RACC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     acpu_rreq_max:8;
 unsigned int     acpu_rreq_num:24;
 }SB2_ACPU_RREQ_RLT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     Dbg_start_addr:32;
 }SB2_DBG_START;
 
-typedef struct 
+typedef struct
 {
 unsigned int     Dbg_end_addr:32;
 }SB2_DBG_END;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:18;
 unsigned int     write_en6:1;
@@ -370,12 +370,12 @@ unsigned int     write_en1:1;
 unsigned int     Dbg_en:1;
 }SB2_DBG_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dbg_addr:32;
 }SB2_DBG_ADDR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     acpu_dbg_write:1;
@@ -385,7 +385,7 @@ unsigned int     scpu_dbg_dacc:1;
 unsigned int     reserved_1:2;
 }SB2_DBG_ADDR1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:19;
 unsigned int     acpu_int:1;
@@ -403,28 +403,28 @@ unsigned int     scpu_neg_int_en:1;
 unsigned int     write_data:1;
 }SB2_DBG_INT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dbg_wdata:32;
 }SB2_DBG_WDATA;
 
-typedef struct 
+typedef struct
 {
 unsigned int     data:32;
 }SB2_DUMMY;
 
-typedef struct 
+typedef struct
 {
 unsigned int     data:32;
 }SB2_SHADOW;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     Semaphore:1;
 }SB2_HD_SEM_NEW;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     inva_wr_sec2_en:1;
@@ -432,58 +432,58 @@ unsigned int     reserved_1:1;
 unsigned int     inva_wr_sec1_en:1;
 }SB2_RBUS_INVA_ACC_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:10;
 unsigned int     sec1_start:20;
 unsigned int     reserved_1:2;
 }SB2_RBUS_INVA_ACC_SEC1_START;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:10;
 unsigned int     sec1_end:20;
 unsigned int     reserved_1:2;
 }SB2_RBUS_INVA_ACC_SEC1_END;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:10;
 unsigned int     sec2_start:20;
 unsigned int     reserved_1:2;
 }SB2_RBUS_INVA_ACC_SEC2_START;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:10;
 unsigned int     sec2_end:20;
 unsigned int     reserved_1:2;
 }SB2_RBUS_INVA_ACC_SEC2_END;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     crc_cmp_latch_en:1;
 }SB2_RBUS_CMP_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     crc_cmp_expect0:32;
 }SB2_RBUS_CMP_DATA0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     crc_cmp_expect1:32;
 }SB2_RBUS_CMP_DATA1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     crc_cmp_result0:1;
 unsigned int     crc_cmp_result1:1;
 }SB2_RBUS_CMP_RESULT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     sb2_bist_rstn:1;
@@ -493,24 +493,24 @@ unsigned int     sb2_rom_rme:1;
 unsigned int     sb2_rom_rm:4;
 }SB2_BIST_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:15;
 unsigned int     sb2_rom_bist_done:1;
 unsigned int     reserved_1:16;
 }SB2_BIST_STATUS;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sb2_misr_dataout_0:32;
 }SB2_BIST_MISR_DATAOUT0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sb2_misr_dataout_1:32;
 }SB2_BIST_MISR_DATAOUT1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:21;
 unsigned int     dual_mode:2;
@@ -518,7 +518,7 @@ unsigned int     fat_mode:1;
 unsigned int     opc:8;
 }SB2_SFC_OPCODE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     reserved_1:11;
@@ -527,7 +527,7 @@ unsigned int     adren:1;
 unsigned int     dmycnt:3;
 }SB2_SFC_CTL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     reserved_1:7;
@@ -535,14 +535,14 @@ unsigned int     mode:1;
 unsigned int     fdiv:8;
 }SB2_SFC_SCK;
 
-typedef struct 
+typedef struct
 {
 unsigned int     tdt:16;
 unsigned int     Phcnt:8;
 unsigned int     Plcnt:8;
 }SB2_SFC_CE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:4;
 unsigned int     write_en5:1;
@@ -552,27 +552,27 @@ unsigned int     write_en1:1;
 unsigned int     wp_n:1;
 }SB2_SFC_WP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     pos_latch:1;
 }SB2_SFC_POS_LATCH;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:23;
 unsigned int     wt_prog_done:1;
 unsigned int     rdsr_op:8;
 }SB2_SFC_WAIT_WR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:23;
 unsigned int     wt_prog_en:1;
 unsigned int     wr_en_op:8;
 }SB2_SFC_EN_WR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     sf_dclk_sel:1;
@@ -580,18 +580,18 @@ unsigned int     fifo_write_tap:3;
 unsigned int     fast_read_en:1;
 }SB2_SFC_FAST_RD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     delay_clk_tap:32;
 }SB2_SFC_SCK_TAP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     SFC_OPCODE_adr4byte_en:1;
 }SB2_SFC_ADR_FOUR_BYTE_EN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:8;
 unsigned int     tp1_clk:2;
@@ -605,7 +605,7 @@ unsigned int     tp0_sync:3;
 unsigned int     tp0_data:3;
 }SB2_MUXPAD2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sensor_cko_0:2;
 unsigned int     sensor_cko_1:2;
@@ -623,7 +623,7 @@ unsigned int     i2c_sda_4:2;
 unsigned int     reserved_1:4;
 }SB2_MUXPAD3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:8;
 unsigned int     gpio_9:2;
@@ -638,7 +638,7 @@ unsigned int     gpio_1:3;
 unsigned int     gpio_0:3;
 }SB2_MUXPAD4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:23;
 unsigned int     tp1_loc:1;
@@ -650,7 +650,7 @@ unsigned int     arm_trace_dbg_en:1;
 unsigned int     sf_en:1;
 }SB2_MUXPAD5;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     tp0_data_smt:1;
@@ -671,7 +671,7 @@ unsigned int     tp0_clk_pud_en:1;
 unsigned int     tp0_clk_pud_sel:1;
 }SB2_PFUNC_TP0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     tp1_data_smt:1;
@@ -692,7 +692,7 @@ unsigned int     tp1_clk_pud_en:1;
 unsigned int     tp1_clk_pud_sel:1;
 }SB2_PFUNC_TP1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:8;
 unsigned int     i2c_scl_5_smt:1;
@@ -714,7 +714,7 @@ unsigned int     i2c_sda_4_pud_sel:1;
 unsigned int     reserved_1:8;
 }SB2_PFUNC_MISC0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     gpio_7_smt:1;
 unsigned int     gpio_7_e2:1;
@@ -750,7 +750,7 @@ unsigned int     gpio_0_pud_en:1;
 unsigned int     gpio_0_pud_sel:1;
 }SB2_PFUNC_MISC1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sensor_cko1_smt:1;
 unsigned int     sensor_cko1_e2:1;
@@ -786,7 +786,7 @@ unsigned int     gpio_8_pud_en:1;
 unsigned int     gpio_8_pud_sel:1;
 }SB2_PFUNC_MISC2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:5;
 unsigned int     boption4_smt:1;
@@ -818,7 +818,7 @@ unsigned int     boption5_pud_en:1;
 unsigned int     boption5_pud_sel:1;
 }SB2_PFUNC_MISC3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     main1_dbg_en:1;
 unsigned int     reserved_0:3;
@@ -830,7 +830,7 @@ unsigned int     dbg_sel0:6;
 unsigned int     dbg_sel1:6;
 }SB2_DEBUG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:3;
 unsigned int     mbist_gpu_chip_top_st:1;
@@ -864,7 +864,7 @@ unsigned int     mbist_dc_sys_st:1;
 unsigned int     mbist_cp_st:1;
 }SB2_MBIST;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     rgmii0_txd_3_sr:1;
@@ -875,7 +875,7 @@ unsigned int     rgmii0_tx_ctl_sr:1;
 unsigned int     rgmii0_txc_sr:1;
 }SB2_PFUNC_RG0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     rgmii0_rx_ctl_smt:1;
 unsigned int     rgmii0_rx_ctl_e2:1;
@@ -911,7 +911,7 @@ unsigned int     rgmii0_txc_pud_en:1;
 unsigned int     rgmii0_txc_pud_sel:1;
 }SB2_PFUNC_RG1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     rgmii0_bias_mode2:1;
 unsigned int     rgmii0_bias_mode:1;
@@ -943,7 +943,7 @@ unsigned int     rgmii0_rxd_0_pud_en:1;
 unsigned int     rgmii0_rxd_0_pud_sel:1;
 }SB2_PFUNC_RG2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:4;
 unsigned int     rgmii0_mdc:2;
@@ -962,7 +962,7 @@ unsigned int     rgmii0_tx_ctl:2;
 unsigned int     rgmii0_txc:2;
 }SB2_MUXPAD_RG0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     rgmii1_txd_3_sr:1;
@@ -973,7 +973,7 @@ unsigned int     rgmii1_tx_ctl_sr:1;
 unsigned int     rgmii1_txc_sr:1;
 }SB2_PFUNC_RG3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     rgmii1_rx_ctl_smt:1;
 unsigned int     rgmii1_rx_ctl_e2:1;
@@ -1009,7 +1009,7 @@ unsigned int     rgmii1_txc_pud_en:1;
 unsigned int     rgmii1_txc_pud_sel:1;
 }SB2_PFUNC_RG4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     rgmii1_bias_mode2:1;
 unsigned int     rgmii1_bias_mode:1;
@@ -1034,7 +1034,7 @@ unsigned int     rgmii1_rxd_0_pud_en:1;
 unsigned int     rgmii1_rxd_0_pud_sel:1;
 }SB2_PFUNC_RG5;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:4;
 unsigned int     rgmii1_mdc:2;
@@ -1053,7 +1053,7 @@ unsigned int     rgmii1_tx_ctl:2;
 unsigned int     rgmii1_txc:2;
 }SB2_MUXPAD_RG1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:23;
 unsigned int     sata_sgmii_sel:1;
@@ -1067,7 +1067,7 @@ unsigned int     sata_bg_en_1:1;
 unsigned int     sata_bg_en_0:1;
 }SB2_SATA_PHY_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:14;
 unsigned int     lfsr_mode:1;
@@ -1083,7 +1083,7 @@ unsigned int     clk_hf_sel:1;
 unsigned int     rng_srst:1;
 }SB2_RNG_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     rosc_d:4;
@@ -1096,13 +1096,13 @@ unsigned int     rosc_test:1;
 unsigned int     rosc_pow:1;
 }SB2_RNG_ANALOG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     prd_ub:16;
 unsigned int     prd_lb:16;
 }SB2_RNG_CALI_CHK;
 
-typedef struct 
+typedef struct
 {
 unsigned int     shot_num:12;
 unsigned int     cyc_num:3;
@@ -1115,7 +1115,7 @@ unsigned int     pol:1;
 unsigned int     hw_en:1;
 }SB2_RNG_CALI_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:8;
 unsigned int     hw_d:4;
@@ -1125,13 +1125,13 @@ unsigned int     cnt_ovflw:1;
 unsigned int     cnt:16;
 }SB2_RNG_RETURN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     prd_ub:16;
 unsigned int     prd_lb:16;
 }SB2_RNG_LOCK_CHK;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:12;
 unsigned int     exit_num:4;
@@ -1139,44 +1139,44 @@ unsigned int     reserved_1:12;
 unsigned int     enter_num:4;
 }SB2_RNG_LOCK_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     out_ready:1;
 }SB2_RNG_RETURN3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     valid_bit_num:32;
 }SB2_RNG_RETURN4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     drop_num:32;
 }SB2_RNG_RETURN5;
 
-typedef struct 
+typedef struct
 {
 unsigned int     random_out:32;
 }SB2_RNG_RESULTR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     lfsr_poly_lsb:32;
 }SB2_RNG_LFSR_POLY_LSB;
 
-typedef struct 
+typedef struct
 {
 unsigned int     lfsr_poly_msb:32;
 }SB2_RNG_LFSR_POLY_MSB;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dummy_msb:16;
 unsigned int     dummy_lsb:16;
 }SB2_RNG_DUMMY;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     gating_en:1;

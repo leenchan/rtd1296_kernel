@@ -32,21 +32,21 @@
 		if(RTL_LogTypeMask.ERROR&&RTL_LogErrorMask.SKB&&RTL_LogModuleMask.PROSTACK&&LOG_LIMIT)scrlog_printk("PS-SKB-ERROR:"fmt, ## args); \
 			}while(0)
 	#endif
-	
-	#if defined(LOG_WARN)		
-	#undef LOG_WARN	
+
+	#if defined(LOG_WARN)
+	#undef LOG_WARN
 	#define LOG_WARN(fmt, args...) do{ \
 		if(RTL_LogTypeMask.WARN&&RTL_LogModuleMask.PROSTACK&&LOG_LIMIT)scrlog_printk("PS-WARN:"fmt, ## args); \
 			}while(0)
 	#endif
-	
-	#if defined(LOG_INFO)		
-	#undef LOG_INFO	
+
+	#if defined(LOG_INFO)
+	#undef LOG_INFO
 	#define LOG_INFO(fmt, args...) do{ \
 		if(RTL_LogTypeMask.INFO&&RTL_LogModuleMask.PROSTACK&&LOG_LIMIT)scrlog_printk("PS-INFO:"fmt, ## args); \
 			}while(0)
 	#endif
-	
+
 #endif
 
 #endif

@@ -45,10 +45,9 @@ unsigned int udp_get_timeouts_by_state(enum udp_conntrack state, void *ct_or_cp,
 	}
 	else {
 		struct ip_vs_conn *cp = (struct ip_vs_conn *)ct_or_cp;
-		net = ip_vs_conn_net(cp);
+		net = cp->ipvs->net;
 	}
 	unsigned int *udp_timeouts_run = udp_get_timeouts(net);
-	//net_warn_ratelimited("--%s--%d-- udp_timeouts_run[%d] = %d\n",__FUNCTION__,__LINE__,state,udp_timeouts_run[state]);
 	return udp_timeouts_run[state];
 }
 #else
@@ -66,13 +65,14 @@ static inline struct nf_udp_net *udp_pernet(struct net *net)
 
 static bool udp_pkt_to_tuple(const struct sk_buff *skb,
 			     unsigned int dataoff,
+			     struct net *net,
 			     struct nf_conntrack_tuple *tuple)
 {
 	const struct udphdr *hp;
 	struct udphdr _hdr;
 
-	/* Actually only need first 8 bytes. */
-	hp = skb_header_pointer(skb, dataoff, sizeof(_hdr), &_hdr);
+	/* Actually only need first 4 bytes to get ports. */
+	hp = skb_header_pointer(skb, dataoff, 4, &_hdr);
 	if (hp == NULL)
 		return false;
 
@@ -116,22 +116,14 @@ static int udp_packet(struct nf_conn *ct,
 	/* If we've seen traffic both ways, this is some kind of UDP
 	   stream.  Extend timeout. */
 	if (test_bit(IPS_SEEN_REPLY_BIT, &ct->status)) {
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-		nf_ct_refresh_acct_udp(ct, ctinfo, skb,timeouts[UDP_CT_REPLIED], "ASSURED"); // assured
-#else
 		nf_ct_refresh_acct(ct, ctinfo, skb,
 				   timeouts[UDP_CT_REPLIED]);
-#endif
 		/* Also, more likely to be important, and not a probe */
 		if (!test_and_set_bit(IPS_ASSURED_BIT, &ct->status))
 			nf_conntrack_event_cache(IPCT_ASSURED, ct);
 	} else {
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-		nf_ct_refresh_acct_udp(ct, ctinfo, skb,timeouts[UDP_CT_UNREPLIED], "UNREPLIED"); // unreplied
-#else
 		nf_ct_refresh_acct(ct, ctinfo, skb,
 				   timeouts[UDP_CT_UNREPLIED]);
-#endif
 	}
 	return NF_ACCEPT;
 }
@@ -309,7 +301,6 @@ static int udp_kmemdup_compat_sysctl_table(struct nf_proto_net *pn,
 
 static int udp_init_net(struct net *net, u_int16_t proto)
 {
-	int ret;
 	struct nf_udp_net *un = udp_pernet(net);
 	struct nf_proto_net *pn = &un->pn;
 
@@ -320,18 +311,7 @@ static int udp_init_net(struct net *net, u_int16_t proto)
 			un->timeouts[i] = udp_timeouts[i];
 	}
 
-	if (proto == AF_INET) {
-		ret = udp_kmemdup_compat_sysctl_table(pn, un);
-		if (ret < 0)
-			return ret;
-
-		ret = udp_kmemdup_sysctl_table(pn, un);
-		if (ret < 0)
-			nf_ct_kfree_compat_sysctl_table(pn);
-	} else
-		ret = udp_kmemdup_sysctl_table(pn, un);
-
-	return ret;
+	return udp_kmemdup_sysctl_table(pn, un);
 }
 
 static struct nf_proto_net *udp_get_net_proto(struct net *net)
@@ -344,6 +324,7 @@ struct nf_conntrack_l4proto nf_conntrack_l4proto_udp4 __read_mostly =
 	.l3proto		= PF_INET,
 	.l4proto		= IPPROTO_UDP,
 	.name			= "udp",
+	.allow_clash		= true,
 	.pkt_to_tuple		= udp_pkt_to_tuple,
 	.invert_tuple		= udp_invert_tuple,
 	.print_tuple		= udp_print_tuple,
@@ -376,6 +357,7 @@ struct nf_conntrack_l4proto nf_conntrack_l4proto_udp6 __read_mostly =
 	.l3proto		= PF_INET6,
 	.l4proto		= IPPROTO_UDP,
 	.name			= "udp",
+	.allow_clash		= true,
 	.pkt_to_tuple		= udp_pkt_to_tuple,
 	.invert_tuple		= udp_invert_tuple,
 	.print_tuple		= udp_print_tuple,

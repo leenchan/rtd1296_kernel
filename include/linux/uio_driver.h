@@ -101,7 +101,7 @@ struct uio_info {
 	unsigned long		irq_flags;
 	void			*priv;
 #ifdef CONFIG_UIO_ASSIGN_MINOR
-    int             minor;
+	int	minor;
 #endif
 	irqreturn_t (*handler)(int irq, struct uio_info *dev_info);
 	int (*mmap)(struct uio_info *info, struct vm_area_struct *vma);

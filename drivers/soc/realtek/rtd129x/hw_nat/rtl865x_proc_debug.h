@@ -1,10 +1,10 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2008  
-* All rights reserved.                                                    
-* 
+* Copyright c                  Realtek Semiconductor Corporation, 2008
+* All rights reserved.
+*
 * Program : just for driver debug
-* Abstract :                                                           
-* Author : Hyking Liu (Hyking_liu@realsil.com.tw)               
+* Abstract :
+* Author : Hyking Liu (Hyking_liu@realsil.com.tw)
 * -------------------------------------------------------
 *
 * This program is free software; you can redistribute it and/or modify

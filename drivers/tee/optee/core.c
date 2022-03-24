@@ -11,6 +11,10 @@
  * GNU General Public License for more details.
  *
  */
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
+#include <linux/arm-smccc.h>
 #include <linux/errno.h>
 #include <linux/io.h>
 #include <linux/module.h>
@@ -25,13 +29,21 @@
 #include "optee_private.h"
 #include "optee_smc.h"
 #include <linux/proc_fs.h>
+#include "shm_pool.h"
 
 
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
+#include <linux/semaphore.h>
+#endif
 #define DRIVER_NAME "optee"
 
 #define OPTEE_SHM_NUM_PRIV_PAGES	1
 
-#define BL31_TSP_TEST
+//#define BL31_TSP_TEST
+
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
+static struct semaphore sem_tee;
+#endif
 
 #ifdef BL31_TSP_TEST
 ssize_t tsp_trigger(struct file *filp, const char __user *buff, unsigned long len, void *data);
@@ -61,8 +73,6 @@ ssize_t tsp_trigger(struct file *filp, const char __user *buff, unsigned long le
 }
 
 #endif
-
-
 
 /**
  * optee_from_msg_param() - convert from OPTEE_MSG parameters to
@@ -115,7 +125,7 @@ int optee_from_msg_param(struct tee_param *params, size_t num_params,
 			rc = tee_shm_get_pa(shm, 0, &pa);
 			if (rc)
 				return rc;
-			p->u.memref.shm_offs = pa - mp->u.tmem.buf_ptr;
+			p->u.memref.shm_offs = mp->u.tmem.buf_ptr - pa;
 			p->u.memref.shm = shm;
 
 			/* Check that the memref is covered by the shm object */
@@ -128,10 +138,69 @@ int optee_from_msg_param(struct tee_param *params, size_t num_params,
 					return rc;
 			}
 			break;
+		case OPTEE_MSG_ATTR_TYPE_RMEM_INPUT:
+		case OPTEE_MSG_ATTR_TYPE_RMEM_OUTPUT:
+		case OPTEE_MSG_ATTR_TYPE_RMEM_INOUT:
+			p->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT +
+				  attr - OPTEE_MSG_ATTR_TYPE_RMEM_INPUT;
+			p->u.memref.size = mp->u.rmem.size;
+			shm = (struct tee_shm *)(unsigned long)
+				mp->u.rmem.shm_ref;
+
+			if (!shm) {
+				p->u.memref.shm_offs = 0;
+				p->u.memref.shm = NULL;
+				break;
+			}
+			p->u.memref.shm_offs = mp->u.rmem.offs;
+			p->u.memref.shm = shm;
+
+			break;
+
 		default:
 			return -EINVAL;
 		}
 	}
+	return 0;
+}
+
+static int to_msg_param_tmp_mem(struct optee_msg_param *mp,
+				const struct tee_param *p)
+{
+	int rc;
+	phys_addr_t pa;
+
+	mp->attr = OPTEE_MSG_ATTR_TYPE_TMEM_INPUT + p->attr -
+		   TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
+
+	mp->u.tmem.shm_ref = (unsigned long)p->u.memref.shm;
+	mp->u.tmem.size = p->u.memref.size;
+
+	if (!p->u.memref.shm) {
+		mp->u.tmem.buf_ptr = 0;
+		return 0;
+	}
+
+	rc = tee_shm_get_pa(p->u.memref.shm, p->u.memref.shm_offs, &pa);
+	if (rc)
+		return rc;
+
+	mp->u.tmem.buf_ptr = pa;
+	mp->attr |= OPTEE_MSG_ATTR_CACHE_PREDEFINED <<
+		    OPTEE_MSG_ATTR_CACHE_SHIFT;
+
+	return 0;
+}
+
+static int to_msg_param_reg_mem(struct optee_msg_param *mp,
+				const struct tee_param *p)
+{
+	mp->attr = OPTEE_MSG_ATTR_TYPE_RMEM_INPUT + p->attr -
+		   TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
+
+	mp->u.rmem.shm_ref = (unsigned long)p->u.memref.shm;
+	mp->u.rmem.size = p->u.memref.size;
+	mp->u.rmem.offs = p->u.memref.shm_offs;
 	return 0;
 }
 
@@ -147,7 +216,6 @@ int optee_to_msg_param(struct optee_msg_param *msg_params, size_t num_params,
 {
 	int rc;
 	size_t n;
-	phys_addr_t pa;
 
 	for (n = 0; n < num_params; n++) {
 		const struct tee_param *p = params + n;
@@ -170,22 +238,12 @@ int optee_to_msg_param(struct optee_msg_param *msg_params, size_t num_params,
 		case TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT:
 		case TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_OUTPUT:
 		case TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INOUT:
-			mp->attr = OPTEE_MSG_ATTR_TYPE_TMEM_INPUT +
-				   p->attr -
-				   TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
-			mp->u.tmem.shm_ref = (unsigned long)p->u.memref.shm;
-			mp->u.tmem.size = p->u.memref.size;
-			if (!p->u.memref.shm) {
-				mp->u.tmem.buf_ptr = 0;
-				break;
-			}
-			rc = tee_shm_get_pa(p->u.memref.shm,
-					    p->u.memref.shm_offs, &pa);
+			if (tee_shm_is_registered(p->u.memref.shm))
+				rc = to_msg_param_reg_mem(mp, p);
+			else
+				rc = to_msg_param_tmp_mem(mp, p);
 			if (rc)
 				return rc;
-			mp->u.tmem.buf_ptr = pa;
-			mp->attr |= OPTEE_MSG_ATTR_CACHE_PREDEFINED <<
-					OPTEE_MSG_ATTR_CACHE_SHIFT;
 			break;
 		default:
 			return -EINVAL;
@@ -202,6 +260,10 @@ static void optee_get_version(struct tee_device *teedev,
 		.impl_caps = TEE_OPTEE_CAP_TZ,
 		.gen_caps = TEE_GEN_CAP_GP,
 	};
+	struct optee *optee = tee_get_drvdata(teedev);
+
+	if (optee->sec_caps & OPTEE_SMC_SEC_CAP_DYNAMIC_SHM)
+		v.gen_caps |= TEE_GEN_CAP_REG_MEM;
 	*vers = v;
 }
 
@@ -218,12 +280,12 @@ static int optee_open(struct tee_context *ctx)
 	if (teedev == optee->supp_teedev) {
 		bool busy = true;
 
-		mutex_lock(&optee->supp.ctx_mutex);
+		mutex_lock(&optee->supp.mutex);
 		if (!optee->supp.ctx) {
 			busy = false;
 			optee->supp.ctx = ctx;
 		}
-		mutex_unlock(&optee->supp.ctx_mutex);
+		mutex_unlock(&optee->supp.mutex);
 		if (busy) {
 			kfree(ctxdata);
 			return -EBUSY;
@@ -245,6 +307,8 @@ static void optee_release(struct tee_context *ctx)
 	struct tee_shm *shm;
 	struct optee_msg_arg *arg = NULL;
 	phys_addr_t parg;
+	struct optee_session *sess;
+	struct optee_session *sess_tmp;
 
 	if (!ctxdata)
 		return;
@@ -253,23 +317,18 @@ static void optee_release(struct tee_context *ctx)
 	if (!IS_ERR(shm)) {
 		arg = tee_shm_get_va(shm, 0);
 		/*
-		 * If va2pa fails for some reason, we can't call
-		 * optee_close_session(), only free the memory. Secure OS
-		 * will leak sessions and finally refuse more session, but
-		 * we will at least let normal world reclaim its memory.
+		 * If va2pa fails for some reason, we can't call into
+		 * secure world, only free the memory. Secure OS will leak
+		 * sessions and finally refuse more sessions, but we will
+		 * at least let normal world reclaim its memory.
 		 */
 		if (!IS_ERR(arg))
-			tee_shm_va2pa(shm, arg, &parg);
+			if (tee_shm_va2pa(shm, arg, &parg))
+				arg = NULL; /* prevent usage of parg below */
 	}
 
-	while (true) {
-		struct optee_session *sess;
-
-		sess = list_first_entry_or_null(&ctxdata->sess_list,
-						struct optee_session,
-						list_node);
-		if (!sess)
-			break;
+	list_for_each_entry_safe(sess, sess_tmp, &ctxdata->sess_list,
+				 list_node) {
 		list_del(&sess->list_node);
 		if (!IS_ERR_OR_NULL(arg)) {
 			memset(arg, 0, sizeof(*arg));
@@ -286,14 +345,11 @@ static void optee_release(struct tee_context *ctx)
 
 	ctx->data = NULL;
 
-	if (teedev == optee->supp_teedev) {
-		mutex_lock(&optee->supp.ctx_mutex);
-		optee->supp.ctx = NULL;
-		mutex_unlock(&optee->supp.ctx_mutex);
-}
+	if (teedev == optee->supp_teedev)
+		optee_supp_release(&optee->supp);
 }
 
-static struct tee_driver_ops optee_ops = {
+static const struct tee_driver_ops optee_ops = {
 	.get_version = optee_get_version,
 	.open = optee_open,
 	.release = optee_release,
@@ -301,23 +357,27 @@ static struct tee_driver_ops optee_ops = {
 	.close_session = optee_close_session,
 	.invoke_func = optee_invoke_func,
 	.cancel_req = optee_cancel_req,
+	.shm_register = optee_shm_register,
+	.shm_unregister = optee_shm_unregister,
 };
 
-static struct tee_desc optee_desc = {
+static const struct tee_desc optee_desc = {
 	.name = DRIVER_NAME "-clnt",
 	.ops = &optee_ops,
 	.owner = THIS_MODULE,
 };
 
-static struct tee_driver_ops optee_supp_ops = {
+static const struct tee_driver_ops optee_supp_ops = {
 	.get_version = optee_get_version,
 	.open = optee_open,
 	.release = optee_release,
 	.supp_recv = optee_supp_recv,
 	.supp_send = optee_supp_send,
+	.shm_register = optee_shm_register_supp,
+	.shm_unregister = optee_shm_unregister_supp,
 };
 
-static struct tee_desc optee_supp_desc = {
+static const struct tee_desc optee_supp_desc = {
 	.name = DRIVER_NAME "-supp",
 	.ops = &optee_supp_ops,
 	.owner = THIS_MODULE,
@@ -338,12 +398,15 @@ static bool optee_msg_api_uid_is_optee_api(optee_invoke_fn *invoke_fn)
 
 static bool optee_msg_api_revision_is_compatible(optee_invoke_fn *invoke_fn)
 {
-	struct arm_smccc_res res;
+	union {
+		struct arm_smccc_res smccc;
+		struct optee_smc_calls_revision_result result;
+	} res;
 
-	invoke_fn(OPTEE_SMC_CALLS_REVISION, 0, 0, 0, 0, 0, 0, 0, &res);
+	invoke_fn(OPTEE_SMC_CALLS_REVISION, 0, 0, 0, 0, 0, 0, 0, &res.smccc);
 
-	if (res.a0 == OPTEE_MSG_REVISION_MAJOR &&
-	    (int)res.a1 >= OPTEE_MSG_REVISION_MINOR)
+	if (res.result.major == OPTEE_MSG_REVISION_MAJOR &&
+	    (int)res.result.minor >= OPTEE_MSG_REVISION_MINOR)
 		return true;
 	return false;
 }
@@ -351,7 +414,10 @@ static bool optee_msg_api_revision_is_compatible(optee_invoke_fn *invoke_fn)
 static bool optee_msg_exchange_capabilities(optee_invoke_fn *invoke_fn,
 					    u32 *sec_caps)
 {
-	struct arm_smccc_res res;
+	union {
+		struct arm_smccc_res smccc;
+		struct optee_smc_exchange_capabilities_result result;
+	} res;
 	u32 a1 = 0;
 
 	/*
@@ -359,110 +425,164 @@ static bool optee_msg_exchange_capabilities(optee_invoke_fn *invoke_fn,
 	 * point of view) or not, is_smp() returns the the information
 	 * needed, but can't be called directly from here.
 	 */
-#ifndef CONFIG_SMP
-	a1 |= OPTEE_SMC_NSEC_CAP_UNIPROCESSOR;
-#endif
+	if (!IS_ENABLED(CONFIG_SMP) || nr_cpu_ids == 1)
+		a1 |= OPTEE_SMC_NSEC_CAP_UNIPROCESSOR;
 
-	invoke_fn(OPTEE_SMC_EXCHANGE_CAPABILITIES, a1, 0, 0, 0, 0, 0, 0, &res);
+	invoke_fn(OPTEE_SMC_EXCHANGE_CAPABILITIES, a1, 0, 0, 0, 0, 0, 0,
+		  &res.smccc);
 
-	if (res.a0 != OPTEE_SMC_RETURN_OK)
+	if (res.result.status != OPTEE_SMC_RETURN_OK)
 		return false;
 
-	*sec_caps = res.a1;
+	*sec_caps = res.result.capabilities;
 	return true;
 }
 
-static struct tee_shm_pool *optee_config_shm_ioremap(struct device *dev,
-			optee_invoke_fn *invoke_fn,
-			void __iomem **ioremaped_shm)
+static struct tee_shm_pool *
+optee_config_shm_memremap(optee_invoke_fn *invoke_fn, void **memremaped_shm,
+			  u32 sec_caps)
 {
-	struct arm_smccc_res res;
-	struct tee_shm_pool *pool;
+	union {
+		struct arm_smccc_res smccc;
+		struct optee_smc_get_shm_config_result result;
+	} res;
 	unsigned long vaddr;
 	phys_addr_t paddr;
 	size_t size;
 	phys_addr_t begin;
 	phys_addr_t end;
-	void __iomem *va;
-	struct tee_shm_pool_mem_info priv_info;
-	struct tee_shm_pool_mem_info dmabuf_info;
+	void *va;
+	struct tee_shm_pool_mgr *priv_mgr;
+	struct tee_shm_pool_mgr *dmabuf_mgr;
+	void *rc;
 
-	invoke_fn(OPTEE_SMC_GET_SHM_CONFIG, 0, 0, 0, 0, 0, 0, 0, &res);
-	if (res.a0 != OPTEE_SMC_RETURN_OK) {
-		dev_info(dev, "shm service not available\n");
+	invoke_fn(OPTEE_SMC_GET_SHM_CONFIG, 0, 0, 0, 0, 0, 0, 0, &res.smccc);
+	if (res.result.status != OPTEE_SMC_RETURN_OK) {
+		pr_info("shm service not available\n");
 		return ERR_PTR(-ENOENT);
 	}
 
-	if (res.a3 != OPTEE_SMC_SHM_CACHED) {
-		dev_err(dev, "only normal cached shared memory supported\n");
+	if (res.result.settings != OPTEE_SMC_SHM_CACHED) {
+		pr_err("only normal cached shared memory supported\n");
 		return ERR_PTR(-EINVAL);
 	}
 
-	begin = roundup(res.a1, PAGE_SIZE);
-	end = rounddown(res.a1 + res.a2, PAGE_SIZE);
+	begin = roundup(res.result.start, PAGE_SIZE);
+	end = rounddown(res.result.start + res.result.size, PAGE_SIZE);
 	paddr = begin;
 	size = end - begin;
 
 	if (size < 2 * OPTEE_SHM_NUM_PRIV_PAGES * PAGE_SIZE) {
-		dev_err(dev, "too small shared memory area\n");
+		pr_err("too small shared memory area\n");
 		return ERR_PTR(-EINVAL);
 	}
 
-	va = ioremap_cache(paddr, size);
+	va = memremap(paddr, size, MEMREMAP_WB);
 	if (!va) {
-		dev_err(dev, "shared memory ioremap failed\n");
+		pr_err("shared memory ioremap failed\n");
 		return ERR_PTR(-EINVAL);
 	}
 	vaddr = (unsigned long)va;
 
-	priv_info.vaddr = vaddr;
-	priv_info.paddr = paddr;
-	priv_info.size = OPTEE_SHM_NUM_PRIV_PAGES * PAGE_SIZE;
-	dmabuf_info.vaddr = vaddr + OPTEE_SHM_NUM_PRIV_PAGES * PAGE_SIZE;
-	dmabuf_info.paddr = paddr + OPTEE_SHM_NUM_PRIV_PAGES * PAGE_SIZE;
-	dmabuf_info.size = size - OPTEE_SHM_NUM_PRIV_PAGES * PAGE_SIZE;
+	/*
+	 * If OP-TEE can work with unregistered SHM, we will use own pool
+	 * for private shm
+	 */
+	if (sec_caps & OPTEE_SMC_SEC_CAP_DYNAMIC_SHM) {
+		rc = optee_shm_pool_alloc_pages();
+		if (IS_ERR(rc))
+			goto err_memunmap;
+		priv_mgr = rc;
+	} else {
+		const size_t sz = OPTEE_SHM_NUM_PRIV_PAGES * PAGE_SIZE;
 
-	pool = tee_shm_pool_alloc_res_mem(dev, &priv_info, &dmabuf_info);
-	if (IS_ERR(pool))
-		iounmap(va);
-	else
-		*ioremaped_shm = va;
-	return pool;
+		rc = tee_shm_pool_mgr_alloc_res_mem(vaddr, paddr, sz,
+						    3 /* 8 bytes aligned */);
+		if (IS_ERR(rc))
+			goto err_memunmap;
+		priv_mgr = rc;
+
+		vaddr += sz;
+		paddr += sz;
+		size -= sz;
+	}
+
+	rc = tee_shm_pool_mgr_alloc_res_mem(vaddr, paddr, size, PAGE_SHIFT);
+	if (IS_ERR(rc))
+		goto err_free_priv_mgr;
+	dmabuf_mgr = rc;
+
+	rc = tee_shm_pool_alloc(priv_mgr, dmabuf_mgr);
+	if (IS_ERR(rc))
+		goto err_free_dmabuf_mgr;
+
+	*memremaped_shm = va;
+
+	return rc;
+
+err_free_dmabuf_mgr:
+	tee_shm_pool_mgr_destroy(dmabuf_mgr);
+err_free_priv_mgr:
+	tee_shm_pool_mgr_destroy(priv_mgr);
+err_memunmap:
+	memunmap(va);
+	return rc;
 }
 
-static int get_invoke_func(struct device *dev, optee_invoke_fn **invoke_fn)
+/* Simple wrapper functions to be able to use a function pointer */
+static void optee_smccc_smc(unsigned long a0, unsigned long a1,
+			    unsigned long a2, unsigned long a3,
+			    unsigned long a4, unsigned long a5,
+			    unsigned long a6, unsigned long a7,
+			    struct arm_smccc_res *res)
 {
-	struct device_node *np = dev->of_node;
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
+	down(&sem_tee);
+#endif
+	arm_smccc_smc(a0, a1, a2, a3, a4, a5, a6, a7, res);
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
+	up(&sem_tee);
+#endif
+}
+
+static void optee_smccc_hvc(unsigned long a0, unsigned long a1,
+			    unsigned long a2, unsigned long a3,
+			    unsigned long a4, unsigned long a5,
+			    unsigned long a6, unsigned long a7,
+			    struct arm_smccc_res *res)
+{
+	arm_smccc_hvc(a0, a1, a2, a3, a4, a5, a6, a7, res);
+}
+
+static optee_invoke_fn *get_invoke_func(struct device_node *np)
+{
 	const char *method;
 
-	dev_info(dev, "probing for conduit method from DT.\n");
+	pr_info("probing for conduit method from DT.\n");
 
 	if (of_property_read_string(np, "method", &method)) {
-		dev_warn(dev, "missing \"method\" property\n");
-		return -ENXIO;
+		pr_warn("missing \"method\" property\n");
+		return ERR_PTR(-ENXIO);
 	}
 
-	if (!strcmp("hvc", method)) {
-		*invoke_fn = arm_smccc_hvc;
-	} else if (!strcmp("smc", method)) {
-		*invoke_fn = arm_smccc_smc;
-	} else {
-		dev_warn(dev, "invalid \"method\" property: %s\n", method);
-		return -EINVAL;
-	}
-	return 0;
+	if (!strcmp("hvc", method))
+		return optee_smccc_hvc;
+	else if (!strcmp("smc", method))
+		return optee_smccc_smc;
+
+	pr_warn("invalid \"method\" property: %s\n", method);
+	return ERR_PTR(-EINVAL);
 }
 
-static int optee_probe(struct platform_device *pdev)
+static struct optee *optee_probe(struct device_node *np)
 {
 	optee_invoke_fn *invoke_fn;
 	struct tee_shm_pool *pool;
 	struct optee *optee = NULL;
-	void __iomem *ioremaped_shm = NULL;
+	void *memremaped_shm = NULL;
 	struct tee_device *teedev;
 	u32 sec_caps;
 	int rc;
-
 	
 #ifdef BL31_TSP_TEST
 	proc_file = proc_create("tsp_trigger", 0x0644, NULL, &proc_fops);
@@ -475,44 +595,53 @@ static int optee_probe(struct platform_device *pdev)
 	}	
 #endif
 
+	invoke_fn = get_invoke_func(np);
+	if (IS_ERR(invoke_fn))
+		return (void *)invoke_fn;
 
-	rc = get_invoke_func(&pdev->dev, &invoke_fn);
-	if (rc)
-		return rc;
+	if (!optee_msg_api_uid_is_optee_api(invoke_fn)) {
+		pr_warn("api uid mismatch\n");
+		return ERR_PTR(-EINVAL);
+	}
 
-	if (!optee_msg_api_uid_is_optee_api(invoke_fn) ||
-	    !optee_msg_api_revision_is_compatible(invoke_fn) ||
-	    !optee_msg_exchange_capabilities(invoke_fn, &sec_caps))
-		return -EINVAL;
+	if (!optee_msg_api_revision_is_compatible(invoke_fn)) {
+		pr_warn("api revision mismatch\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	if (!optee_msg_exchange_capabilities(invoke_fn, &sec_caps)) {
+		pr_warn("capabilities mismatch\n");
+		return ERR_PTR(-EINVAL);
+	}
 
 	/*
 	 * We have no other option for shared memory, if secure world
 	 * doesn't have any reserved memory we can use we can't continue.
 	 */
-	if (!(sec_caps & OPTEE_SMC_SEC_CAP_HAVE_RESERVERED_SHM))
-		return -EINVAL;
+	if (!(sec_caps & OPTEE_SMC_SEC_CAP_HAVE_RESERVED_SHM))
+		return ERR_PTR(-EINVAL);
 
-	pool = optee_config_shm_ioremap(&pdev->dev, invoke_fn, &ioremaped_shm);
+	pool = optee_config_shm_memremap(invoke_fn, &memremaped_shm, sec_caps);
 	if (IS_ERR(pool))
-		return PTR_ERR(pool);
+		return (void *)pool;
 
-	optee = devm_kzalloc(&pdev->dev, sizeof(*optee), GFP_KERNEL);
+	optee = kzalloc(sizeof(*optee), GFP_KERNEL);
 	if (!optee) {
 		rc = -ENOMEM;
 		goto err;
 	}
 
-	optee->dev = &pdev->dev;
 	optee->invoke_fn = invoke_fn;
+	optee->sec_caps = sec_caps;
 
-	teedev = tee_device_alloc(&optee_desc, &pdev->dev, pool, optee);
+	teedev = tee_device_alloc(&optee_desc, NULL, pool, optee);
 	if (IS_ERR(teedev)) {
 		rc = PTR_ERR(teedev);
 		goto err;
 	}
 	optee->teedev = teedev;
 
-	teedev = tee_device_alloc(&optee_supp_desc, &pdev->dev, pool, optee);
+	teedev = tee_device_alloc(&optee_supp_desc, NULL, pool, optee);
 	if (IS_ERR(teedev)) {
 		rc = PTR_ERR(teedev);
 		goto err;
@@ -531,42 +660,55 @@ static int optee_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&optee->call_queue.waiters);
 	optee_wait_queue_init(&optee->wait_queue);
 	optee_supp_init(&optee->supp);
-	optee->ioremaped_shm = ioremaped_shm;
+	optee->memremaped_shm = memremaped_shm;
 	optee->pool = pool;
-
-	platform_set_drvdata(pdev, optee);
 
 	optee_enable_shm_cache(optee);
 
-	dev_info(&pdev->dev, "initialized driver\n");
-	return 0;
+	pr_info("initialized driver\n");
+	return optee;
 err:
 	if (optee) {
-		tee_device_unregister(optee->teedev);
+		/*
+		 * tee_device_unregister() is safe to call even if the
+		 * devices hasn't been registered with
+		 * tee_device_register() yet.
+		 */
 		tee_device_unregister(optee->supp_teedev);
+		tee_device_unregister(optee->teedev);
+		kfree(optee);
 	}
 	if (pool)
 		tee_shm_pool_free(pool);
-	if (ioremaped_shm)
-		iounmap(optee->ioremaped_shm);
-	return rc;
+	if (memremaped_shm)
+		memunmap(memremaped_shm);
+	return ERR_PTR(rc);
 }
 
-static int optee_remove(struct platform_device *pdev)
+static void optee_remove(struct optee *optee)
 {
-	struct optee *optee = platform_get_drvdata(pdev);
-
+	/*
+	 * Ask OP-TEE to free all cached shared memory objects to decrease
+	 * reference counters and also avoid wild pointers in secure world
+	 * into the old shared memory range.
+	 */
 	optee_disable_shm_cache(optee);
 
-	tee_device_unregister(optee->teedev);
+	/*
+	 * The two devices has to be unregistered before we can free the
+	 * other resources.
+	 */
 	tee_device_unregister(optee->supp_teedev);
+	tee_device_unregister(optee->teedev);
+
 	tee_shm_pool_free(optee->pool);
-	if (optee->ioremaped_shm)
-		iounmap(optee->ioremaped_shm);
+	if (optee->memremaped_shm)
+		memunmap(optee->memremaped_shm);
 	optee_wait_queue_exit(&optee->wait_queue);
 	optee_supp_uninit(&optee->supp);
 	mutex_destroy(&optee->call_queue.mutex);
-	return 0;
+
+	kfree(optee);
 }
 
 static const struct of_device_id optee_match[] = {
@@ -574,33 +716,46 @@ static const struct of_device_id optee_match[] = {
 	{},
 };
 
-static struct platform_driver optee_driver = {
-	.driver = {
-		.name = DRIVER_NAME,
-		.of_match_table = optee_match,
-	},
-	.probe = optee_probe,
-	.remove = optee_remove,
-};
+static struct optee *optee_svc;
 
 static int __init optee_driver_init(void)
 {
-	struct device_node *node;
+	struct device_node *fw_np;
+	struct device_node *np;
+	struct optee *optee;
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
+	printk(KERN_INFO "TEE SEM INIT\n");
+	sema_init( &sem_tee, 3);
+#endif
 
-	/*
-	 * Preferred path is /firmware/optee, but it's the matching that
-	 * matters.
-	 */
-	for_each_matching_node(node, optee_match)
-		of_platform_device_create(node, NULL, NULL);
+	/* Node is supposed to be below /firmware */
+	fw_np = of_find_node_by_name(NULL, "firmware");
+	if (!fw_np)
+		return -ENODEV;
 
-	return platform_driver_register(&optee_driver);
+	np = of_find_matching_node(fw_np, optee_match);
+	if (!np)
+		return -ENODEV;
+
+	optee = optee_probe(np);
+	of_node_put(np);
+
+	if (IS_ERR(optee))
+		return PTR_ERR(optee);
+
+	optee_svc = optee;
+
+	return 0;
 }
-module_init(optee_driver_init);
+fs_initcall(optee_driver_init);
 
 static void __exit optee_driver_exit(void)
 {
-	platform_driver_unregister(&optee_driver);
+	struct optee *optee = optee_svc;
+
+	optee_svc = NULL;
+	if (optee)
+		optee_remove(optee);
 }
 module_exit(optee_driver_exit);
 

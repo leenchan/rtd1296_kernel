@@ -19,8 +19,6 @@
 
 #include <linux/types.h>
 
-//#define DEBUG 1
-
 #include "../uapi/ion.h"
 
 struct ion_handle;
@@ -30,10 +28,12 @@ struct ion_mapper;
 struct ion_client;
 struct ion_buffer;
 
-/* This should be removed some day when phys_addr_t's are fully
-   plumbed in the kernel, and all instances of ion_phys_addr_t should
-   be converted to phys_addr_t.  For the time being many kernel interfaces
-   do not accept phys_addr_t's that would have to */
+/*
+ * This should be removed some day when phys_addr_t's are fully
+ * plumbed in the kernel, and all instances of ion_phys_addr_t should
+ * be converted to phys_addr_t.  For the time being many kernel interfaces
+ * do not accept phys_addr_t's that would have to
+ */
 #define ion_phys_addr_t unsigned long
 
 /**
@@ -71,17 +71,6 @@ struct ion_platform_data {
 	int nr;
 	struct ion_platform_heap *heaps;
 };
-
-/**
- * ion_reserve() - reserve memory for ion heaps if applicable
- * @data:	platform data specifying starting physical address and
- *		size
- *
- * Calls memblock reserve to set aside memory for heaps that are
- * located at specific memory addresses or of specific sizes not
- * managed by the kernel
- */
-void ion_reserve(struct ion_platform_data *data);
 
 /**
  * ion_client_create() -  allocate a client and returns it
@@ -129,12 +118,14 @@ struct ion_handle *ion_alloc(struct ion_client *client, size_t len,
  */
 void ion_free(struct ion_client *client, struct ion_handle *handle);
 
+#if defined(CONFIG_ION_RTK)
+
 /**
  * ion_phys - returns the physical address and len of a handle
- * @client:	the client
- * @handle:	the handle
- * @addr:	a pointer to put the address in
- * @len:	a pointer to put the length in
+ * @client:     the client
+ * @handle:     the handle
+ * @addr:       a pointer to put the address in
+ * @len:        a pointer to put the length in
  *
  * This function queries the heap for a particular handle to get the
  * handle's physical address.  It't output is only correct if
@@ -145,19 +136,21 @@ void ion_free(struct ion_client *client, struct ion_handle *handle);
  * the returned value may not be valid if the caller is not
  * holding a reference.
  */
+
 int ion_phys(struct ion_client *client, struct ion_handle *handle,
-	     ion_phys_addr_t *addr, size_t *len);
+	ion_phys_addr_t *addr, size_t *len);
 
 /**
  * ion_map_dma - return an sg_table describing a handle
- * @client:	the client
- * @handle:	the handle
+ * @client:    the client
+ * @handle:    the handle
  *
  * This function returns the sg_table describing
  * a particular ion handle.
  */
 struct sg_table *ion_sg_table(struct ion_client *client,
-			      struct ion_handle *handle);
+	struct ion_handle *handle);
+#endif /* CONFIG_ION_RTK */
 
 /**
  * ion_map_kernel - create mapping for the given handle
@@ -192,19 +185,32 @@ struct dma_buf *ion_share_dma_buf(struct ion_client *client,
 int ion_share_dma_buf_fd(struct ion_client *client, struct ion_handle *handle);
 
 /**
- * ion_import_dma_buf() - given an dma-buf fd from the ion exporter get handle
+ * ion_import_dma_buf() - get ion_handle from dma-buf
+ * @client:	the client
+ * @dmabuf:	the dma-buf
+ *
+ * Get the ion_buffer associated with the dma-buf and return the ion_handle.
+ * If no ion_handle exists for this buffer, return newly created ion_handle.
+ * If dma-buf from another exporter is passed, return ERR_PTR(-EINVAL)
+ */
+struct ion_handle *ion_import_dma_buf(struct ion_client *client,
+				      struct dma_buf *dmabuf);
+
+/**
+ * ion_import_dma_buf_fd() - given a dma-buf fd from the ion exporter get handle
  * @client:	the client
  * @fd:		the dma-buf fd
  *
- * Given an dma-buf fd that was allocated through ion via ion_share_dma_buf,
- * import that fd and return a handle representing it.  If a dma-buf from
+ * Given an dma-buf fd that was allocated through ion via ion_share_dma_buf_fd,
+ * import that fd and return a handle representing it. If a dma-buf from
  * another exporter is passed in this function will return ERR_PTR(-EINVAL)
  */
-struct ion_handle *ion_import_dma_buf(struct ion_client *client, int fd);
+struct ion_handle *ion_import_dma_buf_fd(struct ion_client *client, int fd);
 
+#if defined(CONFIG_ION_RTK)
 struct ion_handle *ion_import_dma_buf_point(struct ion_client *client, struct dma_buf *dmabuf);
 int ion_mmap_by_handle(struct ion_handle *handle, struct vm_area_struct *vma);
-
 extern const struct vm_operations_struct ion_vma_ops;
+#endif /* CONFIG_ION_RTK */
 
 #endif /* _LINUX_ION_H */

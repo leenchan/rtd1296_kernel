@@ -49,6 +49,8 @@ static struct timer_list igmpSysTimer;	/*igmp timer */
 static uint32 rtl_totalMaxGroupCnt;	/*maximum total group entry count,  default is 100 */
 static uint32 rtl_totalMaxClientCnt;	/*maximum total group entry count,  default is 100 */
 static uint32 rtl_totalMaxSourceCnt;	/*maximum total group entry count,  default is 3000 */
+static int32 rtl_currentGroupCnt = 0;
+static int32 rtl_currentClientCnt = 0;
 
 void *rtl_groupMemory = NULL;
 void *rtl_clientMemory = NULL;
@@ -266,7 +268,7 @@ static void rtl_doMcastFlowRecycle(uint32 moduleIndex, uint32 ipVersion);
 #endif
 
 #if  defined(__linux__) && defined(__KERNEL__)
-static void rtl_multicastSysTimerExpired(uint32 expireDada);
+static void rtl_multicastSysTimerExpired(unsigned long expireDada);
 static void rtl_multicastSysTimerInit(void);
 static void rtl_multicastSysTimerDestroy(void);
 #endif
@@ -371,6 +373,10 @@ int32 rtl_initMulticastSnooping(struct rtl_mCastSnoopingGlobalConfig
 	rtl_sourceMemory = NULL;
 	rtl_mcastFlowMemory = NULL;
 
+	/* Initialize GroupCnt & ClientCnt */
+	rtl_currentGroupCnt = 0;
+	rtl_currentClientCnt = 0;
+
 	/*initialize group entry pool */
 	if (mCastSnoopingGlobalConfig.maxGroupNum == 0) {
 		rtl_totalMaxGroupCnt = DEFAULT_MAX_GROUP_COUNT;
@@ -380,7 +386,14 @@ int32 rtl_initMulticastSnooping(struct rtl_mCastSnoopingGlobalConfig
 
 	rtl_groupEntryPool = rtl_initGroupEntryPool(rtl_totalMaxGroupCnt);
 	if (rtl_groupEntryPool == NULL) {
+		printk(KERN_ERR
+				"HW_MCAST:%s:%d Failed to allocate group entry rtl_totalMaxGroupCnt:%d\n",
+				__func__, __LINE__, rtl_totalMaxGroupCnt);
 		return FAILED;
+	} else {
+		printk(KERN_DEBUG
+				"HW_MCAST:%s:%d Succeed to allocate group entry rtl_totalMaxGroupCnt:%d\n",
+				__func__, __LINE__, rtl_totalMaxGroupCnt);
 	}
 
 	/*initialize client entry pool */
@@ -392,7 +405,14 @@ int32 rtl_initMulticastSnooping(struct rtl_mCastSnoopingGlobalConfig
 
 	rtl_clientEntryPool = rtl_initClientEntryPool(rtl_totalMaxClientCnt);
 	if (rtl_clientEntryPool == NULL) {
+		printk(KERN_ERR
+				"HW_MCAST:%s:%d Failed to allocate client entry rtl_totalMaxClientCnt:%d\n",
+				__func__, __LINE__, rtl_totalMaxClientCnt);
 		return FAILED;
+	} else {
+		printk(KERN_DEBUG
+				"HW_MCAST:%s:%d Succeed to allocate client entry rtl_totalMaxClientCnt:%d\n",
+				__func__, __LINE__, rtl_totalMaxClientCnt);
 	}
 #ifdef CONFIG_RECORD_MCAST_FLOW
 	rtl_mcastFlowEntryPool = rtl_initMcastFlowEntryPool(DEFAULT_MAX_FLOW_COUNT);
@@ -803,8 +823,13 @@ static struct rtl_groupEntry *rtl_initGroupEntryPool(uint32 poolSize)
 	uint32 idx = 0;
 	struct rtl_groupEntry *poolHead = NULL;
 	struct rtl_groupEntry *entryPtr = NULL;
-
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	rtl_glueMutexLock();	/* Lock resource */
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	if (poolSize == 0) {
 		goto out;
 	}
@@ -819,6 +844,9 @@ static struct rtl_groupEntry *rtl_initGroupEntryPool(uint32 poolSize)
 
 		/* link the whole group entry pool */
 		for (idx = 0; idx < poolSize; idx++, entryPtr++) {
+#if defined(CONFIG_HW_MCAST_DEBUG)
+			entryPtr->idx = idx;
+#endif
 			if (idx == 0) {
 				entryPtr->previous = NULL;
 				if (idx == (poolSize - 1)) {
@@ -838,7 +866,9 @@ static struct rtl_groupEntry *rtl_initGroupEntryPool(uint32 poolSize)
 	}
 
 out:
-
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	rtl_glueMutexUnlock();	/* UnLock resource */
 	return poolHead;
 
@@ -848,18 +878,52 @@ out:
 static struct rtl_groupEntry *rtl_allocateGroupEntry(void)
 {
 	struct rtl_groupEntry *ret = NULL;
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	int tmp_idx = 0;
+#endif
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 
 	rtl_glueMutexLock();
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	if (rtl_groupEntryPool != NULL) {
 		ret = rtl_groupEntryPool;
 		if (rtl_groupEntryPool->next != NULL) {
 			rtl_groupEntryPool->next->previous = NULL;
 		}
 		rtl_groupEntryPool = rtl_groupEntryPool->next;
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		tmp_idx = ret->idx;
+#endif
 		memset(ret, 0, sizeof(struct rtl_groupEntry));
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		ret->idx = tmp_idx;
+#endif
 	}
-
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	rtl_glueMutexUnlock();
+
+	if (ret == NULL) {
+		printk(KERN_DEBUG
+				"HW_MCAST:%s:%d Failed to retrieve group entry rtl_currentGroupCnt:%d\n",
+				__func__, __LINE__, rtl_currentGroupCnt);
+	} else {
+		rtl_currentGroupCnt++;
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		printk(KERN_DEBUG
+				"HW_MCAST:%s:%d Retrieve group entry successfully rtl_currentGroupCnt:%d idx:%d\n",
+				__func__, __LINE__, rtl_currentGroupCnt, ret->idx);
+#else
+		printk(KERN_DEBUG
+				"HW_MCAST:%s:%d Retrieve group entry successfully rtl_currentGroupCnt:%d\n",
+				__func__, __LINE__, rtl_currentGroupCnt);
+#endif
+	}
 
 	return ret;
 }
@@ -878,6 +942,16 @@ static void rtl_freeGroupEntry(struct rtl_groupEntry *groupEntryPtr)
 	}
 	rtl_groupEntryPool = groupEntryPtr;
 	rtl_glueMutexUnlock();
+
+	rtl_currentGroupCnt--;
+	if (rtl_currentGroupCnt < 0) {
+		WARN_ON(1);
+		printk(KERN_ERR "rtl_currentGroupCnt < 0\n");
+	}
+
+	printk(KERN_DEBUG
+			"HW_MCAST:%s:%d Free group entry Cnt:%d\n",
+			__func__, __LINE__, rtl_currentGroupCnt);
 }
 
 /*client entry memory management*/
@@ -887,8 +961,13 @@ static struct rtl_clientEntry *rtl_initClientEntryPool(uint32 poolSize)
 	uint32 idx = 0;
 	struct rtl_clientEntry *poolHead = NULL;
 	struct rtl_clientEntry *entryPtr = NULL;
-
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	rtl_glueMutexLock();	/* Lock resource */
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	if (poolSize == 0) {
 		goto out;
 	}
@@ -904,6 +983,9 @@ static struct rtl_clientEntry *rtl_initClientEntryPool(uint32 poolSize)
 
 		/* link the whole group entry pool */
 		for (idx = 0; idx < poolSize; idx++, entryPtr++) {
+#if defined(CONFIG_HW_MCAST_DEBUG)
+			entryPtr->idx = idx;
+#endif
 			if (idx == 0) {
 				entryPtr->previous = NULL;
 				if (idx == (poolSize - 1)) {
@@ -923,7 +1005,9 @@ static struct rtl_clientEntry *rtl_initClientEntryPool(uint32 poolSize)
 	}
 
 out:
-
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	rtl_glueMutexUnlock();	/* UnLock resource */
 	return poolHead;
 
@@ -933,18 +1017,52 @@ out:
 static struct rtl_clientEntry *rtl_allocateClientEntry(void)
 {
 	struct rtl_clientEntry *ret = NULL;
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	int tmp_idx = 0;
+#endif
 
 	rtl_glueMutexLock();
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	if (rtl_clientEntryPool != NULL) {
 		ret = rtl_clientEntryPool;
 		if (rtl_clientEntryPool->next != NULL) {
 			rtl_clientEntryPool->next->previous = NULL;
 		}
 		rtl_clientEntryPool = rtl_clientEntryPool->next;
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		tmp_idx = ret->idx;
+#endif
 		memset(ret, 0, sizeof(struct rtl_clientEntry));
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		ret->idx = tmp_idx;
+#endif
 	}
-
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	rtl_glueMutexUnlock();
+
+	if (ret == NULL) {
+		printk(KERN_DEBUG
+				"HW_MCAST:%s:%d Failed to retrieve client entry rtl_currentClientCnt:%d\n",
+				__func__, __LINE__, rtl_currentClientCnt);
+	} else {
+		rtl_currentClientCnt++;
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		printk(KERN_DEBUG
+				"HW_MCAST:%s:%d Retrieve client entry successfully rtl_currentClientCnt:%d idx:%d\n",
+				__func__, __LINE__, rtl_currentClientCnt, ret->idx);
+#else
+		printk(KERN_DEBUG
+				"HW_MCAST:%s:%d Retrieve client entry successfully rtl_currentClientCnt:%d\n",
+				__func__, __LINE__, rtl_currentClientCnt);
+#endif
+	}
 
 	return ret;
 }
@@ -957,12 +1075,24 @@ static void rtl_freeClientEntry(struct rtl_clientEntry *clientEntryPtr)
 	}
 
 	rtl_glueMutexLock();
+
 	clientEntryPtr->next = rtl_clientEntryPool;
 	if (rtl_clientEntryPool != NULL) {
 		rtl_clientEntryPool->previous = clientEntryPtr;
 	}
 	rtl_clientEntryPool = clientEntryPtr;
+
 	rtl_glueMutexUnlock();
+
+	rtl_currentClientCnt--;
+	if (rtl_currentClientCnt < 0) {
+		WARN_ON(1);
+		printk(KERN_ERR "rtl_currentClientCnt < 0\n");
+	}
+
+	printk(KERN_DEBUG
+			"HW_MCAST:%s:%d Free client entry rtl_currentClientCnt:%d\n",
+			__func__, __LINE__, rtl_currentClientCnt);
 }
 
 /*source entry memory management*/
@@ -972,8 +1102,13 @@ static struct rtl_sourceEntry *rtl_initSourceEntryPool(uint32 poolSize)
 	uint32 idx = 0;
 	struct rtl_sourceEntry *poolHead = NULL;
 	struct rtl_sourceEntry *entryPtr = NULL;
-
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	rtl_glueMutexLock();	/* Lock resource */
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	if (poolSize == 0) {
 		goto out;
 	}
@@ -1008,6 +1143,9 @@ static struct rtl_sourceEntry *rtl_initSourceEntryPool(uint32 poolSize)
 	}
 
 out:
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	rtl_glueMutexUnlock();	/* UnLock resource */
 	return poolHead;
 
@@ -1017,7 +1155,6 @@ out:
 static struct rtl_sourceEntry *rtl_allocateSourceEntry(void)
 {
 	struct rtl_sourceEntry *ret = NULL;
-
 	rtl_glueMutexLock();
 	if (rtl_sourceEntryPool != NULL) {
 		ret = rtl_sourceEntryPool;
@@ -1027,7 +1164,6 @@ static struct rtl_sourceEntry *rtl_allocateSourceEntry(void)
 		rtl_sourceEntryPool = rtl_sourceEntryPool->next;
 		memset(ret, 0, sizeof(struct rtl_sourceEntry));
 	}
-
 	rtl_glueMutexUnlock();
 
 	return ret;
@@ -1047,7 +1183,6 @@ static void rtl_freeSourceEntry(struct rtl_sourceEntry *sourceEntryPtr)
 	}
 
 	rtl_sourceEntryPool = sourceEntryPtr;
-
 	rtl_glueMutexUnlock();
 }
 
@@ -1149,8 +1284,15 @@ struct rtl_groupEntry *rtl_searchGroupEntry(uint32 moduleIndex,
 {
 	struct rtl_groupEntry *groupPtr = NULL;
 	int32 hashIndex = 0;
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 
 	hashIndex = rtl_igmpHashAlgorithm(ipVersion, multicastAddr);
+
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 
 	if (ipVersion == IP_VERSION4) {
 		if (rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable != NULL)
@@ -1166,6 +1308,9 @@ struct rtl_groupEntry *rtl_searchGroupEntry(uint32 moduleIndex,
 	while (groupPtr != NULL) {
 		if (ipVersion == IP_VERSION4) {
 			if (multicastAddr[0] == groupPtr->groupAddr[0]) {
+#if defined(CONFIG_SMP)
+				SMP_UNLOCK_IGMP(flags);
+#endif
 				return groupPtr;
 			}
 		}
@@ -1176,6 +1321,9 @@ struct rtl_groupEntry *rtl_searchGroupEntry(uint32 moduleIndex,
 				(multicastAddr[2] == groupPtr->groupAddr[2]) &&
 				(multicastAddr[3] == groupPtr->groupAddr[3])
 				) {
+#if defined(CONFIG_SMP)
+				SMP_UNLOCK_IGMP(flags);
+#endif
 				return groupPtr;
 
 			}
@@ -1184,6 +1332,10 @@ struct rtl_groupEntry *rtl_searchGroupEntry(uint32 moduleIndex,
 		groupPtr = groupPtr->next;
 
 	}
+
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 
 	return NULL;
 }
@@ -1194,6 +1346,13 @@ int32 rtl_getGroupNum(uint32 ipVersion)
 	int32 hashIndex;
 	int32 groupCnt = 0;
 	struct rtl_groupEntry *groupEntryPtr;
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
+
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 
 	for (moduleIndex = 0; moduleIndex < MAX_MCAST_MODULE_NUM; moduleIndex++) {
 
@@ -1240,6 +1399,9 @@ int32 rtl_getGroupNum(uint32 ipVersion)
 		}
 	}
 
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	return groupCnt;
 }
 
@@ -1250,7 +1412,12 @@ int32 rtl_getGroupNumbyBr(uint32 ipVersion, char *brName)
 	int32 hashIndex;
 	int32 groupCnt = 0;
 	struct rtl_groupEntry *groupEntryPtr;
-
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	for (moduleIndex = 0; moduleIndex < MAX_MCAST_MODULE_NUM; moduleIndex++) {
 
 		if (rtl_mCastModuleArray[moduleIndex].enableSnooping == TRUE &&
@@ -1296,7 +1463,9 @@ int32 rtl_getGroupNumbyBr(uint32 ipVersion, char *brName)
 #endif
 		}
 	}
-
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	return groupCnt;
 }
 #endif
@@ -1306,11 +1475,20 @@ static void rtl_linkGroupEntry(struct rtl_groupEntry *groupEntry,
 	struct rtl_groupEntry **hashTable)
 {
 	uint32 hashIndex = 0;
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 
 	rtl_glueMutexLock();	//Lock resource
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	hashIndex = rtl_igmpHashAlgorithm(groupEntry->ipVersion,
 		groupEntry->groupAddr);
 	if (NULL == groupEntry || hashTable == NULL) {
+#if defined(CONFIG_SMP)
+		SMP_UNLOCK_IGMP(flags);
+#endif
 		rtl_glueMutexUnlock();
 		return;
 	}
@@ -1321,7 +1499,17 @@ static void rtl_linkGroupEntry(struct rtl_groupEntry *groupEntry,
 	groupEntry->next = hashTable[hashIndex];
 	hashTable[hashIndex] = groupEntry;
 	hashTable[hashIndex]->previous = NULL;
-
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	printk("HW_MCAST:%s:%d Link group entry. idx:%d groupAddress:%d.%d.%d.%d\n",
+			__func__, __LINE__, groupEntry->idx,
+			groupEntry->groupAddr[0] >> 24,
+			(groupEntry->groupAddr[0] & 0x00ff0000) >> 16,
+			(groupEntry->groupAddr[0] & 0x0000ff00) >> 8,
+			(groupEntry->groupAddr[0] & 0xff));
+#endif
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	rtl_glueMutexUnlock();	//UnLock resource
 
 }
@@ -1359,6 +1547,15 @@ static void rtl_unlinkGroupEntry(struct rtl_groupEntry *groupEntry,
 	groupEntry->previous = NULL;
 	groupEntry->next = NULL;
 
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	printk("HW_MCAST:%s:%d Link group entry. idx:%d groupAddress:%d.%d.%d.%d\n",
+			__func__, __LINE__, groupEntry->idx,
+			groupEntry->groupAddr[0] >> 24,
+			(groupEntry->groupAddr[0] & 0x00ff0000) >> 16,
+			(groupEntry->groupAddr[0] & 0x0000ff00) >> 8,
+			(groupEntry->groupAddr[0] & 0xff));
+#endif
+
 	rtl_glueMutexUnlock();	//UnLock resource
 
 }
@@ -1366,9 +1563,23 @@ static void rtl_unlinkGroupEntry(struct rtl_groupEntry *groupEntry,
 /* clear the content of group entry */
 static void rtl_clearGroupEntry(struct rtl_groupEntry *groupEntry)
 {
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	int tmp_idx = 0;
+#endif
 	rtl_glueMutexLock();
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	printk(KERN_DEBUG
+			"HW_MCAST:%s:%d Going to free groupEntry->idx:%d ipVersion:%d\n",
+			__func__, __LINE__, groupEntry->idx, groupEntry->ipVersion);
+#endif
 	if (NULL != groupEntry) {
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		tmp_idx = groupEntry->idx;
+#endif
 		memset(groupEntry, 0, sizeof(struct rtl_groupEntry));
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		groupEntry->idx = tmp_idx;
+#endif
 	}
 	rtl_glueMutexUnlock();
 }
@@ -1386,10 +1597,15 @@ static struct rtl_clientEntry *rtl_searchClientEntry(uint32 ipVersion,
 #endif
 {
 	struct rtl_clientEntry *clientPtr = groupEntry->clientList;
-
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	if (clientAddr == NULL) {
 		return NULL;
 	}
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	while (clientPtr != NULL) {
 		if (ipVersion == IP_VERSION4) {
 			if ((clientPtr->clientAddr[0] == clientAddr[0])
@@ -1407,6 +1623,9 @@ static struct rtl_clientEntry *rtl_searchClientEntry(uint32 ipVersion,
 					/*update port number,in case of client change port */
 					clientPtr->portNum = portNum;
 				}
+#if defined(CONFIG_SMP)
+				SMP_UNLOCK_IGMP(flags);
+#endif
 				return clientPtr;
 			}
 
@@ -1432,6 +1651,9 @@ static struct rtl_clientEntry *rtl_searchClientEntry(uint32 ipVersion,
 					/*update port number,in case of client change port */
 					clientPtr->portNum = portNum;
 				}
+#if defined(CONFIG_SMP)
+				SMP_UNLOCK_IGMP(flags);
+#endif
 				return clientPtr;
 			}
 		}
@@ -1439,6 +1661,10 @@ static struct rtl_clientEntry *rtl_searchClientEntry(uint32 ipVersion,
 		clientPtr = clientPtr->next;
 
 	}
+
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 
 	return NULL;
 }
@@ -1462,6 +1688,9 @@ uint32 rtl_getAllClientPortMask(struct rtl_groupEntry *groupEntry)
 static void rtl_linkClientEntry(struct rtl_groupEntry *groupEntry,
 	struct rtl_clientEntry *clientEntry)
 {
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	rtl_glueMutexLock();	//Lock resource
 	if (NULL == clientEntry) {
 		return;
@@ -1470,7 +1699,9 @@ static void rtl_linkClientEntry(struct rtl_groupEntry *groupEntry,
 	if (NULL == groupEntry) {
 		return;
 	}
-
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	if (groupEntry->clientList != NULL) {
 		groupEntry->clientList->previous = clientEntry;
 	}
@@ -1479,6 +1710,18 @@ static void rtl_linkClientEntry(struct rtl_groupEntry *groupEntry,
 	groupEntry->clientList = clientEntry;
 	groupEntry->clientList->previous = NULL;
 
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	printk("HW_MCAST:%s:%d Link client entry. group_idx:%d client_idx:%d "
+			"clientAddr:%d.%d.%d.%d\n",
+			__func__, __LINE__, groupEntry->idx,
+			clientEntry->idx, clientEntry->clientAddr[0] >> 24,
+			(clientEntry->clientAddr[0] & 0x00ff0000) >> 16,
+			(clientEntry->clientAddr[0] & 0x0000ff00) >> 8,
+			(clientEntry->clientAddr[0] & 0xff));
+#endif
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	rtl_glueMutexUnlock();	//UnLock resource
 
 }
@@ -1517,6 +1760,15 @@ static void rtl_unlinkClientEntry(struct rtl_groupEntry *groupEntry,
 	clientEntry->previous = NULL;
 	clientEntry->next = NULL;
 
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	printk("HW_MCAST:%s:%d Unlink client entry. group_idx:%d client_idx:%d "
+			"clientAddr:%d.%d.%d.%d\n",
+			__func__, __LINE__, groupEntry->idx,
+			clientEntry->idx, clientEntry->clientAddr[0] >> 24,
+			(clientEntry->clientAddr[0] & 0x00ff0000) >> 16,
+			(clientEntry->clientAddr[0] & 0x0000ff00) >> 8,
+			(clientEntry->clientAddr[0] & 0xff));
+#endif
 	rtl_glueMutexUnlock();	//UnLock resource
 
 }
@@ -1524,9 +1776,27 @@ static void rtl_unlinkClientEntry(struct rtl_groupEntry *groupEntry,
 /* clear the content of client entry */
 static void rtl_clearClientEntry(struct rtl_clientEntry *clientEntry)
 {
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	int tmp_idx = 0;
+#endif
+
 	rtl_glueMutexLock();
 	if (NULL != clientEntry) {
+#if defined(CONFIG_HW_MCAST_DEBUG)
+	printk(KERN_DEBUG
+			"HW_MCAST:%s:%d Going to free clientEntry->idx:%d clientAddr:%d.%d.%d.%d\n",
+			__func__, __LINE__, clientEntry->idx, clientEntry->clientAddr[0] >> 24,
+			(clientEntry->clientAddr[0] & 0x00ff0000) >> 16,
+			(clientEntry->clientAddr[0] & 0x0000ff00) >> 8,
+			(clientEntry->clientAddr[0] & 0xff));
+#endif
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		tmp_idx = clientEntry->idx;
+#endif
 		memset(clientEntry, 0, sizeof(struct rtl_clientEntry));
+#if defined(CONFIG_HW_MCAST_DEBUG)
+		clientEntry->idx = tmp_idx;
+#endif
 	}
 	rtl_glueMutexUnlock();
 }
@@ -1639,6 +1909,9 @@ static int32 rtl_searchSourceAddr(uint32 ipVersion, uint32 *sourceAddr,
 static void rtl_linkSourceEntry(struct rtl_clientEntry *clientEntry,
 	struct rtl_sourceEntry *entryNode)
 {
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	if (NULL == entryNode) {
 		return;
 	}
@@ -1648,14 +1921,18 @@ static void rtl_linkSourceEntry(struct rtl_clientEntry *clientEntry,
 	}
 
 	rtl_glueMutexLock();	/* lock resource */
-
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	if (clientEntry->sourceList != NULL) {
 		clientEntry->sourceList->previous = entryNode;
 	}
 	entryNode->next = clientEntry->sourceList;
 	clientEntry->sourceList = entryNode;
 	clientEntry->sourceList->previous = NULL;
-
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	rtl_glueMutexUnlock();	/* lock resource */
 }
 
@@ -1891,6 +2168,9 @@ static void rtl_deleteSourceList(struct rtl_clientEntry *clientEntry)
 static void rtl_deleteClientEntry(struct rtl_groupEntry *groupEntry,
 	struct rtl_clientEntry *clientEntry)
 {
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	if (NULL == clientEntry) {
 		return;
 	}
@@ -1907,9 +2187,15 @@ static void rtl_deleteClientEntry(struct rtl_groupEntry *groupEntry,
 #endif
 
 	rtl_deleteSourceList(clientEntry);
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	rtl_unlinkClientEntry(groupEntry, clientEntry);
 	rtl_clearClientEntry(clientEntry);
 	rtl_freeClientEntry(clientEntry);
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	return;
 
 }
@@ -1935,12 +2221,27 @@ static void rtl_deleteClientList(struct rtl_groupEntry *groupEntry)
 static void rtl_deleteGroupEntry(struct rtl_groupEntry *groupEntry,
 	struct rtl_groupEntry **hashTable)
 {
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	if (groupEntry != NULL) {
 
 		rtl_deleteClientList(groupEntry);
-		rtl_unlinkGroupEntry(groupEntry, hashTable);
-		rtl_clearGroupEntry(groupEntry);
-		rtl_freeGroupEntry(groupEntry);
+#if defined(CONFIG_SMP)
+		SMP_LOCK_IGMP(flags);
+#endif
+		/*
+		 * This ipVersion condition protects the race condition on SMP platform.
+		 * Uncleared group entry won't have zero value in ipVersion.
+		 */
+		if (groupEntry->ipVersion) {
+			rtl_unlinkGroupEntry(groupEntry, hashTable);
+			rtl_clearGroupEntry(groupEntry);
+			rtl_freeGroupEntry(groupEntry);
+		}
+#if defined(CONFIG_SMP)
+		SMP_UNLOCK_IGMP(flags);
+#endif
 
 	}
 
@@ -2366,8 +2667,8 @@ static int32 rtl_initHashTable(uint32 moduleIndex, uint32 hashTableSize)
 	uint32 i = 0;
 
 	/* Allocate memory */
-	rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable = (struct rtl_groupEntry **)rtl_glueMalloc(4 * hashTableSize);
-
+	rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable =
+			(struct rtl_groupEntry **)rtl_glueMalloc(sizeof(uintptr_t) * hashTableSize);
 	if (rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable != NULL) {
 		for (i = 0; i < hashTableSize; i++) {
 			rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable[i] = NULL;
@@ -2378,7 +2679,9 @@ static int32 rtl_initHashTable(uint32 moduleIndex, uint32 hashTableSize)
 	}
 
 #ifdef CONFIG_RTL_MLD_SNOOPING
-	rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable = (struct rtl_groupEntry **)rtl_glueMalloc(4 * hashTableSize);
+	rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable =
+			(struct rtl_groupEntry **)rtl_glueMalloc(sizeof(uintptr_t) * hashTableSize);
+
 	if (rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable != NULL) {
 		for (i = 0; i < hashTableSize; i++) {
 
@@ -2395,7 +2698,8 @@ static int32 rtl_initHashTable(uint32 moduleIndex, uint32 hashTableSize)
 #endif
 
 #ifdef CONFIG_RECORD_MCAST_FLOW
-	rtl_mCastModuleArray[moduleIndex].flowHashTable = (struct rtl_mcastFlowEntry **)rtl_glueMalloc(4 * hashTableSize);
+	rtl_mCastModuleArray[moduleIndex].flowHashTable =
+			(struct rtl_mcastFlowEntry **)rtl_glueMalloc(sizeof(uintptr_t) * hashTableSize);
 
 	if (rtl_mCastModuleArray[moduleIndex].flowHashTable != NULL) {
 		for (i = 0; i < hashTableSize; i++) {
@@ -2485,10 +2789,17 @@ static void rtl_parseMacFrame(uint32 moduleIndex, uint8 *macFrame,
 		macInfo->ipVersion = IP_VERSION4;
 	} else {
 		/*check the presence of ipv4 type */
-		if (*(int16 *)(ptr) == (int16)htons(IPV6_ETHER_TYPE)) {
-			ptr = ptr + 2;
-			macInfo->ipBuf = ptr;
-			macInfo->ipVersion = IP_VERSION6;
+	#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
+		if((*(int16 *)(ptr)==(int16)htons(IPV6_ETHER_TYPE))||
+		  ((is_pppoe == 1) && (*(int16 *)(ptr)==(int16)htons(PPP_IPV6_PROTOCOL))))
+
+	#else
+		if(*(int16 *)(ptr)==(int16)htons(IPV6_ETHER_TYPE))
+	#endif
+		{
+			ptr=ptr+2;
+			macInfo->ipBuf=ptr;
+			macInfo->ipVersion=IP_VERSION6;
 		}
 	}
 
@@ -2711,7 +3022,27 @@ otherpro:
 							(rtl_compareIpv6Addr(((struct ipv6Pkt *)macInfo->ipBuf)->destinationAddr, ipAddr) == TRUE)) {
 							macInfo->l3Protocol = ICMP_PROTOCOL;
 						}
+						else /*means multicast*/
+						{
 
+								ipAddr[0]=htonl(rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[0]);
+								ipAddr[1]=htonl(rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[1]);
+								ipAddr[2]=htonl(rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[2]);
+								ipAddr[3]=htonl(rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[3]);
+								if(	(rtl_compareMacAddr(macFrame, rtl_mCastModuleArray[moduleIndex].rtl_gatewayMac)==TRUE) &&\
+								(rtl_compareIpv6Addr(((struct ipv6Pkt *)macInfo->ipBuf)->destinationAddr, ipAddr) == TRUE))
+								{
+									macInfo->l3Protocol=ICMP_PROTOCOL;
+								}
+
+								#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
+								else if(is_pppoe == 1)
+								{
+									macInfo->l3Protocol=ICMP_PROTOCOL;
+								}
+								#endif
+
+						}
 					}
 
 					/*
@@ -3584,6 +3915,7 @@ static int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion,
 			newSourceEntry = rtl_allocateSourceEntry();
 			if (newSourceEntry == NULL) {
 				rtl_gluePrintf("run out of source entry!\n");
+				SMP_UNLOCK_IGMP(flags);
 				return FAILED;
 			}
 
@@ -3843,6 +4175,7 @@ static int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,
 		newSourceEntry = rtl_allocateSourceEntry();
 		if (newSourceEntry == NULL) {
 			rtl_gluePrintf("run out of source entry!\n");
+			SMP_UNLOCK_IGMP(flags);
 			return FAILED;
 		}
 
@@ -4106,6 +4439,7 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,
 				newSourceEntry = rtl_allocateSourceEntry();
 				if (newSourceEntry == NULL) {
 					rtl_gluePrintf("run out of source entry!\n");
+					SMP_UNLOCK_IGMP(flags);
 					return FAILED;
 				}
 
@@ -4482,6 +4816,7 @@ static int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,
 		newSourceEntry = rtl_allocateSourceEntry();
 		if (newSourceEntry == NULL) {
 			rtl_gluePrintf("run out of source entry!\n");
+			SMP_UNLOCK_IGMP(flags);
 			return FAILED;
 		}
 
@@ -5148,6 +5483,9 @@ static uint32 rtl_processIgmpMld(uint32 moduleIndex, uint32 ipVersion,
 #endif
 {
 	uint32 fwdPortMask = 0;
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 
 	reportEventContext.moduleIndex = moduleIndex;
 
@@ -5158,16 +5496,25 @@ static uint32 rtl_processIgmpMld(uint32 moduleIndex, uint32 ipVersion,
 		break;
 
 	case IGMPV1_REPORT:
+#if defined(CONFIG_SMP)
+		SMP_LOCK_IGMP_CONCURRENT(flags);
+#endif
 #if defined (CONFIG_RTL_IGMPSNOOPING_MAC_BASED) || defined (M2U_DELETE_CHECK)
 		fwdPortMask = rtl_processJoin(moduleIndex, ipVersion, portNum,
 			clientAddr, clientMacAddr, pktBuf);
 #else
 		fwdPortMask = rtl_processJoin(moduleIndex, ipVersion, portNum,
 			clientAddr, pktBuf);
+#endif
+#if defined(CONFIG_SMP)
+		SMP_UNLOCK_IGMP_CONCURRENT(flags);
 #endif
 		break;
 
 	case IGMPV2_REPORT:
+#if defined(CONFIG_SMP)
+		SMP_LOCK_IGMP_CONCURRENT(flags);
+#endif
 #if defined (CONFIG_RTL_IGMPSNOOPING_MAC_BASED) || defined (M2U_DELETE_CHECK)
 		fwdPortMask = rtl_processJoin(moduleIndex, ipVersion, portNum,
 			clientAddr, clientMacAddr, pktBuf);
@@ -5175,15 +5522,24 @@ static uint32 rtl_processIgmpMld(uint32 moduleIndex, uint32 ipVersion,
 		fwdPortMask = rtl_processJoin(moduleIndex, ipVersion, portNum,
 			clientAddr, pktBuf);
 #endif
+#if defined(CONFIG_SMP)
+		SMP_UNLOCK_IGMP_CONCURRENT(flags);
+#endif
 		break;
 
 	case IGMPV2_LEAVE:
+#if defined(CONFIG_SMP)
+		SMP_LOCK_IGMP_CONCURRENT(flags);
+#endif
 #if defined (CONFIG_RTL_IGMPSNOOPING_MAC_BASED) || defined (M2U_DELETE_CHECK)
 		fwdPortMask = rtl_processLeave(moduleIndex, ipVersion, portNum,
 			clientAddr, clientMacAddr, pktBuf);
 #else
 		fwdPortMask = rtl_processLeave(moduleIndex, ipVersion, portNum,
 			clientAddr, pktBuf);
+#endif
+#if defined(CONFIG_SMP)
+		SMP_UNLOCK_IGMP_CONCURRENT(flags);
 #endif
 		break;
 
@@ -5203,6 +5559,9 @@ static uint32 rtl_processIgmpMld(uint32 moduleIndex, uint32 ipVersion,
 		break;
 
 	case MLDV1_REPORT:
+#if defined(CONFIG_SMP)
+		SMP_LOCK_IGMP_CONCURRENT(flags);
+#endif
 #if defined (CONFIG_RTL_IGMPSNOOPING_MAC_BASED) || defined (M2U_DELETE_CHECK)
 		fwdPortMask = rtl_processJoin(moduleIndex, ipVersion, portNum,
 			clientAddr, clientMacAddr, pktBuf);
@@ -5210,9 +5569,15 @@ static uint32 rtl_processIgmpMld(uint32 moduleIndex, uint32 ipVersion,
 		fwdPortMask = rtl_processJoin(moduleIndex, ipVersion, portNum,
 			clientAddr, pktBuf);
 #endif
+#if defined(CONFIG_SMP)
+		SMP_UNLOCK_IGMP_CONCURRENT(flags);
+#endif
 		break;
 
 	case MLDV1_DONE:
+#if defined(CONFIG_SMP)
+		SMP_LOCK_IGMP_CONCURRENT(flags);
+#endif
 #if defined (CONFIG_RTL_IGMPSNOOPING_MAC_BASED) || defined (M2U_DELETE_CHECK)
 
 		fwdPortMask = rtl_processLeave(moduleIndex, ipVersion, portNum,
@@ -5220,6 +5585,9 @@ static uint32 rtl_processIgmpMld(uint32 moduleIndex, uint32 ipVersion,
 #else
 		fwdPortMask = rtl_processLeave(moduleIndex, ipVersion, portNum,
 			clientAddr, pktBuf);
+#endif
+#if defined(CONFIG_SMP)
+		SMP_UNLOCK_IGMP_CONCURRENT(flags);
 #endif
 		break;
 
@@ -5625,9 +5993,115 @@ void rtl_setMulticastParameters(struct rtl_mCastTimerParameters mCastTimerParame
 
 	return;
 }
+int rtl_getMulticastParameters(struct rtl_mCastTimerParameters *mCastTimerParameters)
+{
+	if(mCastTimerParameters == NULL)
+		return FAILED;
 
-int32 rtl_configIgmpSnoopingModule(uint32 moduleIndex,
-	struct rtl_mCastSnoopingLocalConfig *mCastSnoopingLocalConfig)
+	mCastTimerParameters->disableExpire= rtl_mCastTimerParas.disableExpire;
+	mCastTimerParameters->groupMemberAgingTime= rtl_mCastTimerParas.groupMemberAgingTime;
+	mCastTimerParameters->lastMemberAgingTime= rtl_mCastTimerParas.lastMemberAgingTime;
+	mCastTimerParameters->querierPresentInterval=rtl_mCastTimerParas.querierPresentInterval;
+	mCastTimerParameters->dvmrpRouterAgingTime=rtl_mCastTimerParas.dvmrpRouterAgingTime;
+	mCastTimerParameters->mospfRouterAgingTime=rtl_mCastTimerParas.mospfRouterAgingTime;
+	mCastTimerParameters->pimRouterAgingTime=rtl_mCastTimerParas.pimRouterAgingTime;
+
+	return SUCCESS;
+}
+
+
+void rtl_modifyGroupTimer(int groupAgeTime)
+{
+	int32 moduleIndex;
+	int32 hashIndex;
+	struct rtl_groupEntry *groupEntryPtr=NULL;
+	struct rtl_clientEntry* clientEntry=NULL;
+	struct rtl_sourceEntry *sourceEntryPtr=NULL;
+
+	for(moduleIndex=0; moduleIndex<MAX_MCAST_MODULE_NUM ;moduleIndex++)
+	{
+			if(rtl_mCastModuleArray[moduleIndex].enableSnooping==TRUE)
+			{
+				if(rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable != NULL)
+				{
+					for(hashIndex=0;hashIndex<rtl_hashTableSize;hashIndex++)
+					{
+						groupEntryPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable[hashIndex];
+						while(groupEntryPtr!=NULL)
+						{
+							clientEntry=groupEntryPtr->clientList;
+
+							while (clientEntry!=NULL)
+							{
+
+								if(clientEntry->groupFilterTimer>rtl_sysUpSeconds)
+								{
+									if((clientEntry->groupFilterTimer-rtl_sysUpSeconds)>rtl_mCastTimerParas.groupMemberAgingTime)
+										clientEntry->groupFilterTimer = rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
+								}
+
+								sourceEntryPtr=clientEntry->sourceList;
+
+								while(sourceEntryPtr!=NULL)
+								{
+									if(sourceEntryPtr->portTimer>rtl_sysUpSeconds)
+									{
+										if((sourceEntryPtr->portTimer-rtl_sysUpSeconds)>rtl_mCastTimerParas.groupMemberAgingTime)
+											sourceEntryPtr->portTimer=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
+									}
+
+									sourceEntryPtr=sourceEntryPtr->next;
+								}
+								clientEntry = clientEntry->next;
+							}
+							groupEntryPtr=groupEntryPtr->next;
+						}
+
+					}
+				}
+				if(rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable != NULL)
+				{
+					for(hashIndex=0;hashIndex<rtl_hashTableSize;hashIndex++)
+					{
+						groupEntryPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable[hashIndex];
+						while(groupEntryPtr!=NULL)
+						{
+							clientEntry=groupEntryPtr->clientList;
+
+							while (clientEntry!=NULL)
+							{
+
+								if(clientEntry->groupFilterTimer>rtl_sysUpSeconds)
+								{
+									if((clientEntry->groupFilterTimer-rtl_sysUpSeconds)>rtl_mCastTimerParas.groupMemberAgingTime)
+										clientEntry->groupFilterTimer = rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
+								}
+
+								sourceEntryPtr=clientEntry->sourceList;
+
+								while(sourceEntryPtr!=NULL)
+								{
+									if(sourceEntryPtr->portTimer>rtl_sysUpSeconds)
+									{
+										if((sourceEntryPtr->portTimer-rtl_sysUpSeconds)>rtl_mCastTimerParas.groupMemberAgingTime)
+											sourceEntryPtr->portTimer=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
+									}
+
+									sourceEntryPtr=sourceEntryPtr->next;
+								}
+								clientEntry = clientEntry->next;
+							}
+							groupEntryPtr=groupEntryPtr->next;
+						}
+
+					}
+				}
+			}
+		}
+
+}
+
+int32 rtl_configIgmpSnoopingModule(uint32 moduleIndex, struct rtl_mCastSnoopingLocalConfig *mCastSnoopingLocalConfig)
 {
 
 	if (moduleIndex >= MAX_MCAST_MODULE_NUM) {
@@ -6238,12 +6712,21 @@ int32 rtl_getMulticastDataFwdInfo(uint32 moduleIndex,
 
 #if defined(__linux__) && defined(__KERNEL__)
 
-static void rtl_multicastSysTimerExpired(uint32 expireDada)
+static void rtl_multicastSysTimerExpired(unsigned long expireDada)
 {
 	struct timeval currentTimeVector;
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 
 	do_gettimeofday(&currentTimeVector);
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP_CONCURRENT(flags);
+#endif
 	rtl_maintainMulticastSnoopingTimerList((uint32)(currentTimeVector.tv_sec));
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP_CONCURRENT(flags);
+#endif
 	mod_timer(&igmpSysTimer, jiffies + HZ);
 
 }
@@ -6255,11 +6738,9 @@ static void rtl_multicastSysTimerInit(void)
 	do_gettimeofday(&startTimeVector);
 	rtl_startTime = (uint32)(startTimeVector.tv_sec);
 	rtl_sysUpSeconds = 0;
-
-	init_timer(&igmpSysTimer);
-	igmpSysTimer.data = igmpSysTimer.expires;
 	igmpSysTimer.expires = jiffies + HZ;
-	igmpSysTimer.function = (void *)rtl_multicastSysTimerExpired;
+	setup_timer(&igmpSysTimer, rtl_multicastSysTimerExpired,
+			(unsigned long)igmpSysTimer.expires);
 	add_timer(&igmpSysTimer);
 }
 
@@ -6870,6 +7351,12 @@ int igmp_show(struct seq_file *s, void *v)
 #if defined (CONFIG_RTL_MLD_SNOOPING)
 	int mldVersion;
 #endif
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	for (moduleIndex = 0; moduleIndex < MAX_MCAST_MODULE_NUM; moduleIndex++) {
 		if (rtl_mCastModuleArray[moduleIndex].enableSnooping == TRUE) {
 			seq_printf(s, "-------------------------------------------------------------------------\n");
@@ -6902,6 +7389,10 @@ int igmp_show(struct seq_file *s, void *v)
 							(groupEntryPtr->groupAddr[0] & 0x00ff0000) >> 16,
 							(groupEntryPtr->groupAddr[0] & 0x0000ff00) >> 8,
 							(groupEntryPtr->groupAddr[0] & 0xff));
+
+#if defined(CONFIG_HW_MCAST_DEBUG)
+							seq_printf(s, "\\idx:%d", groupEntryPtr->idx);
+#endif
 
 #if defined (CONFIG_STATIC_RESERVED_MULTICAST)
 						if (groupEntryPtr->attribute == STATIC_RESERVED_MULTICAST)
@@ -6948,7 +7439,9 @@ int igmp_show(struct seq_file *s, void *v)
 							} else {
 								seq_printf(s, ":0s");
 							}
-
+#if defined(CONFIG_HW_MCAST_DEBUG)
+							seq_printf(s, "\\idx:%d", clientEntry->idx);
+#endif
 							sourceEntryPtr = clientEntry->sourceList;
 							if (sourceEntryPtr != NULL) {
 								seq_printf(s, "\\source list:");
@@ -7247,12 +7740,14 @@ int igmp_show(struct seq_file *s, void *v)
 #endif
 			}
 		}
-
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	seq_printf(s, "------------------------------------------------------------------\n");
 	return SUCCESS;
 }
 
-int igmp_write(struct file *file, const char __user *buffer,
+ssize_t igmp_write(struct file *file, const char __user *buffer,
 			size_t count, loff_t *data)
 {
 #if defined (CONFIG_STATIC_RESERVED_MULTICAST)
@@ -7719,13 +8214,18 @@ int32 rtl_getGroupInfo(uint32 groupAddr, struct rtl_groupInfo * groupInfo)
 	int32 moduleIndex;
 	int32 hashIndex;
 	struct rtl_groupEntry *groupEntryPtr;
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 
 	if (groupInfo == NULL) {
 		return FAILED;
 	}
 
 	memset(groupInfo, 0 , sizeof(struct rtl_groupInfo));
-
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	for (moduleIndex  =0; moduleIndex < MAX_MCAST_MODULE_NUM; moduleIndex++) {
 		if (rtl_mCastModuleArray[moduleIndex].enableSnooping == TRUE) {
 			hashIndex = rtl_hashMask&groupAddr;
@@ -7744,7 +8244,9 @@ int32 rtl_getGroupInfo(uint32 groupAddr, struct rtl_groupInfo * groupInfo)
 
 		}
 	}
-
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 	return SUCCESS;
 }
 #if defined(CONFIG_RTL_MLD_SNOOPING)
@@ -7753,12 +8255,17 @@ int32 rtl_getGroupInfov6(uint32 * groupAddr,struct rtl_groupInfo * groupInfo)
 	int32 moduleIndex;
 	int32 hashIndex;
 	struct rtl_groupEntry *groupEntryPtr;
-
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	if (groupAddr==NULL || groupInfo==NULL) {
 		return FAILED;
 	}
 
 	memset(groupInfo, 0 , sizeof(struct rtl_groupInfo));
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 
 	for (moduleIndex = 0; moduleIndex < MAX_MCAST_MODULE_NUM ; moduleIndex++) {
 		if (rtl_mCastModuleArray[moduleIndex].enableSnooping == TRUE) {
@@ -7781,6 +8288,9 @@ int32 rtl_getGroupInfov6(uint32 * groupAddr,struct rtl_groupInfo * groupInfo)
 
 		}
 	}
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
+#endif
 
 	return SUCCESS;
 }
@@ -7795,14 +8305,18 @@ int FindClientforM2U(unsigned int moduleindex, unsigned char *dMac, unsigned cha
 	struct rtl_clientEntry* clientEntryPtr = NULL;
 	unsigned int groupip[4] = {0, 0, 0, 0};
 	int ret = 0;
-
+#if defined(CONFIG_SMP)
+	unsigned long flags = 0;
+#endif
 	#if 0
 	printk("dst = %X:%X:%X:%X:%X:%X, src = %X:%X:%X:%X:%X:%X, [%s:%d]\n",
 		dMac[0], dMac[1], dMac[2], dMac[3], dMac[4], dMac[5],
 		sMac[0], sMac[1], sMac[2], sMac[3], sMac[4], sMac[5],
 		__FUNCTION__, __LINE__);
 	#endif
-
+#if defined(CONFIG_SMP)
+	SMP_LOCK_IGMP(flags);
+#endif
 	if (dMac[0] == 0x01 && dMac[1] == 0x00 && dMac[2] == 0x5e) {
 		if (rtl_mCastModuleArray[moduleindex].enableSnooping == TRUE) {
 			if (rtl_mCastModuleArray[moduleindex].rtl_ipv4HashTable != NULL) {
@@ -7886,6 +8400,9 @@ int FindClientforM2U(unsigned int moduleindex, unsigned char *dMac, unsigned cha
 			}
 		}
 	}
+#endif
+#if defined(CONFIG_SMP)
+	SMP_UNLOCK_IGMP(flags);
 #endif
 	return ret;
 }

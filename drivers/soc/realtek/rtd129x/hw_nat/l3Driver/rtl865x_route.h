@@ -1,10 +1,10 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2008  
+* Copyright c                  Realtek Semiconductor Corporation, 2008
 * All rights reserved.
-* 
+*
 * Program : route table driver
-* Abstract : 
-* Author : hyking (hyking_liu@realsil.com.cn)  
+* Abstract :
+* Author : hyking (hyking_liu@realsil.com.cn)
 *
 * This program is free software; you can redistribute it and/or modify
 * it under the terms of the GNU General Public License as published by
@@ -22,10 +22,10 @@ typedef struct rtl865x_route_s
 	ipaddr_t	ipMask;						/* Network mask */
 	ipaddr_t 	nextHop;					/* next hop IP address */
 	ipaddr_t	srcIp;						/* source IP address,only for multiple wan now*/
-	uint32	valid:1, 		
+	uint32	valid:1,
 			process:4,					/* 000: PPPoE, 001: L2, 010: ARP, 100: CPU, 101: NextHop, 110: Drop*/
 			asicIdx:4;
-				
+
 	uint32            ref_count;                       /*referrence count*/
 	rtl865x_netif_local_t *dstNetif;			/*destination network interface*/
 #if defined(CONFIG_RTL_HW_NAPT_REFINE_KERNEL_HOOKS)
@@ -40,7 +40,7 @@ typedef struct rtl865x_route_s
 			uint32	arpIpIdx;					/* External IP selection index */
 		} arp;
 
-		struct 
+		struct
 		{
 			void *macInfo;	/*direct nexthop's mac information*/
 		}direct;
@@ -48,23 +48,23 @@ typedef struct rtl865x_route_s
 		struct
 		{
 			void *macInfo; /*pppoe server's mac information*/
-			rtl865x_ppp_t *pppInfo;			
+			rtl865x_ppp_t *pppInfo;
 		}pppoe;
-		
+
 		struct
 		{
-			
+
 			uint32 nxtHopSta;	/* pointer to Nexthop table: starting range */
-			uint32 nxtHopEnd;		/* pointer to Nexthop table: ending range */				
+			uint32 nxtHopEnd;		/* pointer to Nexthop table: ending range */
 			uint8 nhalog;							/* algo. for load balance */
 			uint8 ipDomain;						/* IP domain */
 		} nxthop;
-		
+
 	} un;
 #if defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
 	uint32			DSLEG;
 	uint32			DSL_IDX;
-#endif	
+#endif
 
 } rtl865x_route_t;
 

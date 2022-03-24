@@ -22,10 +22,9 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 
-#include <linux/power-control.h>
-#include <linux/reset-helper.h> /* rstc_get */
+#include <soc/realtek/power-control.h>
 #include <linux/reset.h>
-#include <linux/clkdev.h>  /* clk_get */
+#include <linux/clk.h> /* clk_get */
 #include <linux/clk-provider.h>
 
 #include <soc/realtek/kernel-rpc.h>
@@ -43,11 +42,13 @@
 #ifdef USE_ION_AUDIO_HEAP
 #include "uapi/ion.h"
 #include "ion/ion.h"
-#include "uapi/rtk_phoenix_ion.h"
+#include "uapi/ion_rtk.h"
 
 struct ion_client *rpc_ion_client;
 extern struct ion_device *rtk_phoenix_ion_device;
 #endif
+
+extern hdmitx_device_t tx_dev;
 
 enum HDMI_AVMUTE {
 	HDMI_CLRAVM = 0,
@@ -60,11 +61,19 @@ enum HDMI_CLK_STATE {
 	HDMI_CLK_PLL_ON
 };
 
+#if defined(CONFIG_ARCH_RTD129x) || defined(CONFIG_ARCH_RTD119X)
 #define CONVERT_FOR_AVCPU(x)		((unsigned int)(x) | 0xA0000000)
+#else
+#define CONVERT_FOR_AVCPU(x)		(x)
+#endif
 
 static int hdmi_error;
 unsigned int tmds_en = 0;
 unsigned int hdmi_clk_always_on = 0;
+unsigned int displayport_exist = 0;
+#if 1//__LINUX_MEDIA_NAS__
+static int hpdDetect = 0;
+#endif
 
 void hdmitx_print_sink_info(asoc_hdmi_t *p_this);
 
@@ -80,8 +89,8 @@ int is_hdmi_clock_on(void)
 	pll_hdmi = rd_reg(vaddr)&0xBF;
 	iounmap(vaddr);
 
-	clk_hdmitx = clk_get(NULL, "clk_en_hdmi");
-	reset_hdmitx = rstc_get("rstn_hdmi");
+	clk_hdmitx = tx_dev.clk_hdmi;
+	reset_hdmitx = tx_dev.reset_hdmi;
 
 	if (__clk_is_enabled(clk_hdmitx) &&
 		(!reset_control_status(reset_hdmitx))) {
@@ -128,31 +137,25 @@ int hdmitx_check_rx_sense(void __iomem *reg_base)
 
 int hdmitx_check_tmds_src(void __iomem *reg_base)
 {
-	u32 cr_val;
-	int ret_val;
+	u32 val;
 
-	ret_val = TMDS_HDMI_ENABLED;
 	if (tmds_en == 1) {
-		cr_val = rd_reg(reg_base + HDMI_CR);
-		HDMI_INFO("CR=%x", cr_val);
+		val = rd_reg(reg_base + HDMI_CR);
+		HDMI_INFO("CR=%x", val);
 
-		switch (cr_val) {
-		case 0x15:
-			ret_val = TMDS_HDMI_ENABLED;
-			break;
-		case 0x0:
-			ret_val = TMDS_HDMI_DISABLED;
-			break;
-		case 0x11:
-			ret_val = TMDS_MHL_ENABLED;
-			break;
-		default:
-			ret_val = TMDS_MODE_UNKNOW;
-			break;
-		}
+		if (val == 0x15)
+			return TMDS_HDMI_ENABLED;
+		else if (val == 0x0)
+			return TMDS_HDMI_DISABLED;
+		else if (val == 0x11)
+			return TMDS_MHL_ENABLED;
+		else
+			return TMDS_MODE_UNKNOW;
+
+	} else {
+		return TMDS_HDMI_ENABLED;
 	}
 
-	return ret_val;
 }
 
 void hdmitx_turn_off_tmds(int vo_mode)
@@ -173,16 +176,13 @@ void hdmitx_turn_off_tmds(int vo_mode)
 
 int hdmitx_send_AVmute(void __iomem *reg_base, int flag)
 {
-	int ret_val;
-
-	ret_val = 1;
 	if ((flag == HDMI_SETAVM) || (flag == HDMI_CLRAVM))
 		set_mute_gpio_pulse();
 
 	/*  Skip AV mute if HDMI clock not enable */
 	if (is_hdmi_clock_on() != HDMI_CLK_PLL_ON) {
 		HDMI_DEBUG("Skip av mute, HDMI clock not enable");
-		goto exit;
+		return 1;
 	}
 
 	if (flag == HDMI_SETAVM) {
@@ -190,40 +190,34 @@ int hdmitx_send_AVmute(void __iomem *reg_base, int flag)
 		HDMI_DEBUG("set av mute");
 
 		wr_reg((reg_base + HDMI_GCPCR), HDMI_GCPCR_enablegcp(1) |
-								HDMI_GCPCR_gcp_clearavmute(1) |
-								HDMI_GCPCR_gcp_setavmute(1) |
-								HDMI_GCPCR_write_data(0));
+									HDMI_GCPCR_gcp_clearavmute(1) |
+									HDMI_GCPCR_gcp_setavmute(1) |
+									HDMI_GCPCR_write_data(0));
 		wr_reg((reg_base + HDMI_GCPCR), HDMI_GCPCR_enablegcp(1) |
-								HDMI_GCPCR_gcp_clearavmute(0) |
-								HDMI_GCPCR_gcp_setavmute(1) |
-								HDMI_GCPCR_write_data(1));
-		ret_val = 0;
+									HDMI_GCPCR_gcp_clearavmute(0) |
+									HDMI_GCPCR_gcp_setavmute(1) |
+									HDMI_GCPCR_write_data(1));
 
 		msleep(50);/* Makes sure sink device can receive mute */
-		goto exit;
+		return 0;
 	} else if (flag == HDMI_CLRAVM) {
 
 		HDMI_DEBUG("clear av mute");
 
 		wr_reg((reg_base + HDMI_GCPCR), HDMI_GCPCR_enablegcp(1) |
-								HDMI_GCPCR_gcp_clearavmute(1) |
-								HDMI_GCPCR_gcp_setavmute(1) |
-								HDMI_GCPCR_write_data(0));
+									HDMI_GCPCR_gcp_clearavmute(1) |
+									HDMI_GCPCR_gcp_setavmute(1) |
+									HDMI_GCPCR_write_data(0));
 		wr_reg((reg_base + HDMI_GCPCR), HDMI_GCPCR_enablegcp(1) |
-								HDMI_GCPCR_gcp_clearavmute(1) |
-								HDMI_GCPCR_gcp_setavmute(0) |
-								HDMI_GCPCR_write_data(1));
-		ret_val = 0;
-
-		msleep(50);/* Makes sure sink device can receive clear mute before hdcp on */
-		goto exit;
+									HDMI_GCPCR_gcp_clearavmute(1) |
+									HDMI_GCPCR_gcp_setavmute(0) |
+									HDMI_GCPCR_write_data(1));
+		return 0;
 	} else {
 
 		HDMI_DEBUG("unknown av mute parameter");
+		return 1;
 	}
-
-exit:
-	return ret_val;
 }
 
 
@@ -231,7 +225,6 @@ exit:
 void register_ion_client(const char *name)
 {
 	rpc_ion_client = ion_client_create(rtk_phoenix_ion_device, name);
-
 }
 
 void deregister_ion_client(const char *name)
@@ -243,43 +236,41 @@ void deregister_ion_client(const char *name)
 }
 
 #if __RTK_HDMI_GENERIC_DEBUG__
-void hdmitx_dump_VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM(
-	struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *arg, char *str)
+void hdmitx_dump_VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *arg, char *str)
 {
 	HDMI_DEBUG("%s", __func__);
-	HDMI_INFO("interfaceType =0x%x", arg->interfaceType);
+	HDMI_INFO("interfaceType       =0x%x", arg->interfaceType);
 
-	HDMI_INFO("videoInfo.standard =0x%x", arg->videoInfo.standard);
-	HDMI_INFO("videoInfo.enProg =0x%x", arg->videoInfo.enProg);
-	HDMI_INFO("videoInfo.enDIF =0x%x", arg->videoInfo.enDIF);
+	HDMI_INFO("videoInfo.standard  =0x%x", arg->videoInfo.standard);
+	HDMI_INFO("videoInfo.enProg    =0x%x", arg->videoInfo.enProg);
+	HDMI_INFO("videoInfo.enDIF     =0x%x", arg->videoInfo.enDIF);
 	HDMI_INFO("videoInfo.enCompRGB =0x%x", arg->videoInfo.enCompRGB);
-	HDMI_INFO("videoInfo.pedType =0x%x", arg->videoInfo.pedType);
-	HDMI_INFO("videoInfo.dataInt0 =0x%x", arg->videoInfo.dataInt0);
-	HDMI_INFO("videoInfo.dataInt1 =0x%x", arg->videoInfo.dataInt1);
+	HDMI_INFO("videoInfo.pedType   =0x%x", arg->videoInfo.pedType);
+	HDMI_INFO("videoInfo.dataInt0  =0x%x", arg->videoInfo.dataInt0);
+	HDMI_INFO("videoInfo.dataInt1  =0x%x", arg->videoInfo.dataInt1);
 
-	HDMI_INFO("hdmiInfo.hdmiMode =0x%x", arg->hdmiInfo.hdmiMode);
-	HDMI_INFO("hdmiInfo.audioSampleFreq =0x%x", arg->hdmiInfo.audioSampleFreq);
-	HDMI_INFO("hdmiInfo.audioChannelCount =0x%x", arg->hdmiInfo.audioChannelCount);
-	HDMI_INFO("hdmiInfo.dataByte1 =0x%x", arg->hdmiInfo.dataByte1);
-	HDMI_INFO("hdmiInfo.dataByte2 =0x%x", arg->hdmiInfo.dataByte2);
-	HDMI_INFO("hdmiInfo.dataByte3 =0x%x", arg->hdmiInfo.dataByte3);
-	HDMI_INFO("hdmiInfo.dataByte4 =0x%x", arg->hdmiInfo.dataByte4);
-	HDMI_INFO("hdmiInfo.dataByte5 =0x%x", arg->hdmiInfo.dataByte5);
-	HDMI_INFO("hdmiInfo.dataInt0 =0x%x", arg->hdmiInfo.dataInt0);
-	HDMI_INFO("hdmiInfo.hdmi2p0_feature	=0x%x", arg->hdmiInfo.hdmi2p0_feature);
-	HDMI_INFO("hdmiInfo.hdmi_off_mode =0x%x", arg->hdmiInfo.hdmi_off_mode);
-	HDMI_INFO("hdmiInfo.hdr_ctrl_mode =0x%x", arg->hdmiInfo.hdr_ctrl_mode);
-	HDMI_INFO("hdmiInfo.reserved4 =0x%x", arg->hdmiInfo.reserved4);
+	HDMI_INFO("hdmiInfo.hdmiMode   =0x%x", arg->hdmiInfo.hdmiMode);
+    HDMI_INFO("hdmiInfo.audioSampleFreq    =0x%x", arg->hdmiInfo.audioSampleFreq);
+	HDMI_INFO("hdmiInfo.audioChannelCount  =0x%x", arg->hdmiInfo.audioChannelCount);
+	HDMI_INFO("hdmiInfo.dataByte1  =0x%x", arg->hdmiInfo.dataByte1);
+	HDMI_INFO("hdmiInfo.dataByte2  =0x%x", arg->hdmiInfo.dataByte2);
+	HDMI_INFO("hdmiInfo.dataByte3  =0x%x", arg->hdmiInfo.dataByte3);
+	HDMI_INFO("hdmiInfo.dataByte4  =0x%x", arg->hdmiInfo.dataByte4);
+	HDMI_INFO("hdmiInfo.dataByte5  =0x%x", arg->hdmiInfo.dataByte5);
+	HDMI_INFO("hdmiInfo.dataInt0   =0x%x", arg->hdmiInfo.dataInt0);
+	HDMI_INFO("hdmiInfo.hdmi2p0_feature   =0x%x", arg->hdmiInfo.hdmi2p0_feature);
+	HDMI_INFO("hdmiInfo.hdmi_off_mode     =0x%x", arg->hdmiInfo.hdmi_off_mode);
+	HDMI_INFO("hdmiInfo.hdr_ctrl_mode     =0x%x", arg->hdmiInfo.hdr_ctrl_mode);
+	HDMI_INFO("hdmiInfo.reserved4         =0x%x", arg->hdmiInfo.reserved4);
 
 }
 
 void hdmitx_dump_AUDIO_HDMI_OUT_EDID_DATA2(struct AUDIO_HDMI_OUT_EDID_DATA2 *arg, char *str)
 {
 	HDMI_DEBUG("%s", __func__);
-	HDMI_INFO("Version =0x%x", arg->Version);
-	HDMI_INFO("HDMI_output_enable =0x%x", arg->HDMI_output_enable);
-	HDMI_INFO("EDID_DATA_addr =0x%x", arg->EDID_DATA_addr);
-
+	HDMI_INFO("Version         =0x%x", arg->Version);
+	HDMI_INFO("HDMI_output_enable  =0x%x", arg->HDMI_output_enable);
+	HDMI_INFO("EDID_DATA_addr  =0x%x", arg->EDID_DATA_addr);
 }
 #endif
 
@@ -293,8 +284,8 @@ int RPC_TOAGENT_HDMI_Config_TV_System(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *ar
 	size_t len;
 
 	handle = ion_alloc(rpc_ion_client, 4096, 1024,
-				RTK_PHOENIX_ION_HEAP_AUDIO_MASK,
-				ION_FLAG_NONCACHED | ION_FLAG_SCPUACC | ION_FLAG_ACPUACC);
+		RTK_PHOENIX_ION_HEAP_AUDIO_MASK,
+		ION_FLAG_NONCACHED | ION_FLAG_SCPUACC | ION_FLAG_ACPUACC);
 
 	if (IS_ERR(handle)) {
 		HDMI_ERROR("[%s %d ion_alloc fail]", __func__, __LINE__);
@@ -325,8 +316,7 @@ int RPC_TOAGENT_HDMI_Config_TV_System(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *ar
 	rpc->hdmiInfo.hdr_ctrl_mode = htonl(arg->hdmiInfo.hdr_ctrl_mode);
 	rpc->hdmiInfo.reserved4 = htonl(arg->hdmiInfo.reserved4);
 
-	if (send_rpc_command(RPC_AUDIO,
-		ENUM_VIDEO_KERNEL_RPC_CONFIG_TV_SYSTEM,
+	if (send_rpc_command(RPC_AUDIO, ENUM_VIDEO_KERNEL_RPC_CONFIG_TV_SYSTEM,
 		CONVERT_FOR_AVCPU(dat),
 		CONVERT_FOR_AVCPU(dat + get_rpc_alignment_offset(sizeof(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM))),
 		&RPC_ret)) {
@@ -416,7 +406,7 @@ int RPC_TOAGENT_HDMI_Set(struct AUDIO_HDMI_SET *arg)
 	}
 
 	if (ion_phys(rpc_ion_client, handle, &dat, &len) != 0) {
-	    HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
+		HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
 		goto exit;
 	}
 
@@ -458,12 +448,12 @@ int RPC_TOAGENT_HDMI_Mute(struct AUDIO_HDMI_MUTE_INFO *arg)
 		ION_FLAG_NONCACHED | ION_FLAG_SCPUACC | ION_FLAG_ACPUACC);
 
 	if (IS_ERR(handle)) {
-		HDMI_ERROR("[%s %d ion_alloc fail]", __func__, __LINE__);
+	    HDMI_ERROR("[%s %d ion_alloc fail]", __func__, __LINE__);
 		goto exit;
 	}
 
 	if (ion_phys(rpc_ion_client, handle, &dat, &len) != 0) {
-		HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
+	    HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
 		goto exit;
 	}
 
@@ -504,7 +494,7 @@ int RPC_TOAGENT_HDMI_OUT_VSDB(struct AUDIO_HDMI_OUT_VSDB_DATA *arg)
 		ION_FLAG_NONCACHED | ION_FLAG_SCPUACC | ION_FLAG_ACPUACC);
 
 	if (IS_ERR(handle)) {
-		HDMI_ERROR("[%s %d ion_alloc fail]", __func__, __LINE__);
+	    HDMI_ERROR("[%s %d ion_alloc fail]", __func__, __LINE__);
 		goto exit;
 	}
 
@@ -546,16 +536,16 @@ int RPC_ToAgent_HDMI_OUT_EDID_0(struct AUDIO_HDMI_OUT_EDID_DATA2 *arg)
 	size_t len;
 
 	handle = ion_alloc(rpc_ion_client, 4096, 1024,
-		RTK_PHOENIX_ION_HEAP_AUDIO_MASK,
-		ION_FLAG_NONCACHED | ION_FLAG_SCPUACC | ION_FLAG_ACPUACC);
+				RTK_PHOENIX_ION_HEAP_AUDIO_MASK,
+				ION_FLAG_NONCACHED | ION_FLAG_SCPUACC | ION_FLAG_ACPUACC);
 
 	if (IS_ERR(handle)) {
-		HDMI_ERROR("[%s %d ion_alloc fail]", __func__, __LINE__);
+	    HDMI_ERROR("[%s %d ion_alloc fail]", __func__, __LINE__);
 		goto exit;
 	}
 
 	if (ion_phys(rpc_ion_client, handle, &dat, &len) != 0) {
-		HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
+	    HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
 		goto exit;
 	}
 
@@ -598,13 +588,13 @@ int RPC_ToAgent_QueryDisplayWin_0(struct VIDEO_RPC_VOUT_QUERY_DISP_WIN_OUT *arg)
 		ION_FLAG_NONCACHED | ION_FLAG_SCPUACC | ION_FLAG_ACPUACC);
 
 	if (IS_ERR(handle)) {
-		HDMI_ERROR("[%s %d ion_alloc fail]", __func__, __LINE__);
-		goto exit;
+	    HDMI_ERROR("[%s %d ion_alloc fail]", __func__, __LINE__);
+	    goto exit;
 	}
 
 	if (ion_phys(rpc_ion_client, handle, &dat, &len) != 0) {
-		HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
-		goto exit;
+	    HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
+	    goto exit;
 	}
 
 	i_rpc = ion_map_kernel(rpc_ion_client, handle);
@@ -613,7 +603,7 @@ int RPC_ToAgent_QueryDisplayWin_0(struct VIDEO_RPC_VOUT_QUERY_DISP_WIN_OUT *arg)
 
 	HDMI_DEBUG("i_rpc=%p ,o_rpc=%p\n", i_rpc, o_rpc);
 
-	if (send_rpc_command(RPC_AUDIO, ENUM_VIDEO_KERNEL_RPC_QUERY_DISPLAY_WIN,
+    if (send_rpc_command(RPC_AUDIO, ENUM_VIDEO_KERNEL_RPC_QUERY_DISPLAY_WIN,
 		CONVERT_FOR_AVCPU(dat),
 		CONVERT_FOR_AVCPU(dat + offset),
 		&RPC_ret)) {
@@ -705,7 +695,7 @@ int RPC_ToAgent_QueryConfigTvSystem(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *arg)
 	}
 
 	if (ion_phys(rpc_ion_client, handle, &dat, &len) != 0) {
-		HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
+	    HDMI_ERROR("[%s %d fail]", __func__, __LINE__);
 		goto exit;
 	}
 
@@ -735,7 +725,6 @@ int RPC_ToAgent_QueryConfigTvSystem(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM *arg)
 	arg->hdmiInfo.hdmi2p0_feature	= htonl(arg->hdmiInfo.hdmi2p0_feature);
 	arg->hdmiInfo.hdmi_off_mode		= htonl(arg->hdmiInfo.hdmi_off_mode);
 	arg->hdmiInfo.hdr_ctrl_mode		= htonl(arg->hdmiInfo.hdr_ctrl_mode);
-	arg->hdmiInfo.reserved4			= htonl(arg->hdmiInfo.reserved4);
 
 	ret = 0;
 exit:
@@ -839,7 +828,6 @@ int hdmitx_get_sink_capability(asoc_hdmi_t *p_this)
 	else
 		p_this->sink_cap.hdmi_mode = HDMI_MODE_DVI;
 
-
 	rtk_add_edid_modes(edid, &p_this->sink_cap);
 	rtk_edid_to_eld(edid, &p_this->sink_cap);
 
@@ -858,47 +846,46 @@ int hdmitx_get_sink_capability(asoc_hdmi_t *p_this)
 void hdmitx_print_sink_capability(asoc_hdmi_t *p_this)
 {
 	HDMI_INFO("\n=================== sink_capabilities ========================");
-	HDMI_INFO("hdmi_mode=%u", p_this->sink_cap.hdmi_mode);
-	HDMI_INFO("est_modes=%u", p_this->sink_cap.est_modes);
+	HDMI_INFO("hdmi_mode=%u ", p_this->sink_cap.hdmi_mode);
+	HDMI_INFO("est_modes=%u ", p_this->sink_cap.est_modes);
 	HDMI_INFO("\n");
-	/* VSBD */
-	HDMI_INFO("cec_phy_addr=0x%02x 0x%02x", p_this->sink_cap.cec_phy_addr[0], p_this->sink_cap.cec_phy_addr[1]);
-	HDMI_INFO("support_AI=%d", p_this->sink_cap.support_AI);
-	HDMI_INFO("DC_Y444=%d", p_this->sink_cap.DC_Y444);
-	HDMI_INFO("color_space=%u", p_this->sink_cap.color_space);
-	HDMI_INFO("dvi_dual=%u", p_this->sink_cap.dvi_dual);
-	HDMI_INFO("max_tmds_clock=%d", p_this->sink_cap.max_tmds_clock);
-	HDMI_INFO("latency_present=%d %d", p_this->sink_cap.latency_present[0], p_this->sink_cap.latency_present[1]);
-	HDMI_INFO("video_latency=%u %u", p_this->sink_cap.video_latency[0], p_this->sink_cap.video_latency[1]);
-	HDMI_INFO("audio_latency=%u %u", p_this->sink_cap.audio_latency[0], p_this->sink_cap.audio_latency[1]);
+	//VSBD
+	HDMI_INFO("cec_phy_addr=0x%02x 0x%02x ", p_this->sink_cap.cec_phy_addr[0], p_this->sink_cap.cec_phy_addr[1]);
+	HDMI_INFO("support_AI=%d ", p_this->sink_cap.support_AI);
+	HDMI_INFO("DC_Y444=%d ", p_this->sink_cap.DC_Y444);
+	HDMI_INFO("color_space=%u ", p_this->sink_cap.color_space);
+	HDMI_INFO("dvi_dual=%u ", p_this->sink_cap.dvi_dual);
+	HDMI_INFO("max_tmds_clock=%d ", p_this->sink_cap.max_tmds_clock);
+	HDMI_INFO("latency_present=%d %d ", p_this->sink_cap.latency_present[0], p_this->sink_cap.latency_present[1]);
+	HDMI_INFO("video_latency=%u %u ", p_this->sink_cap.video_latency[0], p_this->sink_cap.video_latency[1]);
+	HDMI_INFO("audio_latency=%u %u ", p_this->sink_cap.audio_latency[0], p_this->sink_cap.audio_latency[1]);
 	HDMI_INFO("\n");
 
-	HDMI_INFO("structure_all 0x%x", p_this->sink_cap.structure_all);
-	HDMI_INFO("_3D_vic 0x%x", p_this->sink_cap._3D_vic);
+	HDMI_INFO("structure_all=0x%x\n", p_this->sink_cap.structure_all);
 
-	/* Video */
-	HDMI_INFO("display_info.width_mm=%u", p_this->sink_cap.display_info.width_mm);
-	HDMI_INFO("display_info.height_mm=%u", p_this->sink_cap.display_info.height_mm);
-	HDMI_INFO("display_info.bpc=%u", p_this->sink_cap.display_info.bpc);
-	HDMI_INFO("display_info.color_formats=%u", p_this->sink_cap.display_info.color_formats);
-	HDMI_INFO("display_info.cea_rev=%u", p_this->sink_cap.display_info.cea_rev);
-	HDMI_INFO("vic=0x%llx", p_this->sink_cap.vic);
-	HDMI_INFO("extended_vic=%u", p_this->sink_cap.extended_vic);
-	HDMI_INFO("vic2=0x%llx", p_this->sink_cap.vic2);
-	HDMI_INFO("vic2_420=0x%llx", p_this->sink_cap.vic2_420);
-	HDMI_INFO("HDR metadata: et(0x%02x) sm(0x%02x) max_luminace(0x%02x) max_frame_avg(0x%02x) min_luminace(0x%02x)",
+	//Video
+	HDMI_INFO("display_info.width_mm=%u ", p_this->sink_cap.display_info.width_mm);
+	HDMI_INFO("display_info.height_mm=%u ", p_this->sink_cap.display_info.height_mm);
+	HDMI_INFO("display_info.bpc=%u ", p_this->sink_cap.display_info.bpc);
+	HDMI_INFO("display_info.color_formats=%u ", p_this->sink_cap.display_info.color_formats);
+	HDMI_INFO("display_info.cea_rev=%u ", p_this->sink_cap.display_info.cea_rev);
+	HDMI_INFO("vic=0x%llx ", p_this->sink_cap.vic);
+	HDMI_INFO("extended_vic=%u ", p_this->sink_cap.extended_vic);
+	HDMI_INFO("vic2=0x%llx ", p_this->sink_cap.vic2);
+	HDMI_INFO("vic2_420=0x%llx ", p_this->sink_cap.vic2_420);
+	HDMI_INFO("HDR metadata: et(0x%02x) sm(0x%02x) max_luminace(0x%02x) max_frame_avg(0x%02x) min_luminace(0x%02x) ",
 		p_this->sink_cap.vout_edid_data.et, p_this->sink_cap.vout_edid_data.sm,
 		p_this->sink_cap.vout_edid_data.max_luminace, p_this->sink_cap.vout_edid_data.max_frame_avg,
 		p_this->sink_cap.vout_edid_data.min_luminace);
-	HDMI_INFO("Color characteristics: red_green_lo(0x%02x) black_white_lo(0x%02x)",
+	HDMI_INFO("Color characteristics: red_green_lo(0x%02x) black_white_lo(0x%02x) ",
 		p_this->sink_cap.vout_edid_data.red_green_lo, p_this->sink_cap.vout_edid_data.black_white_lo);
-	HDMI_INFO("Color characteristics: red_x(0x%02x) red_y(0x%02x)",
+	HDMI_INFO("Color characteristics: red_x(0x%02x) red_y(0x%02x) ",
 		p_this->sink_cap.vout_edid_data.red_x, p_this->sink_cap.vout_edid_data.red_y);
-	HDMI_INFO("Color characteristics: green_x(0x%02x) green_y(0x%02x)",
+	HDMI_INFO("Color characteristics: green_x(0x%02x) green_y(0x%02x) ",
 		p_this->sink_cap.vout_edid_data.green_x, p_this->sink_cap.vout_edid_data.green_y);
-	HDMI_INFO("Color characteristics: blue_x(0x%02x) blue_y(0x%02x)",
+	HDMI_INFO("Color characteristics: blue_x(0x%02x) blue_y(0x%02x) ",
 		p_this->sink_cap.vout_edid_data.blue_x, p_this->sink_cap.vout_edid_data.blue_y);
-	HDMI_INFO("Color characteristics: white_x(0x%02x) white_y(0x%02x)",
+	HDMI_INFO("Color characteristics: white_x(0x%02x) white_y(0x%02x) ",
 		p_this->sink_cap.vout_edid_data.white_x, p_this->sink_cap.vout_edid_data.white_y);
 
 	HDMI_INFO("=================================================================\n");
@@ -912,33 +899,30 @@ void hdmitx_print_sink_info(asoc_hdmi_t *p_this)
 	print_color_formats(p_this->sink_cap.display_info.color_formats);
 
 	if (p_this->sink_cap.hdmi_mode == HDMI_MODE_HDMI)
-		HDMI_INFO("DEVICE MODE: HDMI Mode");
+		HDMI_INFO("DEVICE MODE: HDMI Mode ");
 	else if (p_this->sink_cap.hdmi_mode == HDMI_MODE_DVI)
-		HDMI_INFO("DEVICE MODE: DVI Mode");
+		HDMI_INFO("DEVICE MODE: DVI Mode ");
 	else if (p_this->sink_cap.hdmi_mode == HDMI_MODE_MHL)
-		HDMI_INFO("DEVICE MODE: MHL Mode");
+		HDMI_INFO("DEVICE MODE: MHL Mode ");
 
 	print_cea_modes(p_this->sink_cap.vic, p_this->sink_cap.vic2, p_this->sink_cap.vic2_420);
 
-	HDMI_INFO("CEC Address: 0x%x%02x",
-		p_this->sink_cap.cec_phy_addr[0],
-		p_this->sink_cap.cec_phy_addr[1]);
+	HDMI_INFO("CEC Address: 0x%x%02x ", p_this->sink_cap.cec_phy_addr[0],
+										p_this->sink_cap.cec_phy_addr[1]);
 
 	print_deep_color(p_this->sink_cap.display_info.bpc);
 
 	if (p_this->sink_cap.DC_Y444)
-		HDMI_INFO("Support Deep Color in YCbCr444");
+		HDMI_INFO("Support Deep Color in YCbCr444 ");
 
 	if (p_this->sink_cap.max_tmds_clock)
 		HDMI_INFO("Max TMDS clock: %d", p_this->sink_cap.max_tmds_clock);
 
-	HDMI_INFO("Video Latency: %d %d",
-		p_this->sink_cap.video_latency[0],
-		p_this->sink_cap.video_latency[1]);
+	HDMI_INFO("Video Latency: %d %d ", p_this->sink_cap.video_latency[0],
+										p_this->sink_cap.video_latency[1]);
 
-	HDMI_INFO("Audio Latency: %d %d",
-		p_this->sink_cap.audio_latency[0],
-		p_this->sink_cap.audio_latency[1]);
+	HDMI_INFO("Audio Latency: %d %d ", p_this->sink_cap.audio_latency[0],
+										p_this->sink_cap.audio_latency[1]);
 
 	print_color_space(p_this->sink_cap.color_space);
 
@@ -948,6 +932,7 @@ void hdmitx_print_sink_info(asoc_hdmi_t *p_this)
 int ops_config_tv_system(void __user *arg)
 {
 	struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM tv_system;
+	unsigned char scramble;
 
 	HDMI_DEBUG("%s", __func__);
 
@@ -963,15 +948,15 @@ int ops_config_tv_system(void __user *arg)
 				tv_system.hdmiInfo.dataInt0);
 
 	if (tv_system.hdmiInfo.hdmiMode == VO_HDMI_ON) {
-
 		if (hdmitx_edid_info.hdmi_id == HDMI_2P0_IDENTIFIER)
 			tv_system.hdmiInfo.hdmi2p0_feature |= 0x1;/* [Bit0] HDMI2.0 */
 
-		if (hdmitx_send_scdc_TmdsConfig(tv_system.videoInfo.standard, tv_system.hdmiInfo.dataInt0) != 0)
+		scramble = hdmitx_send_scdc_TmdsConfig(tv_system.videoInfo.standard,
+			tv_system.hdmiInfo.dataInt0, tv_system.hdmiInfo.dataByte1);
+
+		if (scramble != 0)
 			tv_system.hdmiInfo.hdmi2p0_feature |= 0x2;/* [Bit1]Scrabmle */
-
 	} else if (tv_system.hdmiInfo.hdmiMode == VO_HDMI_OFF) {
-
 		if (hdmi_clk_always_on) {
 			HDMI_INFO("Keep clock always on");
 			tv_system.hdmiInfo.hdmi_off_mode = VO_HDMI_OFF_CLOCK_ON;
@@ -1120,6 +1105,7 @@ int ops_get_raw_edid(void __user *arg, asoc_hdmi_t *data)
 
 	return ret;
 }
+
 int ops_get_link_status(void __user *arg)
 {
 	int ret = 0;
@@ -1143,7 +1129,9 @@ int ops_get_video_config(void __user *arg, asoc_hdmi_t *data)
 
 	HDMI_DEBUG("%s", __func__);
 
-	if (copy_to_user(arg, &data->sink_cap.vic, sizeof(data->sink_cap.vic))) {
+	if (copy_to_user(arg, &data->sink_cap.vic,
+		sizeof(data->sink_cap.vic))) {
+
 		HDMI_ERROR("%s:failed to copy to user !", __func__);
 		return -EFAULT;
 	}
@@ -1214,7 +1202,7 @@ int ops_get_extension_blk_count(void __user *arg, asoc_hdmi_t *data)
 		return -ENOMSG;
 	}
 
-	count = (int)data->edid_ptr[0x7e];
+	count = (int) data->edid_ptr[0x7e];
 
 	if (copy_to_user(arg, &count, sizeof(int))) {
 		HDMI_ERROR("%s:failed to copy to user !", __func__);
@@ -1228,6 +1216,7 @@ int ops_get_extension_blk_count(void __user *arg, asoc_hdmi_t *data)
 int ops_get_extended_edid(void __user *arg, asoc_hdmi_t *data)
 {
 	int ret = 0;
+	unsigned char number;
 	struct ext_edid ext = {0};
 
 	HDMI_DEBUG("%s", __func__);
@@ -1250,12 +1239,12 @@ int ops_get_extended_edid(void __user *arg, asoc_hdmi_t *data)
 	HDMI_DEBUG("ext.extension=%d ext.current_blk=%d",
 		ext.extension, ext.current_blk);
 
-	if (ext.current_blk%2 == 0)
-		memcpy(ext.data, data->edid_ptr + EDID_LENGTH*(ext.current_blk),
-			sizeof(ext.data));
-	else
-		memcpy(ext.data, data->edid_ptr + EDID_LENGTH*ext.current_blk,
-			EDID_LENGTH*sizeof(unsigned char));
+	number = ext.extension - ext.current_blk + 1;
+	if (number > 2)
+		number = 2;
+
+	memcpy(ext.data, data->edid_ptr + EDID_LENGTH*(ext.current_blk),
+		EDID_LENGTH*number);
 
 	if (copy_to_user(arg, &ext, sizeof(struct ext_edid))) {
 		HDMI_ERROR("%s:failed to copy to user ! ", __func__);
@@ -1319,6 +1308,16 @@ int ops_set_output_format(void __user *arg)
 
 	ret = set_hdmitx_format(&format_setting);
 
+#ifdef CONFIG_ARCH_RTD139x
+#ifdef CONFIG_RTK_HDCP_1x_TEE
+	if ((format_setting.mode != FORMAT_MODE_OFF) &&
+		(format_setting.vic == VIC_720X480P60)) {
+		ta_hdcp14_init();
+		ta_hdcp_fix480p();
+	}
+#endif
+#endif
+
 	return ret;
 }
 
@@ -1343,3 +1342,82 @@ exit:
 	return ret;
 }
 
+int ops_set_interface_type(void __user *arg)
+{
+	int ret = 0;
+	int type;
+
+	HDMI_DEBUG("%s", __func__);
+
+	if (copy_from_user(&type, arg, sizeof(type))) {
+		HDMI_ERROR("%s:failed to copy from user !", __func__);
+		ret = -EFAULT;
+	}
+
+	set_vo_interface_type(type);
+
+	return ret;
+}
+
+int ops_get_config_tv_system(void __user *arg)
+{
+	int ret;
+	struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM tv_system;
+
+	ret = RPC_ToAgent_QueryConfigTvSystem(&tv_system);
+
+	if (ret != 0) {
+		ret =  -EFAULT;
+		goto exit;
+	}
+
+	if (copy_to_user(arg, &tv_system, sizeof(tv_system))) {
+		HDMI_ERROR("%s:failed to copy to user ! ", __func__);
+		ret =  -EFAULT;
+	}
+
+	ret = 0;
+
+exit:
+	return ret;
+}
+
+#if 1//def __LINUX_MEDIA_NAS__
+int ops_wait_hotplug(void __user *arg, hdmitx_device_t * dev)
+{
+	int ret= 0;
+	int status = 0;
+	HDMI_DEBUG("%s", __func__);
+
+	status = show_hpd_status(false);
+
+	wait_event_interruptible(dev->hpd_wait, ((status!=show_hpd_status(false)) || (!hpdDetect)));
+
+	status = show_hpd_status(false);
+
+	if (copy_to_user(arg,&status,sizeof(int))) {
+		HDMI_ERROR("%s:failed to copy to user ! ", __func__);
+		return -EFAULT;
+	}
+
+	return ret;
+}
+
+int ops_set_hotplug_detection(void __user *arg, hdmitx_device_t * dev)
+{
+	int ret= 0;
+	int fEn = 0;
+	HDMI_DEBUG("%s", __func__);
+
+	if (copy_from_user(&fEn, arg, sizeof(fEn))) {
+		HDMI_ERROR("%s:failed to copy from user !", __func__);
+		return -EFAULT;
+	}
+
+	hpdDetect = fEn;
+	if(fEn == 0)
+		wake_up_interruptible(&dev->hpd_wait);
+
+	return ret;
+}
+#endif

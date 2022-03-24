@@ -17,6 +17,7 @@
 
 #include <linux/types.h>
 #include <linux/compiler.h>
+#include <linux/if.h>
 #include <linux/netfilter_ipv4.h>
 
 #include <linux/netfilter/x_tables.h>
@@ -97,12 +98,6 @@ struct ipt_ip {
 #define IPT_INV_FRAG		0x20	/* Invert the sense of FRAG. */
 #define IPT_INV_PROTO		XT_INV_PROTO
 #define IPT_INV_MASK		0x7F	/* All possible flag bits mask. */
-
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT) && defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
-/* Values for special return value	*/
-#define RTL_QOSFINDSPECIALNETIF		1
-#endif
-
 
 /* This structure defines each of the firewall rules.  Consists of 3
    parts which are 1) general IP header stuff 2) match specific

@@ -24,10 +24,6 @@
 #include "hdmitx_api.h"
 #include "hdmitx_rpc.h"
 
-#if __RTK_HDMI_GENERIC_DEBUG__
-#include "rtk_pseudo_edid.h"
-#endif
-
 #define EDID_EST_TIMINGS 16
 #define EDID_STD_TIMINGS 8
 #define EDID_DETAILED_TIMINGS 4
@@ -709,7 +705,7 @@ static const u8 edid_header[] = {
 	0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00
 };
 
-static u8 svds[32] = {0x00};/* Short Video Descriptors */
+static u8 svds[32] = {0x00};//Short Video Descriptors
 
 
 struct detailed_mode_closure {
@@ -776,7 +772,7 @@ bool rtk_edid_block_valid(u8 *raw_edid, int block)
 	return 1;
 
 bad:
-	hdmitx_set_error_code(HDMI_ERROR_INVALID_EDID);
+    hdmitx_set_error_code(HDMI_ERROR_INVALID_EDID);
 	if (raw_edid) {
 		HDMI_ERROR("Raw EDID:");
 		print_hex_dump(KERN_ERR, " \t", DUMP_PREFIX_NONE, 16, 1, raw_edid, EDID_LENGTH, false);
@@ -801,10 +797,9 @@ bool rtk_edid_is_valid(struct edid *edid)
 
 void print_established_modes(u32 est_format)
 {
-	int i;
-	int freq;
+	int i, freq;
 
-	printk("\n%12s :\n", "EST TIMEINGS");
+	printk("\n%12s : \n", "EST TIMEINGS");
 
 	for (i = 0; i <= EDID_EST_TIMINGS; i++) {
 		if ((est_format >> i) & 1) {
@@ -812,6 +807,7 @@ void print_established_modes(u32 est_format)
 			printk("%12s   [%d]%s @%d Hz\n", " ", i, edid_est_modes[i].name, freq);
 		}
 	}
+
 }
 
 static int add_established_modes(struct edid *edid, u32 *est_format)
@@ -931,7 +927,7 @@ u8 *rtk_find_cea_extension(struct edid *edid)
 	return edid_ext;
 }
 
-static int do_cea_modes (u8 *db, u8 len, u64 *cea_format, u64 *cea_format2)
+static int do_cea_modes(u8 *db, u8 len, u64 *cea_format, u64 *cea_format2)
 {
 	u8 *mode;
 	u64 cea_mode = 0;
@@ -959,7 +955,7 @@ static int do_cea_modes (u8 *db, u8 len, u64 *cea_format, u64 *cea_format2)
 	return modes;
 }
 
-static void do_cea_420modes (u8 *db, u8 len, u64 *cea_420format)
+static void do_cea_420modes(u8 *db, u8 len, u64 *cea_420format)
 {
 	u8 *mode;
 	u64 cea_mode = 0;
@@ -1006,7 +1002,8 @@ static int cea_db_offsets(const u8 *cea, int *start, int *end)
 static int add_cea_modes(struct edid *edid, u64 *video_format, u64 *video_format2)
 {
 	u8 *cea = rtk_find_cea_extension(edid);
-	u8 *db, dbl;
+	u8 *db;
+	u8 dbl;
 	int modes = 0;
 
 	if (cea && cea_revision(cea) >= 3) {
@@ -1020,7 +1017,7 @@ static int add_cea_modes(struct edid *edid, u64 *video_format, u64 *video_format
 			dbl = cea_db_payload_len(db);
 
 			if (cea_db_tag(db) == VIDEO_BLOCK)
-				modes += do_cea_modes (db+1, dbl, video_format, video_format2);
+				modes += do_cea_modes(db+1, dbl, video_format, video_format2);
 		}
 	}
 
@@ -1071,7 +1068,6 @@ void print_deep_color(u32 var)
 	int i;
 
 	printk("[HDMITx]Color Bit Depth: ");
-
 	for (i = 0; i < 6; i++) {
 		if ((var >> i) & 1)
 			printk("%s,", dpc_str[i]);
@@ -1087,7 +1083,6 @@ void print_color_formats(u32 var)
 	int i;
 
 	printk("[HDMITx]COLOR FORMAT: ");
-
 	for (i = 0; i < 3; i++) {
 		if ((var >> i) & 1)
 			printk("%s,", color_format_str[i]);
@@ -1104,7 +1099,6 @@ void print_color_space(u8 var)
 	int i;
 
 	printk("[HDMITx]COLORIMETRY: ");
-
 	for (i = 0; i < 8; i++) {
 		if ((var >> i) & 1)
 			printk("%s, ", color_space_str[i]);
@@ -1140,6 +1134,7 @@ static void rtk_add_display_info(struct edid *edid, struct Video_Display_Info *i
 			info->color_formats |= DRM_COLOR_FORMAT_YCRCB444;
 		if (edid_ext[3] & EDID_CEA_YCRCB422)
 			info->color_formats |= DRM_COLOR_FORMAT_YCRCB422;
+
 	}
 
 	/* Only defined for 1.4 with digital displays */
@@ -1178,7 +1173,6 @@ static void rtk_add_display_info(struct edid *edid, struct Video_Display_Info *i
 		info->color_formats |= DRM_COLOR_FORMAT_YCRCB422;
 
 }
-#if 1
 
 static void cea_for_each_detailed_block(u8 *ext, detailed_cb *cb, void *closure)
 {
@@ -1275,7 +1269,6 @@ static void rtk_drm_mode_do_interlace_quirk(struct drm_display_mode *mode, struc
 	mode->flags |= DRM_MODE_FLAG_INTERLACE;
 }
 
-
 int rtk_drm_mode_vrefresh(const struct drm_display_mode *mode)
 {
 	int refresh = 0;
@@ -1357,7 +1350,10 @@ static struct drm_display_mode *rtk_drm_mode_detailed(struct edid *edid, struct 
 
 	mode->vrefresh = rtk_drm_mode_vrefresh(mode);
 
+//	mode->type = DRM_MODE_TYPE_DRIVER;
+
 	return mode;
+
 }
 
 static void rtk_do_detailed_mode(struct detailed_timing *timing, void *c)
@@ -1406,11 +1402,15 @@ int rtk_add_detailed_modes(struct sink_capabilities_t *sink_cap, struct edid *ed
 		0
 	};
 
+	//if (closure.preferred && !version_greater(edid, 1, 3))
+	//	closure.preferred =(edid->features & DRM_EDID_FEATURE_PREFERRED_TIMING);
+
 	rtk_for_each_detailed_block((u8 *)edid, rtk_do_detailed_mode, &closure);
 
 	return closure.modes;
+
 }
-#endif
+
 
 int rtk_add_edid_modes(struct edid *edid, struct sink_capabilities_t *sink_cap)
 {
@@ -1442,9 +1442,11 @@ int rtk_add_edid_modes(struct edid *edid, struct sink_capabilities_t *sink_cap)
 	HDMI_INFO("Detailed Timing Descriptor");
 	print_cea_modes(sink_cap->vic, sink_cap->vic2, sink_cap->vic2_420);
 
-	/* num_modes += add_cvt_modes(connector, edid); */
-	/* num_modes += add_standard_modes(connector, edid); */
+	//num_modes += add_cvt_modes(connector, edid);
+	//num_modes += add_standard_modes(connector, edid);
 	num_modes += add_established_modes(edid, &sink_cap->est_modes);
+	//if (edid->features & DRM_EDID_FEATURE_DEFAULT_GTF)
+		//num_modes += add_inferred_modes(connector, edid);
 
 	num_modes += add_cea_modes(edid, &sink_cap->vic, &sink_cap->vic2);
 	rtk_add_display_info(edid, &sink_cap->display_info);
@@ -1475,9 +1477,9 @@ static void parse_hdmi_VideoCapability_db(struct sink_capabilities_t *sink_cap, 
 /**
  * parse_VendorSpecificVideo_db - parse vendor specific video data block
  * @sink_cap: sink_capabilities_t
- * @db: video capability data block
+ * @db: vendor specific video data block
  *
- * Only store dolby vision information
+ * Only store dolby vision/HDR10+ information
  */
 static void parse_VendorSpecificVideo_db(struct sink_capabilities_t *sink_cap, const u8 *db)
 {
@@ -1512,6 +1514,10 @@ static void parse_VendorSpecificVideo_db(struct sink_capabilities_t *sink_cap, c
 		hdr_data->dolby_len = length-4;
 		for (i = 5; i <= length; i++)
 			hdr_data->dolby_data[i-5] = db[i];
+	} else if ((oui[0] == 0x8B) && (oui[1] == 0x84) && (oui[2] == 0x90)) {
+		/* Get HDR10+ */
+		hdr_data->hdr10_plus = db[5];
+		HDMI_INFO("Found HDR10+ in EDID");
 	}
 
 exit:
@@ -1532,7 +1538,6 @@ static void parse_hdmi_colorimetry_db(struct sink_capabilities_t *sink_cap, cons
 	sink_cap->vout_edid_data.color_space = db[2];
 	hdmitx_edid_info.colorimetry = db[2];
 	HDMI_DEBUG("[%s] color_space(0x%02x)", __func__, sink_cap->color_space);
-
 }
 
 /**
@@ -1840,6 +1845,7 @@ static void parse_hdmi_vsdb(struct sink_capabilities_t *sink_cap, const u8 *db)
 		HDMI_Video_present, sink_cap->_3D_present, multi_present);
 	HDMI_DEBUG("vic_len %d,hdmi_3d_len %d", vic_len, hdmi_3d_len);
 	HDMI_DEBUG("structure_all 0x%x,mask 0x%x", sink_cap->structure_all, mask);
+
 }
 
 static void parse_hdmi_forum_vsdb(struct sink_capabilities_t *sink_cap, const u8 *db)
@@ -1949,7 +1955,7 @@ void rtk_edid_to_eld(struct edid *edid, struct sink_capabilities_t *sink_cap)
 	eld[4] = (cea[1] << 5) | mnl;
 	HDMI_DEBUG("ELD monitor %s", eld + 20);
 
-	eld[0] = 2 << 3;		/* ELD version: 2 */
+	eld[0] = 2 << 3;/* ELD version: 2 */
 
 	eld[16] = edid->mfg_id[0];
 	eld[17] = edid->mfg_id[1];
@@ -2022,7 +2028,7 @@ void rtk_edid_to_eld(struct edid *edid, struct sink_capabilities_t *sink_cap)
 				HDMI_INFO("[%s] Unknow tag(0x%x)", __func__, cea_db_tag(db));
 				break;
 			}
-		}
+		} /*end of for_each_cea_db(cea, i, start, end) */
 		HDMI_INFO("HDMI version:%s", (hdmitx_edid_info.hdmi_id == HDMI_2P0_IDENTIFIER)?"2.0":"1.4");
 	}
 	eld[5] |= sad_count << 4;
@@ -2035,7 +2041,8 @@ bool rtk_detect_hdmi_monitor(struct edid *edid)
 {
 	u8 *edid_ext;
 	int i;
-	int start_offset, end_offset;
+	int start_offset;
+	int end_offset;
 
 	edid_ext = rtk_find_cea_extension(edid);
 	if (!edid_ext)
@@ -2057,8 +2064,6 @@ bool rtk_detect_hdmi_monitor(struct edid *edid)
 }
 
 #define DDC_SEGMENT_ADDR 0x30
-
-
 int rtk_do_probe_ddc_edid(unsigned char *buf, int block, int len)
 {
 	struct i2c_adapter *p_adap;
@@ -2092,9 +2097,6 @@ int rtk_do_probe_ddc_edid(unsigned char *buf, int block, int len)
 		hdmitx_set_error_code(HDMI_ERROR_I2C_ERROR);
 		return -ENODEV;
 	}
-
-	/* Delay 500 ms after HDMI hot-plug to solve read EDID first time fail */
-	msleep(500);
 
 	for (i = 0; i < retry; i++) {
 		/* Slow down I2C speed when retry */
@@ -2236,7 +2238,7 @@ struct edid *rtk_get_base_edid(void)
 		goto out;
 	}
 
-	ret_val = rtk_do_probe_ddc_edid(base_edid, 0, EDID_LENGTH);
+	ret_val = rtk_do_probe_ddc_edid((u8 *)base_edid, 0, EDID_LENGTH);
 	if (ret_val != 0) {
 		HDMI_ERROR("%s fail", __func__);
 		kfree(base_edid);
@@ -2286,4 +2288,3 @@ void hdmi_print_raw_edid(unsigned char *edid)
 			edid[i+8], edid[i+9], edid[i+10], edid[i+11], edid[i+12], edid[i+13], edid[i+14], edid[i+15]);
 
 }
-

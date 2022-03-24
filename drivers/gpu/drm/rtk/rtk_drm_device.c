@@ -13,6 +13,8 @@
  *
  */
 
+
+
 /**
  * rtk_drm_device.c
  * Implementation of the Linux device driver entrypoints for RTK DRM
@@ -30,6 +32,29 @@
 #include "rtk_drm.h"
 
 #include "../../../video/fbdev/rtk/dc2vo/dc2vo.h"
+
+void rtk_drm_preclose(struct drm_device *dev, struct drm_file *file_priv)
+{
+    struct rtk_drm_private *priv = dev->dev_private;
+    DRM_DEBUG_KMS("DRM %s on dev=%p\n", __func__, dev);
+    if (priv != NULL && priv->rtk_crtc != NULL)
+        rtk_crtc_pending_vblank(&priv->rtk_crtc->base, file_priv);
+}
+
+/*
+ * rtk does not have a proper HW counter for vblank IRQs so enable_vblank
+ * and disable_vblank are just no op callbacks.
+ */
+static int rtk_enable_vblank(struct drm_device *dev, unsigned int pipe)
+{
+    DRM_DEBUG_KMS("%s: dev=%p, crtc=%d", __func__, dev, pipe);
+    return 0;
+}
+
+static void rtk_disable_vblank(struct drm_device *dev, unsigned int pipe)
+{
+    DRM_DEBUG_KMS("%s: dev=%p, crtc=%d", __func__, dev, pipe);
+}
 
 static int vblank_thread(void *data)
 {
@@ -49,37 +74,8 @@ static int vblank_thread(void *data)
     return 0;
 }
 
-void rtk_drm_preclose(struct drm_device *dev, struct drm_file *file_priv)
-{
-    struct rtk_drm_private *priv = dev->dev_private;
-    DRM_DEBUG_DRIVER("DRM %s on dev=%p\n", __func__, dev);
-    if (priv != NULL && priv->rtk_crtc != NULL)
-        rtk_crtc_pending_vblank(&priv->rtk_crtc->base, file_priv);
-}
-
-void rtk_drm_lastclose(struct drm_device *dev)
-{
-    DRM_DEBUG_DRIVER("DRM %s on dev=%p\n", __func__, dev);
-}
-
-/*
- * rtk does not have a proper HW counter for vblank IRQs so enable_vblank
- * and disable_vblank are just no op callbacks.
- */
-static int rtk_enable_vblank(struct drm_device *dev, int crtc)
-{
-    DRM_DEBUG_DRIVER("%s: dev=%p, crtc=%d", __func__, dev, crtc);
-    return 0;
-}
-
-static void rtk_disable_vblank(struct drm_device *dev, int crtc)
-{
-    DRM_DEBUG_DRIVER("%s: dev=%p, crtc=%d", __func__, dev, crtc);
-}
-
 static void rtk_drm_driver_lastclose(struct drm_device *dev)
 {
-    DRM_DEBUG_DRIVER("DRM %s on dev=%p\n", __func__, dev);
 #ifdef RTK_USE_FBHELPER
     struct rtk_drm_private *priv = dev->dev_private;
     if (priv->fbhelper)
@@ -110,9 +106,7 @@ void rtk_drm_mode_config_init(struct drm_device *dev)
     dev->mode_config.min_height      = 0;
     dev->mode_config.max_width       = 1920; //3840
     dev->mode_config.max_height      = 1080; //2160
-#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
-    dev->mode_config.async_page_flip = true;
-#endif
+    //dev->mode_config.async_page_flip = true;
     dev->mode_config.funcs           = &mode_config_funcs;
 }
 
@@ -199,25 +193,17 @@ static int rtk_drm_load(struct drm_device *dev, unsigned long flags)
 
     dev->dev_private = priv;
 
-#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
-    ret = kds_callback_init(&priv->kds_cb, 1, show_framebuffer_on_crtc_cb);
-    if (ret != 0) {
-        pr_err("Failed to initialise KDS callback\n");
-        goto finish;
-    }
-#endif
-
     ret = rtk_gem_ion_device_init(dev);
     if (ret != 0) {
         DRM_ERROR("[%s:%d] Failed to init rtk_gem_ion\n", __func__, __LINE__);
         kfree(priv);
-        goto out_kds_callbacks;
+        return -ENOMEM;
     }
 
     ret = rtk_modeset_init(dev);
     if (ret != 0) {
         pr_err("Failed to init modeset\n");
-        goto out_kds_callbacks;
+        goto out_slab;
     }
 
     ret = rtk_device_init(dev);
@@ -248,8 +234,6 @@ static int rtk_drm_load(struct drm_device *dev, unsigned long flags)
      */
     dev->irq_enabled = true;
 
-    dev->vblank_disable_allowed = 1;
-
     platform_set_drvdata(dev->platformdev, dev);
 
     //drm_kms_helper_poll_init(dev);
@@ -269,12 +253,9 @@ out_vblank:
     rtk_device_fini(dev);
 out_modeset:
     rtk_modeset_fini(dev);
-out_kds_callbacks:
-#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
-    kds_callback_term(&priv->kds_cb);
-#endif
+out_slab:
 finish:
-    DRM_DEBUG_DRIVER("rtk_drm_load returned %d\n", ret);
+    DRM_DEBUG_KMS("rtk_drm_load returned %d\n", ret);
     return ret;
 }
 
@@ -298,10 +279,6 @@ static int rtk_drm_unload(struct drm_device *dev)
     drm_vblank_cleanup(dev);
     rtk_device_fini(dev);
     rtk_gem_ion_device_deinit(dev);
-
-#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
-    kds_callback_term(&priv->kds_cb);
-#endif
 
     if (priv != NULL) {
         kfree(dev->dev_private);
@@ -332,14 +309,13 @@ static struct drm_driver driver = {
     .driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_PRIME | DRIVER_ATOMIC /*| DRIVER_HAVE_IRQ*/ | DRIVER_RENDER,
     .load                       = rtk_drm_load,
     .unload                     = rtk_drm_unload,
-    .set_busid                  = drm_platform_set_busid,
+    //.set_busid                  = drm_platform_set_busid,
     .preclose                   = rtk_drm_preclose,
-    .lastclose                  = rtk_drm_lastclose,
     .get_vblank_counter         = drm_vblank_count,
     .enable_vblank              = rtk_enable_vblank,
     .disable_vblank             = rtk_disable_vblank,
-    .suspend                    = rtk_drm_suspend,
-    .resume                     = rtk_drm_resume,
+    //.suspend                    = rtk_drm_suspend,
+    //.resume                     = rtk_drm_resume,
     .gem_free_object            = rtk_gem_ion_free_object,
     .gem_vm_ops                 = &rtk_gem_ion_vm_ops,
     .gem_prime_get_sg_table     = rtk_gem_ion_prime_get_sg_table,

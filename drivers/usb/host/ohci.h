@@ -430,6 +430,7 @@ struct ohci_hcd {
 #define	OHCI_QUIRK_AMD_PLL	0x200			/* AMD PLL quirk*/
 #define	OHCI_QUIRK_AMD_PREFETCH	0x400			/* pre-fetch for ISO transfer */
 #define	OHCI_QUIRK_GLOBAL_SUSPEND	0x800		/* must suspend ports */
+#define	OHCI_QUIRK_QEMU		0x1000			/* relax timing expectations */
 
 	// there are also chip quirks/bugs in init logic
 
@@ -575,8 +576,9 @@ static inline unsigned int _ohci_readl (const struct ohci_hcd *ohci,
 #ifdef CONFIG_USB_PATCH_ON_RTK
 	unsigned long flags;
 	rtk_lockapi_lock(flags, __FUNCTION__); /* Add global lock for emmc issue*/
-	if (readl(ohci->wrap_reg) == 0x0) {
-		ohci_err(ohci, "%s [USB Workaround] fixed force to enable ohci clock \n", __func__);
+	if (ohci->wrap_reg && readl(ohci->wrap_reg) == 0x0) {
+		ohci_err(ohci, "%s [USB Workaround] fixed force to enable "
+			    "ohci clock \n", __func__);
 		writel(0x40, ohci->wrap_reg);
 		mdelay(1);
 	}
@@ -598,7 +600,7 @@ static inline void _ohci_writel (const struct ohci_hcd *ohci,
 #ifdef CONFIG_USB_PATCH_ON_RTK
 	unsigned long flags;
 	rtk_lockapi_lock(flags, __FUNCTION__); /* Add global lock for emmc issue*/
-	if (readl(ohci->wrap_reg) == 0x0) {
+	if (ohci->wrap_reg && readl(ohci->wrap_reg) == 0x0) {
 		ohci_err(ohci, "%s [USB Workaround] fixed force to enable ohci clock \n", __func__);
 		writel(0x40, ohci->wrap_reg);
 		mdelay(1);
@@ -769,10 +771,8 @@ extern void	ohci_init_driver(struct hc_driver *drv,
 				const struct ohci_driver_overrides *over);
 extern int	ohci_restart(struct ohci_hcd *ohci);
 extern int	ohci_setup(struct usb_hcd *hcd);
-#ifdef CONFIG_PM
 extern int	ohci_suspend(struct usb_hcd *hcd, bool do_wakeup);
 extern int	ohci_resume(struct usb_hcd *hcd, bool hibernated);
-#endif
 extern int	ohci_hub_control(struct usb_hcd	*hcd, u16 typeReq, u16 wValue,
 				 u16 wIndex, char *buf, u16 wLength);
 extern int	ohci_hub_status_data(struct usb_hcd *hcd, char *buf);

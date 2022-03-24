@@ -111,7 +111,11 @@ extern unsigned int nf_ct_udp_timeout;
 extern unsigned int nf_ct_udp_timeout_stream;
 #endif
 #endif
+#if defined(CONFIG_RTD_1295_HWNAT) && LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0)
+void rtl_check_for_acc(struct nf_conn *ct, unsigned int expires);
+#else
 void rtl_check_for_acc(struct nf_conn *ct, unsigned long expires);
+#endif /* CONFIG_RTD_1295_HWNAT & version >= 4.9.0 */
 void rtl_delConnCache(struct nf_conn *ct);
 int32 rtl_connCache_timer_update(struct nf_conn *ct);
 #endif
@@ -252,7 +256,11 @@ int rtl_test_bit(struct nf_conn* ct, int num);
 int rtl_del_ct_timer(struct nf_conn *ct);
 void rtl_add_ct_timer(struct nf_conn *ct);
 void rtl_list_move_tail(struct nf_conn *ct, int proto, int state);
+#if defined(CONFIG_RTD_1295_HWNAT) && LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0)
+unsigned int rtl_get_ct_timer_expires(struct nf_conn* ct);
+#else
 unsigned long rtl_get_ct_timer_expires(struct nf_conn* ct);
+#endif /* CONFIG_RTD_1295_HWNAT & version >= 4.9.0 */
 void rtl_nf_ct_stat_inc(struct net* net);
 int rtl_skb_network_offset(struct sk_buff *skb);
 u_int8_t rtl_new_gc_get_ct_protonum(void *ct_ptr, enum ip_conntrack_dir dir);
@@ -260,7 +268,11 @@ struct iphdr *rtl_new_gc_ip_hdr(struct sk_buff *skb);
 __be16 rtl_new_gc_get_skb_protocol(struct sk_buff *skb);
 unsigned long rtl_new_gc_get_ct_udp_status(void *ct_ptr);
 u_int8_t rtl_new_gc_get_ct_tcp_state(void *ct_ptr);
+#if defined(CONFIG_RTD_1295_HWNAT) && LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0)
+void rtl_new_gc_set_ct_timeout_expires(void *ct_ptr, unsigned int value);
+#else
 void rtl_new_gc_set_ct_timeout_expires(void *ct_ptr, unsigned long value);
+#endif /* CONFIG_RTD_1295_HWNAT & version >= 4.9.0 */
 __be32 rtl_new_gc_get_ct_ip_by_dir(void *ct_ptr, enum ip_conntrack_dir dir, int flag);
 __be16 rtl_new_gc_get_ct_port_by_dir(void *ct_ptr, enum ip_conntrack_dir dir, int flag);
 #endif

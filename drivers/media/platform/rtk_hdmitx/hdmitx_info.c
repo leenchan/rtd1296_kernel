@@ -19,102 +19,46 @@
 #include "hdmitx_rpc.h"
 #include "rtk_edid.h"
 
-static unsigned char hpd_interlock = 1;
-
-struct VO_STANDARD_TABLE_T {
+struct vic_format_info {
+	unsigned char vic;
 	unsigned int width;
 	unsigned int height;
-	unsigned int fps;
-	unsigned int interlace;
+	unsigned char fps;
+	unsigned char interlace;
 };
 
-const struct VO_STANDARD_TABLE_T vo_standard_table[] = {
-	/* {width, height, fps, interlace} */
-	{  720,  480, 60, 1},/* VO_STANDARD_NTSC_M = 0 */
-	{  720,  480, 60, 1},/* VO_STANDARD_NTSC_J = 1 */
-	{  720,  480, 60, 1},/* VO_STANDARD_NTSC_443 = 2 */
-	{  720,  576, 60, 1},/* VO_STANDARD_PAL_B = 3 */
-	{  720,  576, 60, 1},/* VO_STANDARD_PAL_D = 4 */
-	{  720,  576, 60, 1},/* VO_STANDARD_PAL_G = 5 */
-	{  720,  576, 60, 1},/* VO_STANDARD_PAL_H = 6 */
-	{  720,  576, 60, 1},/* VO_STANDARD_PAL_I = 7 */
-	{  720,  576, 60, 1},/* VO_STANDARD_PAL_N = 8 */
-	{  720,  576, 60, 1},/* VO_STANDARD_PAL_NC = 9 */
-	{  720,  576, 60, 1},/* VO_STANDARD_PAL_M = 10 */
-	{  720,  576, 60, 1},/* VO_STANDARD_PAL_60 = 11 */
-	{ 0, 0, 0, 0},/* VO_STANDARD_SECAM = 12 */
-	{ 1280,  720, 60, 0},/* VO_STANDARD_HDTV_720P_60 = 13 */
-	{ 1280,  720, 50, 0},/* VO_STANDARD_HDTV_720P_50 = 14 */
-	{ 1280,  720, 30, 0},/* VO_STANDARD_HDTV_720P_30 = 15 */
-	{ 1280,  720, 25, 0},/* VO_STANDARD_HDTV_720P_25 = 16 */
-	{ 1280,  720, 24, 0},/* VO_STANDARD_HDTV_720P_24 = 17 */
-	{ 1920, 1080, 60, 1},/* VO_STANDARD_HDTV_1080I_60 = 18 */
-	{ 1920, 1080, 50, 1},/* VO_STANDARD_HDTV_1080I_50 = 19 */
-	{ 1920, 1080, 30, 0},/* VO_STANDARD_HDTV_1080P_30 = 20 */
-	{ 1920, 1080, 25, 0},/* VO_STANDARD_HDTV_1080P_25 = 21 */
-	{ 1920, 1080, 24, 0},/* VO_STANDARD_HDTV_1080P_24 = 22 */
-	{ 0, 0, 0, 0},/* VO_STANDARD_VGA = 23 */
-	{ 0, 0, 0, 0},/* VO_STANDARD_SVGA = 24 */
-	{ 1920, 1080, 60, 0},/* VO_STANDARD_HDTV_1080P_60 = 25 */
-	{ 1920, 1080, 50, 0},/* VO_STANDARD_HDTV_1080P_50 = 26 */
-	{ 1920, 1080, 59, 1},/* VO_STANDARD_HDTV_1080I_59 = 27 */
-	{ 1280,  720, 59, 0},/* VO_STANDARD_HDTV_720P_59 = 28 */
-	{ 1920, 1080, 23, 0},/* VO_STANDARD_HDTV_1080P_23 = 29 */
-	{ 1920, 1080, 59, 0},/* VO_STANDARD_HDTV_1080P_59 = 30 */
-	{ 1920, 1080, 60, 0},/* VO_STANDARD_HDTV_1080P_60_3D = 31 */
-	{ 1920, 1080, 50, 0},/* VO_STANDARD_HDTV_1080P_50_3D = 32 */
-	{ 1920, 1080, 30, 0},/* VO_STANDARD_HDTV_1080P_30_3D = 33 */
-	{ 1920, 1080, 24, 0},/* VO_STANDARD_HDTV_1080P_24_3D = 34 */
-	{ 1280,  720, 60, 0},/* VO_STANDARD_HDTV_720P_60_3D = 35 */
-	{ 1280,  720, 50, 0},/* VO_STANDARD_HDTV_720P_50_3D = 36 */
-	{ 1280,  720, 30, 0},/* VO_STANDARD_HDTV_720P_30_3D = 37 */
-	{ 1280,  720, 24, 0},/* VO_STANDARD_HDTV_720P_24_3D = 38 */
-	{ 1280,  720, 59, 0},/* VO_STANDARD_HDTV_720P_59_3D = 39 */
-	{ 1920, 1080, 60, 1},/* VO_STANDARD_HDTV_1080I_60_3D = 40 */
-	{ 1920, 1080, 59, 1},/* VO_STANDARD_HDTV_1080I_59_3D = 41 */
-	{ 1920, 1080, 50, 1},/* VO_STANDARD_HDTV_1080I_50_3D = 42 */
-	{ 1920, 1080, 23, 0},/* VO_STANDARD_HDTV_1080P_23_3D = 43 */
-	{ 3840, 2160, 30, 0},/* VO_STANDARD_HDTV_2160P_30 = 44  */
-	{ 3840, 2160, 29, 0},/* VO_STANDARD_HDTV_2160P_29 = 45 */
-	{ 3840, 2160, 25, 0},/* VO_STANDARD_HDTV_2160P_25 = 46 */
-	{ 3840, 2160, 24, 0},/* VO_STANDARD_HDTV_2160P_24 = 47 */
-	{ 3840, 2160, 23, 0},/* VO_STANDARD_HDTV_2160P_23 = 48 */
-	{ 4096, 2160, 24, 0},/* VO_STANDARD_HDTV_4096_2160P_24 = 49 */
-	{ 3840, 2160, 60, 0},/* VO_STANDARD_HDTV_2160P_60 = 50 */
-	{ 3840, 2160, 50, 0},/* VO_STANDARD_HDTV_2160P_50 = 51 */
-	{ 4096, 2160, 25, 0},/* VO_STANDARD_HDTV_4096_2160P_25 =  52 */
-	{ 4096, 2160, 30, 0},/* VO_STANDARD_HDTV_4096_2160P_30 = 53 */
-	{ 4096, 2160, 50, 0},/* VO_STANDARD_HDTV_4096_2160P_50 = 54 */
-	{ 4096, 2160, 60, 0},/* VO_STANDARD_HDTV_4096_2160P_60 = 55 */
-	{ 3840, 2160, 60, 0},/* VO_STANDARD_HDTV_2160P_60_420 = 56 */
-	{ 3840, 2160, 50, 0},/* VO_STANDARD_HDTV_2160P_50_420 = 57 */
-	{ 4096, 2160, 60, 0},/* VO_STANDARD_HDTV_4096_2160P_60_420 = 58 */
-	{ 4096, 2160, 50, 0},/* VO_STANDARD_HDTV_4096_2160P_50_420 = 59 */
-	{ 1920, 1080, 60, 0},/* VO_STANDARD_DP_FORMAT_1920_1080P_60 = 60 */
-	{ 3840, 2160, 30, 0},/* VO_STANDARD_DP_FORMAT_2160P_30 = 61 */
-	{ 3840, 2160, 24, 0},/* VO_STANDARD_HDTV_2160P_24_3D = 62 */
-	{ 3840, 2160, 23, 0},/* VO_STANDARD_HDTV_2160P_23_3D = 63 */
-	{ 3840, 2160, 59, 0},/* VO_STANDARD_HDTV_2160P_59 = 64 */
-	{ 3840, 2160, 59, 0},/* VO_STANDARD_HDTV_2160P_59_420 =65 */
-	{ 3840, 2160, 25, 0},/* VO_STANDARD_HDTV_2160P_25_3D = 66 */
-	{ 3840, 2160, 30, 0},/* VO_STANDARD_HDTV_2160P_30_3D = 67 */
-	{ 3840, 2160, 50, 0},/* VO_STANDARD_HDTV_2160P_50_3D = 68 */
-	{ 3840, 2160, 60, 0},/* VO_STANDARD_HDTV_2160P_60_3D = 69 */
-	{ 4096, 2160, 24, 0},/* VO_STANDARD_HDTV_4096_2160P_24_3D = 70 */
-	{ 4096, 2160, 25, 0},/* VO_STANDARD_HDTV_4096_2160P_25_3D = 71 */
-	{ 4096, 2160, 30, 0},/* VO_STANDARD_HDTV_4096_2160P_30_3D = 72 */
-	{ 4096, 2160, 50, 0},/* VO_STANDARD_HDTV_4096_2160P_50_3D = 73 */
-	{ 4096, 2160, 60, 0},/* VO_STANDARD_HDTV_4096_2160P_60_3D = 74 */
-	{ 1280,  720, 60, 0},/* VO_STANDARD_DP_FORMAT_1280_720P_60 = 75 */
-	{ 3840, 2160, 60, 0},/* VO_STANDARD_DP_FORMAT_3840_2160P_60 = 76 */
-	{ 1024,  768, 60, 0},/* VO_STANDARD_DP_FORMAT_1024_768P_60 = 77 */
-	{ 3840, 2160, 50, 0},/* VO_STANDARD_HDTV_2160P_50_422_12bit = 78 */
-	{ 3840, 2160, 60, 0},/* VO_STANDARD_HDTV_2160P_60_422_12bit = 79 */
-};
+static unsigned char hpd_interlock = 1;
 
+const struct vic_format_info vic_format_table[] = {
+	{  0,    0,    0,  0, 0},
+	{  2,  720,  480, 60, 0},
+	{  4, 1280,  720, 60, 0},
+	{  5, 1920, 1080, 60, 1},
+	{  6,  720,  480, 60, 1},
+	{ 16, 1920, 1080, 60, 0},
+	{ 17,  720,  576, 50, 0},
+	{ 19, 1280,  720, 50, 0},
+	{ 20, 1920, 1080, 50, 1},
+	{ 21,  720,  576, 50, 1},
+	{ 31, 1920, 1080, 50, 0},
+	{ 32, 1920, 1080, 24, 0},
+	{ 33, 1920, 1080, 25, 0},
+	{ 34, 1920, 1080, 30, 0},
+	{ 93, 3840, 2160, 24, 0},
+	{ 94, 3840, 2160, 25, 0},
+	{ 95, 3840, 2160, 30, 0},
+	{ 96, 3840, 2160, 50, 0},
+	{ 97, 3840, 2160, 60, 0},
+	{ 98, 4096, 2160, 24, 0},
+	{ 99, 4096, 2160, 25, 0},
+	{100, 4096, 2160, 30, 0},
+	{101, 4096, 2160, 50, 0},
+	{102, 4096, 2160, 60, 0},
+};
+const unsigned int vic_format_number = sizeof(vic_format_table)/sizeof(vic_format_table[0]);
 
 /* EISA ID is based upon compressed ASCII */
-static const unsigned char eisa_id[] = {
+const unsigned char eisa_id[] = {
 	' ', 'A', 'B', 'C', 'D', 'E', 'F', 'G',
 	'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
 	'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W',
@@ -122,16 +66,11 @@ static const unsigned char eisa_id[] = {
 };
 
 static const char * const mode[] = {
-	"DVI", "HDMI", "OFF", "MHL", "OFF"
+	"OFF", "DVI", "HDMI", "Unknow"
 };
 
 static const char * const pixel_format[] = {
-	"RGB", "YUV422", "YUV444", "YUV420",
-	"Reserved", "Reserved", "Reserved", "IDO-Defined"
-};
-
-static const char * const depth[] = {
-	"8 Bits", "10 Bits", "12 Bits"
+	"RGB", "YUV422", "YUV444", "YUV420"
 };
 
 static const char * const colorimetry[] = {
@@ -144,133 +83,132 @@ static const char * const extended_colorimetry[] = {
 };
 
 static const char * const format3d[] = {
-	"Auto", "FramePacking", "Side-by-Side", "Top-and-Bottom"
+	"N/A", "FramePacking", "Side-by-Side", "Top-and-Bottom",
+	"FramePacking", "Side-by-Side", "Top-and-Bottom", "N/A"
+};
+
+static const char * const hdr_mode[] = {
+	"AUTO", "DV", "SDR", "GAMMA",
+	"HDR10", "FUTURE", "INPUT", "12B_YUV422",
+	"10B_YUV444", "10B_RGB444", "12B_YUV444", "12B_RGB444",
+	"DV_ON_INPUT", "DV_ON_LOW_LATENCY_12B422", "Unknow", "Unknow"
+};
+
+static const char * const vo_type[] = {
+	"ANALOG_AND_DIGITAL",
+	"ANALOG_ONLY",
+	"DIGITAL_ONLY",
+	"DISPLAY_PORT_ONLY",
+	"HDMI_AND_DISPLAY_PORT_SAME_SOURCE",
+	"HDMI_AND_DISPLAY_PORT_DIFF_SOURCE",
+	"DISPLAY_PORT_AND_CVBS_SAME_SOURCE",
+	"HDMI_AND_DP_DIFF_SOURCE_WITH_CVBS",
+	"FORCE_DP_OFF"
 };
 
 static const char * const yes_no[] = {
 	"No", "Yes"
 };
 
+unsigned char get_vic_format_table_index(unsigned char vic)
+{
+	int i;
+	unsigned char index;
+
+	index = 0;
+	for (i = 0; i < vic_format_number; i++) {
+		if (vic == vic_format_table[i].vic) {
+			index = i;
+			break;
+		}
+	}
+
+	return index;
+}
+
 ssize_t show_hdmitx_info(struct device *cd, struct device_attribute *attr, char *buf)
 {
 	unsigned int ret_count;
 	unsigned int vo_standard;
-	unsigned int vic;
+	unsigned char vic_index;
+	unsigned char fps;
 	unsigned char color_index;
-	unsigned char depp_depth;
+	unsigned char vo_type_index;
 	struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM hdmitx_tv_system;
+	struct hdmi_format_setting format;
 
 	RPC_ToAgent_QueryConfigTvSystem(&hdmitx_tv_system);
+
+	tv_system_to_hdmi_format(&hdmitx_tv_system, &format);
 
 	ret_count = sprintf(buf, "------ HDMI Info -----\n");
 
 	vo_standard = hdmitx_tv_system.videoInfo.standard;
 
 	/* Mode:DVI/HDMI/OFF */
-	if (hdmitx_tv_system.hdmiInfo.hdmiMode <= 4)
-		ret_count += sprintf(buf+ret_count, "Mode: %s\n",
-			mode[hdmitx_tv_system.hdmiInfo.hdmiMode]);
+	ret_count += sprintf(buf+ret_count, "Mode: %s\n", mode[format.mode&0x3]);
 
 	/* RTK VO_STANDARD */
-	ret_count += sprintf(buf+ret_count, "RTK VO_STANDARD: %u\n", vo_standard);
+	ret_count += sprintf(buf+ret_count, "RTK VO_STANDARD: %u\n",
+		vo_standard);
 
-	if (hdmitx_tv_system.hdmiInfo.hdmiMode == VO_HDMI_OFF)
+	/* VO interface type */
+	vo_type_index = (unsigned char)hdmitx_tv_system.interfaceType;
+	if (vo_type_index <= 9)
+		ret_count += sprintf(buf+ret_count, "VO type: %s\n", vo_type[vo_type_index]);
+	else
+		ret_count += sprintf(buf+ret_count, "VO type: Unknow\n");
+
+	if (format.mode == FORMAT_MODE_OFF)
 		return ret_count;
 
 	/* VIC */
-	vic = hdmitx_tv_system.hdmiInfo.dataByte4&0x7F;
-	if (vic == 0) {
-		/* extended VIC */
-		switch (vo_standard) {
-		case VO_STANDARD_HDTV_2160P_23:
-		case VO_STANDARD_HDTV_2160P_24:
-			vic = 93;
-			break;
-		case VO_STANDARD_HDTV_2160P_25:
-			vic = 94;
-			break;
-		case VO_STANDARD_HDTV_2160P_29:
-		case VO_STANDARD_HDTV_2160P_30:
-			vic = 95;
-			break;
-		case VO_STANDARD_HDTV_4096_2160P_24:
-			vic = 98;
-			break;
-		default:
-			break;
-		}
-	}
-	ret_count += sprintf(buf+ret_count, "VIC: %u\n", vic);
+	ret_count += sprintf(buf+ret_count, "VIC: %u\n",
+		format.vic);
 
 	/* Resolution: Width x Height I/P fps */
-	ret_count += sprintf(buf+ret_count, "Resolution: %ux%u%s @ %uHz\n",
-		vo_standard_table[vo_standard].width,
-		vo_standard_table[vo_standard].height,
-		(hdmitx_tv_system.videoInfo.enProg&0x1)?"P":"I",
-		vo_standard_table[vo_standard].fps);
+	vic_index = get_vic_format_table_index(format.vic);
 
-	/* Pixel format: RGB/YUV422/YUV444/YUV420 */
-	switch (hdmitx_tv_system.videoInfo.standard) {
-	case VO_STANDARD_HDTV_2160P_50_420:
-	case VO_STANDARD_HDTV_2160P_59_420:
-	case VO_STANDARD_HDTV_2160P_60_420:
-	case VO_STANDARD_HDTV_4096_2160P_50_420:
-	case VO_STANDARD_HDTV_4096_2160P_60_420:
-		ret_count += sprintf(buf+ret_count, "Pixel format: %s\n",
-			pixel_format[3]);/* YUV420 */
-		break;
-	default:
-		ret_count += sprintf(buf+ret_count, "Pixel format: %s\n",
-			pixel_format[hdmitx_tv_system.hdmiInfo.dataByte1>>5]);
-		break;
-	}
-
-	/* Color depth: 24 Bits/30 Bits/36 Bits */
-	depp_depth = (hdmitx_tv_system.hdmiInfo.dataInt0>>2)&0xF;
-	if (depp_depth == 5)
-		ret_count += sprintf(buf+ret_count, "Color depth: %s\n", depth[1]);
-	else if (depp_depth == 6)
-		ret_count += sprintf(buf+ret_count, "Color depth: %s\n", depth[2]);
+	if (format.freq_shift)
+		fps = vic_format_table[vic_index].fps - 1;
 	else
-		ret_count += sprintf(buf+ret_count, "Color depth: %s\n", depth[0]);
+		fps = vic_format_table[vic_index].fps;
 
-	/* Colorimetry:SMPTE 170M/ITU 709/xvYCC601/xvYCC709/sYCC601/AdobeYCC601/AdobeRGB/BT2020YcCbcCrx/BT2020RGB */
+	ret_count += sprintf(buf+ret_count, "Resolution: %ux%u%s @ %uHz\n",
+		vic_format_table[vic_index].width,
+		vic_format_table[vic_index].height,
+		(hdmitx_tv_system.videoInfo.enProg&0x1)?"P":"I",
+		fps);
+
+	/* Pixel format:RGB/YUV422/YUV444/YUV420 */
+	ret_count += sprintf(buf+ret_count, "Pixel format: %s\n",
+		pixel_format[format.color&0x3]);
+
+	/* Color depth:8 Bits/10 Bits/12 Bits */
+	ret_count += sprintf(buf+ret_count, "Color depth: %u Bits\n",
+		format.color_depth);
+
+	/* Colorimetry */
 	color_index = (hdmitx_tv_system.hdmiInfo.dataByte2>>6)&0x3;
 	if (color_index != 0x3) {
 		/* Colorimetry C1:C0 */
 		ret_count += sprintf(buf+ret_count, "Colorimetry: %s\n",
-			colorimetry[color_index]);
+				colorimetry[color_index]);
 	} else {
 		/* Extended Colorimetry EC2:EC1:EC0 */
 		color_index = (hdmitx_tv_system.hdmiInfo.dataByte3>>4)&0x7;
+
 		ret_count += sprintf(buf+ret_count, "Colorimetry: %s\n",
-			extended_colorimetry[color_index]);
+				extended_colorimetry[color_index]);
 	}
 
 	/* 3D:"N/A"/FramePacking/Side-by-Side/Top-and-Bottom */
-	switch (hdmitx_tv_system.videoInfo.standard) {
-	case VO_STANDARD_HDTV_1080P_60_3D:
-	case VO_STANDARD_HDTV_1080P_50_3D:
-	case VO_STANDARD_HDTV_1080P_30_3D:
-	case VO_STANDARD_HDTV_1080P_24_3D:
-	case VO_STANDARD_HDTV_720P_60_3D:
-	case VO_STANDARD_HDTV_720P_50_3D:
-	case VO_STANDARD_HDTV_720P_30_3D:
-	case VO_STANDARD_HDTV_720P_24_3D:
-	case VO_STANDARD_HDTV_720P_59_3D:
-	case VO_STANDARD_HDTV_1080I_60_3D:
-	case VO_STANDARD_HDTV_1080I_59_3D:
-	case VO_STANDARD_HDTV_1080I_50_3D:
-	case VO_STANDARD_HDTV_1080P_23_3D:
-	case VO_STANDARD_HDTV_2160P_24_3D:/* 4K 3D */
-	case VO_STANDARD_HDTV_2160P_23_3D:
-		ret_count += sprintf(buf+ret_count, "3D: %s\n",
-			format3d[(hdmitx_tv_system.hdmiInfo.dataInt0>>8)&0x3]);
-		break;
-	default:
-		ret_count += sprintf(buf+ret_count, "3D: N/A\n");
-		break;
-	}
+	ret_count += sprintf(buf+ret_count, "3D: %s\n",
+		format3d[format._3d_format&0x7]);
+
+	/* HDR mode */
+	ret_count += sprintf(buf+ret_count, "HDR mode: %s\n",
+		hdr_mode[format.hdr&0xF]);
 
 	/* HDMI2.0:YES/NO */
 	ret_count += sprintf(buf+ret_count, "HDMI2.0: %s\n",
@@ -305,22 +243,26 @@ ssize_t show_edid_info(struct device *cd, struct device_attribute *attr, char *b
 	id_index[1] = (vendor_id>>5)&0x1F;
 	id_index[2] = vendor_id&0x1F;
 	ret_count += sprintf(buf+ret_count, "TV name:%c%c%c\n",
-		eisa_id[id_index[0]], eisa_id[id_index[1]], eisa_id[id_index[2]]);
+					eisa_id[id_index[0]],
+					eisa_id[id_index[1]],
+					eisa_id[id_index[2]]);
 
 	ret_count += sprintf(buf+ret_count, "ProductCode:%02x%02x\n",
-		hdmitx_edid_info.prod_code[1], hdmitx_edid_info.prod_code[0]);
+					hdmitx_edid_info.prod_code[1],
+					hdmitx_edid_info.prod_code[0]);
 
 	ret_count += sprintf(buf+ret_count, "SerialNumber:%08x\n",
-		hdmitx_edid_info.serial);
+					hdmitx_edid_info.serial);
 
 	ret_count += sprintf(buf+ret_count, "ManufactureYear:%u\n",
-		1990+hdmitx_edid_info.mfg_year);
+					1990+hdmitx_edid_info.mfg_year);
 
 	ret_count += sprintf(buf+ret_count, "ManufactureWeek:%u\n",
-		hdmitx_edid_info.mfg_week);
+					hdmitx_edid_info.mfg_week);
 
 	if (hdmitx_edid_info.hdmi_id == HDMI_2P0_IDENTIFIER) {
-		ret_count += sprintf(buf+ret_count, "Max TMDS character rate:%u\n",
+		ret_count += sprintf(buf+ret_count,
+			"Max TMDS character rate:%u\n",
 			hdmitx_edid_info.max_tmds_char_rate);
 
 		ret_count += sprintf(buf+ret_count, "Deep Color 420:0x%x\n",
@@ -359,9 +301,9 @@ static ssize_t hpd_interlock_store(struct device *dev,
 }
 
 /* /sys/devices/platform/9800d000.hdmitx/hdmitx_info */
-static DEVICE_ATTR(hdmitx_info, S_IRUGO, show_hdmitx_info, NULL);
+static DEVICE_ATTR(hdmitx_info, 0444, show_hdmitx_info, NULL);
 /* /sys/devices/platform/9800d000.hdmitx/edid_info */
-static DEVICE_ATTR(edid_info, S_IRUGO, show_edid_info, NULL);
+static DEVICE_ATTR(edid_info, 0444, show_edid_info, NULL);
 /* /sys/devices/platform/9800d000.hdmitx/hpd_interlock */
 static DEVICE_ATTR(hpd_interlock, 0644,
 	hpd_interlock_show, hpd_interlock_store);

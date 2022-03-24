@@ -885,6 +885,7 @@ static int cdrom_is_dvd_rw(struct cdrom_device_info *cdi)
 	switch (cdi->mmc3_profile) {
 	case 0x12:	/* DVD-RAM	*/
 	case 0x1A:	/* DVD+RW	*/
+	case 0x43:	/* BD-RE	*/
 		return 0;
 	default:
 		return 1;
@@ -1152,9 +1153,6 @@ int cdrom_open(struct cdrom_device_info *cdi, struct block_device *bdev,
 	int ret;
 
 	cd_dbg(CD_OPEN, "entering cdrom_open\n");
-
-	/* open is event synchronization point, check events first */
-	check_disk_change(bdev);
 
 	/* if this was a O_NONBLOCK open and we should honor the flags,
 	 * do a quick open without drive/disc integrity checks. */
@@ -2031,7 +2029,7 @@ static int cdrom_read_subchannel(struct cdrom_device_info *cdi,
 
 	init_cdrom_command(&cgc, buffer, 16, CGC_DATA_READ);
 	cgc.cmd[0] = GPCMD_READ_SUBCHANNEL;
-	cgc.cmd[1] = 2;     /* MSF addressing */
+	cgc.cmd[1] = subchnl->cdsc_format;/* MSF or LBA addressing */
 	cgc.cmd[2] = 0x40;  /* request subQ data */
 	cgc.cmd[3] = mcn ? 2 : 1;
 	cgc.cmd[8] = 16;
@@ -2040,17 +2038,27 @@ static int cdrom_read_subchannel(struct cdrom_device_info *cdi,
 		return ret;
 
 	subchnl->cdsc_audiostatus = cgc.buffer[1];
-	subchnl->cdsc_format = CDROM_MSF;
 	subchnl->cdsc_ctrl = cgc.buffer[5] & 0xf;
 	subchnl->cdsc_trk = cgc.buffer[6];
 	subchnl->cdsc_ind = cgc.buffer[7];
 
-	subchnl->cdsc_reladdr.msf.minute = cgc.buffer[13];
-	subchnl->cdsc_reladdr.msf.second = cgc.buffer[14];
-	subchnl->cdsc_reladdr.msf.frame = cgc.buffer[15];
-	subchnl->cdsc_absaddr.msf.minute = cgc.buffer[9];
-	subchnl->cdsc_absaddr.msf.second = cgc.buffer[10];
-	subchnl->cdsc_absaddr.msf.frame = cgc.buffer[11];
+	if (subchnl->cdsc_format == CDROM_LBA) {
+		subchnl->cdsc_absaddr.lba = ((cgc.buffer[8] << 24) |
+						(cgc.buffer[9] << 16) |
+						(cgc.buffer[10] << 8) |
+						(cgc.buffer[11]));
+		subchnl->cdsc_reladdr.lba = ((cgc.buffer[12] << 24) |
+						(cgc.buffer[13] << 16) |
+						(cgc.buffer[14] << 8) |
+						(cgc.buffer[15]));
+	} else {
+		subchnl->cdsc_reladdr.msf.minute = cgc.buffer[13];
+		subchnl->cdsc_reladdr.msf.second = cgc.buffer[14];
+		subchnl->cdsc_reladdr.msf.frame = cgc.buffer[15];
+		subchnl->cdsc_absaddr.msf.minute = cgc.buffer[9];
+		subchnl->cdsc_absaddr.msf.second = cgc.buffer[10];
+		subchnl->cdsc_absaddr.msf.frame = cgc.buffer[11];
+	}
 
 	return 0;
 }
@@ -2357,7 +2365,7 @@ static int cdrom_ioctl_media_changed(struct cdrom_device_info *cdi,
 	if (!CDROM_CAN(CDC_SELECT_DISC) || arg == CDSL_CURRENT)
 		return media_changed(cdi, 1);
 
-	if ((unsigned int)arg >= cdi->capacity)
+	if (arg >= cdi->capacity)
 		return -EINVAL;
 
 	info = kmalloc(sizeof(*info), GFP_KERNEL);
@@ -3021,7 +3029,7 @@ static noinline int mmc_ioctl_cdrom_subchannel(struct cdrom_device_info *cdi,
 	if (!((requested == CDROM_MSF) ||
 	      (requested == CDROM_LBA)))
 		return -EINVAL;
-	q.cdsc_format = CDROM_MSF;
+
 	ret = cdrom_read_subchannel(cdi, &q, 0);
 	if (ret)
 		return ret;
@@ -3185,15 +3193,11 @@ static noinline int mmc_ioctl_dvd_read_struct(struct cdrom_device_info *cdi,
 	if (!CDROM_CAN(CDC_DVD))
 		return -ENOSYS;
 
-	s = kmalloc(size, GFP_KERNEL);
-	if (!s)
-		return -ENOMEM;
+	s = memdup_user(arg, size);
+	if (IS_ERR(s))
+		return PTR_ERR(s);
 
 	cd_dbg(CD_DO_IOCTL, "entering DVD_READ_STRUCT\n");
-	if (copy_from_user(s, arg, size)) {
-		kfree(s);
-		return -EFAULT;
-	}
 
 	ret = dvd_read_struct(cdi, s, cgc);
 	if (ret)

@@ -1,10 +1,6 @@
-#EXTRA_CFLAGS += -DDEBUG
-
-obj-$(CONFIG_ION) +=	ion.o ion_heap.o ion_page_pool.o ion_system_heap.o \
+obj-$(CONFIG_ION) +=	ion.o ion-ioctl.o ion_heap.o \
+			ion_page_pool.o ion_system_heap.o \
 			ion_carveout_heap.o ion_chunk_heap.o ion_cma_heap.o
-
-obj-$(CONFIG_ION_RTK_PHOENIX) += ion_rtk_carveout_heap.o
-
 obj-$(CONFIG_ION_TEST) += ion_test.o
 ifdef CONFIG_COMPAT
 obj-$(CONFIG_ION) += compat_ion.o
@@ -12,4 +8,6 @@ endif
 
 obj-$(CONFIG_ION_DUMMY) += ion_dummy_driver.o
 obj-$(CONFIG_ION_TEGRA) += tegra/
-obj-$(CONFIG_ION_RTK_PHOENIX) += rtk_phoenix/
+obj-$(CONFIG_ION_HISI) += hisilicon/
+obj-$(CONFIG_ION_RTK) += realtek/
+obj-$(CONFIG_ION_OF) += ion_of.o

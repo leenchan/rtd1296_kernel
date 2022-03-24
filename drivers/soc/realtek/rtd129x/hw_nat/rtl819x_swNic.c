@@ -539,7 +539,7 @@ int32 New_swNic_init(uint32 userNeedRxPkthdrRingCnt[NEW_NIC_MAX_RX_DESC_RING],
 	 * this way (set TX_RING0_TAIL_AWARE bit) CAN NOT used when tx desc number is larger than 2730.
 	 */
 	REG32(DMA_CR1) = (New_txDescRingCnt[0] - 1) * (sizeof(struct tx_desc));
-	REG32(DMA_CR4) = TX_RING0_TAIL_AWARE;
+	/* REG32(DMA_CR4) = TX_RING0_TAIL_AWARE; */
 
 	/* Initialize Rx packet header descriptors */
 	for (i = 0; i < NEW_NIC_MAX_RX_DESC_RING; i++) {
@@ -926,8 +926,7 @@ get_next:
 		if (!(desc->rx_l3csok) || !(desc->rx_l4csok)) {
 #ifdef CONFIG_RTL_IPV6READYLOGO
 			if (!(!(desc->rx_l4csok) &&
-					(desc->rx_ipv6)
-					&& (desc->rx_reason == 0x60)))
+				(desc->rx_ipv6) && (desc->rx_reason == 0x60)))
 #endif
 			{
 #if !defined(CONFIG_RTD_1295_HWNAT)
@@ -1013,8 +1012,10 @@ get_next:
 			 * the mdata of second/third/... pkthdr will be updated to 4-byte alignment by hardware.
 			 */
 #if defined(CONFIG_RTD_1295_HWNAT)
+			DBG("info vid %d, pid %d, rxPri %d, len %d\n", info->vid, info->pid, info->rxPri, info->len);
 			DBG("rx_skb[ring_idx %d][rx_idx %d] = 0x%lx, data = 0x%lx, len = %d", ring_idx, rx_idx, (uintptr_t) r_skb, (uintptr_t) r_skb->data, desc->rx_len);
-			DBG("rx_skb[ring_idx][rx_idx].dma_addr 0x%lx, desc->addr 0x%lx", (uintptr_t) rx_skb[ring_idx][rx_idx].dma_addr, (uintptr_t) desc->mdata);
+			//rtl_dump_data(r_skb->data, 64);
+			//DBG("rx_skb[ring_idx][rx_idx].dma_addr 0x%lx, desc->addr 0x%lx", (uintptr_t) rx_skb[ring_idx][rx_idx].dma_addr, (uintptr_t) desc->mdata);
 
 			/* unmap received skb from DMA */
 			dma_unmap_single(&rtl819x_pdev->dev,
@@ -1426,6 +1427,7 @@ int32 _New_swNic_send(void *skb, void *output, uint32 len,
 	struct tx_desc *txd;
 	uint32 next_index;
 
+	DBG("skb 0x%p, len %d\n", skb, len);
 /* startCP3Ctrl(PERF_EVENT_CYCLE); //added for romperf testing */
 	tx_idx = New_currTxPkthdrDescIndex[nicTx->txIdx];
 
@@ -1434,6 +1436,7 @@ int32 _New_swNic_send(void *skb, void *output, uint32 len,
 	if (next_index == New_txPktDoneDescIndex[nicTx->txIdx]) {
 		/* TX ring full */
 /* stopCP3Ctrl(1, 0);      //added for romperf testing */
+		DBG("check\n");
 		return (FAILED);
 	}
 #ifdef _LOCAL_TX_DESC
@@ -1472,8 +1475,8 @@ int32 _New_swNic_send(void *skb, void *output, uint32 len,
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 	/* do not need to set tail bit after we use DMA_CR1/DMA_CR4 register */
-	/* if (tx_idx == (New_txDescRingCnt[nicTx->txIdx] - 1)) */
-	/* txd->tx_eor = 1; */
+	if (tx_idx == (New_txDescRingCnt[nicTx->txIdx] - 1))
+		txd->tx_eor = 1;
 	txd->tx_ls = 1;
 	txd->tx_fs = 1;
 	txd->tx_ph_len = len;
@@ -1524,6 +1527,10 @@ int32 _New_swNic_send(void *skb, void *output, uint32 len,
 	fill_txd_misc(txd, nicTx, (struct sk_buff *)skb);
 #endif
 
+	DBG("txd dp 0x%x, mlen %d, dvlanid %d, hwlkup %d, bridge %d, extspa %d\n",
+		txd->tx_dp, txd->tx_mlen, txd->tx_dvlanid, txd->tx_hwlkup,
+		txd->tx_bridge, txd->tx_extspa);
+	//rtl_dump_data(((struct sk_buff *)skb)->data, 64);
 #ifdef _LOCAL_TX_DESC
 	txd = (struct tx_desc *)dw_copy((uint32 *)&New_txDescRing[nicTx->txIdx][tx_idx], (uint32 *)txd,
 		sizeof(struct tx_desc) / 4);
@@ -1542,6 +1549,7 @@ int32 _New_swNic_send(void *skb, void *output, uint32 len,
 #endif
 #if defined(CONFIG_RTD_1295_HWNAT)
 	wmb();
+	DBG("ready\n");
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 	txd->tx_own = 1;	/* set     own     bit     after all done. */
@@ -1550,7 +1558,8 @@ int32 _New_swNic_send(void *skb, void *output, uint32 len,
 
 	/* Set TXFD     bit     to start transmission */
 	REG32(CPUICR) |= TXFD;
-/* stopCP3Ctrl(1, 0);      //added for romperf testing */
+
+	/* stopCP3Ctrl(1, 0);      //added for romperf testing */
 	return ret;
 }
 
@@ -1600,6 +1609,7 @@ int32 _New_swNic_send_tso_sg(struct sk_buff *skb, void *output, uint32 len,
 	uint8 proto_type = 0;
 	bool cur_pi = 0, cur_vi = 0;
 
+	DBG("%s:%d: skb 0x%p, len %d\n", __func__, __LINE__, skb, len);
 	first_len = skb->len - skb->data_len;
 /* L3_hdr_len = find_L3L4_hdr_len(skb, &L4_hdr_len); */
 
@@ -2131,7 +2141,7 @@ void New_swNic_reConfigRxTxRing(void)
 	}
 
 	REG32(DMA_CR1) = (New_txDescRingCnt[0] - 1) * (sizeof(struct tx_desc));
-	REG32(DMA_CR4) = TX_RING0_TAIL_AWARE;
+	/* REG32(DMA_CR4) = TX_RING0_TAIL_AWARE; */
 
 	/* Initialize Rx packet header descriptors */
 	for (i = 0; i < NEW_NIC_MAX_RX_DESC_RING; i++) {

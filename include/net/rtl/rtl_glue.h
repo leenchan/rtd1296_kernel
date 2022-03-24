@@ -1,8 +1,8 @@
 /*
 * --------------------------------------------------------------------
-* Copyright c                  Realtek Semiconductor Corporation, 2002  
+* Copyright c                  Realtek Semiconductor Corporation, 2002
 * All rights reserved.
-* 
+*
 * Program : rtl_glue.h
 * Abstract :Header of porting layer
 * Author	: Edward Jin-Ru Chen

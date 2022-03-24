@@ -230,7 +230,9 @@ static struct rts5400_dev {
 } g_rts5400;
 
 /* I2C transfer */
-static struct tcpm_command_status __rts5400_get_ping_status(const struct i2c_client *client) {
+static struct tcpm_command_status __rts5400_get_ping_status(
+		const struct i2c_client *client)
+{
 	int ret;
 	struct tcpm_command_status status;
 	status.cmd_status = 0;
@@ -247,7 +249,8 @@ static struct tcpm_command_status __rts5400_get_ping_status(const struct i2c_cli
 }
 
 static int __rts5400_block_read(const struct i2c_client *client,
-		struct tcpm_command *command) {
+		struct tcpm_command *command)
+{
 	int ret;
 	int data_len = command->wr_data_len + 1;
 	u8 *buffer;
@@ -270,7 +273,8 @@ static int __rts5400_block_read(const struct i2c_client *client,
 }
 
 static int __rts5400_block_write(struct i2c_client *client,
-		struct tcpm_command *command) {
+		struct tcpm_command *command)
+{
 	int ret;
 
 	ret = i2c_smbus_write_block_data(client, command->cmd,
@@ -279,7 +283,8 @@ static int __rts5400_block_write(struct i2c_client *client,
 }
 
 static int __rts5400_transfer(const struct rts5400_dev *rts5400,
-		struct tcpm_command *w_cmd, struct tcpm_command *r_cmd) {
+		struct tcpm_command *w_cmd, struct tcpm_command *r_cmd)
+{
 	struct device *dev = rts5400->dev;
 	struct i2c_client *client = rts5400->client;
 	struct tcpm_command_status status;
@@ -334,7 +339,8 @@ static int __rts5400_transfer(const struct rts5400_dev *rts5400,
 		return ret;
 }
 
-int rtk_rts5400_get_IC_status(void) {
+int rtk_rts5400_get_IC_status(void)
+{
 	struct rts5400_dev *rts5400 = &g_rts5400;
 	int ret, i;
 	struct tcpm_command w_cmd, r_cmd;
@@ -379,11 +385,13 @@ int rtk_rts5400_get_IC_status(void) {
 	return ret;
 }
 
-int rtk_rts5400_get_status(void) {
+int rtk_rts5400_get_status(void)
+{
 	struct rts5400_dev *rts5400 = &g_rts5400;
 	int ret, i;
 	struct tcpm_command w_cmd, r_cmd;
 	struct pd_status_info *status_info = &rts5400->status_info;
+
 	w_cmd.cmd = 0x9;
 	w_cmd.wr_data_len = 0x3;
 	w_cmd.data[0] = 0x0;
@@ -429,11 +437,14 @@ int rtk_rts5400_get_status(void) {
 	return ret;
 }
 
-int rtk_rts5400_get_PDO(int pdo_type, int pdo, int offset, int num, u8 *value) {
+int rtk_rts5400_get_PDO(int pdo_type, int pdo, int offset,
+		int num, u8 *value)
+{
 	struct rts5400_dev *rts5400 = &g_rts5400;
 	int ret, i;
 	struct tcpm_command w_cmd, r_cmd;
 	union pdo_info *pdo_inf;
+
 	w_cmd.cmd = 0x8;
 	w_cmd.wr_data_len = 0x3;
 	w_cmd.data[0] = 0x83;
@@ -459,7 +470,7 @@ int rtk_rts5400_get_PDO(int pdo_type, int pdo, int offset, int num, u8 *value) {
 	//	dev_dbg(rts5400->dev, "Data#%d : 0x%x\n", i, r_cmd.data[i]);
 	//}
 
-	for (i = 0; i < r_cmd.wr_data_len; i=i + 4) {
+	for (i = 0; i < r_cmd.wr_data_len; i = i + 4) {
 		pdo_inf = (union pdo_info *)&r_cmd.data[i];
 
 		if (pdo == PDO_TYPE_SOURCE && pdo_inf->com.power_type == PDO_INFO_POWER_TYPE_FIX) {
@@ -490,10 +501,12 @@ int rtk_rts5400_get_PDO(int pdo_type, int pdo, int offset, int num, u8 *value) {
 	return ret;
 }
 
-int rtk_rts5400_init_pd_ams(u8 pd_ams) {
+int rtk_rts5400_init_pd_ams(u8 pd_ams)
+{
 	struct rts5400_dev *rts5400 = &g_rts5400;
 	int ret, i;
 	struct tcpm_command w_cmd, r_cmd;
+
 	w_cmd.cmd = 0x8;
 	w_cmd.wr_data_len = 0x3;
 	w_cmd.data[0] = 0x20;
@@ -518,14 +531,16 @@ int rtk_rts5400_init_pd_ams(u8 pd_ams) {
 }
 
 /* Type C */
-bool rtk_rts5400_is_enabled(void) {
+bool rtk_rts5400_is_enabled(void)
+{
 	struct rts5400_dev *rts5400 = &g_rts5400;
 	struct device *dev = rts5400->dev;
 
 	return !rts5400->no_device;
 }
 
-bool rtk_rts5400_is_UFP_attached(void) {
+bool rtk_rts5400_is_UFP_attached(void)
+{
 	struct rts5400_dev *rts5400 = &g_rts5400;
 	struct device *dev = rts5400->dev;
 	struct pd_status_info *status_info = &rts5400->status_info;
@@ -533,7 +548,8 @@ bool rtk_rts5400_is_UFP_attached(void) {
 	return status_info->port_partner_type == PD_STATUS_INFO_PARTNER_UFP;
 }
 
-int rtk_rts5400_set_type_c_soft_reset(void) {
+int rtk_rts5400_set_type_c_soft_reset(void)
+{
 	int ret = 0;
 
 	ret = rtk_rts5400_init_pd_ams(PD_AMS_SOFT_RESET);
@@ -541,7 +557,8 @@ int rtk_rts5400_set_type_c_soft_reset(void) {
 	return ret;
 }
 
-int rtk_rts5400_get_current_pdo_voltage(void) {
+int rtk_rts5400_get_current_pdo_voltage(void)
+{
 	struct rts5400_dev *rts5400 = &g_rts5400;
 	struct device *dev = rts5400->dev;
 	struct pd_status_info *status_info = &rts5400->status_info;
@@ -560,10 +577,12 @@ int rtk_rts5400_get_current_pdo_voltage(void) {
 
 	offest = (rdo->obj_pos - 1) * 4;
 
-	dev_dbg(dev, "%s rdo->obj_pos=%d, offest=%d", __func__, rdo->obj_pos, offest);
+	dev_dbg(dev, "%s rdo->obj_pos=%d, offest=%d", __func__,
+			rdo->obj_pos, offest);
 
 	if (offest < 0) {
-		dev_err(dev, "%s Error! rdo->obj_pos=%d, offest=%d", __func__, rdo->obj_pos, offest);
+		dev_err(dev, "%s Error! rdo->obj_pos=%d, offest=%d",
+			__func__, rdo->obj_pos, offest);
 		return ret;
 	}
 
@@ -579,7 +598,8 @@ int rtk_rts5400_get_current_pdo_voltage(void) {
 	pdo = buffer + offest;
 
 	if (pdo != NULL && pdo->com.power_type == PDO_INFO_POWER_TYPE_FIX) {
-		dev_info(rts5400->dev, "Current Partner Source Fix PDO, valtage %d mV\n", (pdo->so_f.valtage) * 50);
+		dev_info(rts5400->dev, "Current Partner Source Fix PDO, "
+				"valtage %d mV\n", (pdo->so_f.valtage) * 50);
 		ret = pdo->so_f.valtage * 50;
 	}
 
@@ -589,7 +609,8 @@ int rtk_rts5400_get_current_pdo_voltage(void) {
 }
 
 /* init and probe */
-static int rtk_rts5400_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int rtk_rts5400_probe(struct i2c_client *client,
+		const struct i2c_device_id *id)
 {
 	struct rts5400_dev *rts5400 = &g_rts5400;
 	struct device *dev = &client->dev;
@@ -613,15 +634,24 @@ static int rtk_rts5400_probe(struct i2c_client *client, const struct i2c_device_
 		rts5400->no_device = true;
 	} else {
 		ret = rtk_rts5400_get_status();
-		if (ret < 0) dev_err(dev, "[RTS5400] rtk_rts5400_get_status fail (ret=%d)\n", ret);
+		if (ret < 0)
+			dev_err(dev, "[RTS5400] rtk_rts5400_get_status fail (ret=%d)\n", ret);
 		ret = rtk_rts5400_get_PDO(PDO_TYPE_SOURCE, PDO_TCPM_TCPM, 0, 7, NULL);
-		if (ret < 0) dev_err(dev, "[RTS5400] rtk_rts5400_get_PDO (PDO_TYPE_SOURCE, PDO_TCPM_TCPM) fail (ret=%d)\n", ret);
+		if (ret < 0)
+			dev_err(dev, "[RTS5400] rtk_rts5400_get_PDO "
+				"(PDO_TYPE_SOURCE, PDO_TCPM_TCPM) fail (ret=%d)\n", ret);
 		ret = rtk_rts5400_get_PDO(PDO_TYPE_SOURCE, PDO_TCPM_PARTNER, 0, 7, NULL);
-		if (ret < 0) dev_err(dev, "[RTS5400] rtk_rts5400_get_PDO (PDO_TYPE_SOURCE, PDO_TCPM_PARTNER) fail (ret=%d)\n", ret);
+		if (ret < 0)
+			dev_err(dev, "[RTS5400] rtk_rts5400_get_PDO "
+				"PDO_TYPE_SOURCE, PDO_TCPM_PARTNER) fail (ret=%d)\n", ret);
 		ret = rtk_rts5400_get_PDO(PDO_TYPE_SINK, PDO_TCPM_TCPM, 0, 7, NULL);
-		if (ret < 0) dev_err(dev, "[RTS5400] rtk_rts5400_get_PDO (PDO_TYPE_SINK, PDO_TCPM_TCPM) fail (ret=%d)\n", ret);
+		if (ret < 0)
+			dev_err(dev, "[RTS5400] rtk_rts5400_get_PDO "
+				"(PDO_TYPE_SINK, PDO_TCPM_TCPM) fail (ret=%d)\n", ret);
 		ret = rtk_rts5400_get_PDO(PDO_TYPE_SINK, PDO_TCPM_PARTNER, 0, 7, NULL);
-		if (ret < 0) dev_err(dev, "[RTS5400] rtk_rts5400_get_PDO (PDO_TYPE_SINK, PDO_TCPM_PARTNER) fail (ret=%d)\n", ret);
+		if (ret < 0)
+			 dev_err(dev, "[RTS5400] rtk_rts5400_get_PDO "
+				"(PDO_TYPE_SINK, PDO_TCPM_PARTNER) fail (ret=%d)\n", ret);
 
 		ret = rtk_rts5400_get_current_pdo_voltage();
 

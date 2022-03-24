@@ -1,3 +1,13 @@
+/*
+ * scd_mars_priv.h - smartcard driver
+ *
+ * Copyright (c) 2017 Realtek Semiconductor Corp.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ */
+
 #ifndef __SCD_MARS_PRIV_H__
 #define __SCD_MARS_PRIV_H__
 
@@ -36,6 +46,11 @@ typedef struct mars_dts_info
     //void __iomem        *padmux;
     void __iomem        *misc;
     void __iomem        *base;
+#if 0
+    void __iomem        *crt;
+    void __iomem        *pinmux;
+    void __iomem        *gpio;
+#endif
     unsigned int        irq;
     unsigned int        id;
     unsigned char       cmd_vcc_en;

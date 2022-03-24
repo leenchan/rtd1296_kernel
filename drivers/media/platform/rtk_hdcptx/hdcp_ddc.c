@@ -15,26 +15,27 @@
 
 #define HDCP_I2C_SPEED I2C_M_LOW_SPEED_80
 
-int ddc_write(int len,unsigned char start,unsigned char *buf)
-{	
-	struct i2c_adapter *p_adap;	
-	unsigned char bus_id =1;
+int ddc_write(int len, unsigned char start, unsigned char *buf)
+{
+	struct i2c_adapter *p_adap;
+	unsigned char bus_id = 1;
 	unsigned char *data;
-	//int i;
-	
+
 	data = kzalloc((len+1)*sizeof(unsigned char), GFP_KERNEL);
-	
-	data[0]= start;
-	memcpy(data+1,buf,len);
-	
-#if 0	
-	for(i=0;i<len+1;i++)
-	 	HDCP_DEBUG("data[%d]=0x%x \n",i,data[i]);
-		
-	for(i=0;i<len;i++)
-	 	HDCP_DEBUG("buf[%d]=0x%x\n",i,buf[i]);	
+
+	data[0] = start;
+	memcpy(data+1, buf, len);
+
+#if 0
+	int i;
+
+	for (i = 0; i < len+1; i++)
+		HDCP_DEBUG("data[%d]=0x%x\n", i, data[i]);
+
+	for (i = 0; i < len; i++)
+		HDCP_DEBUG("buf[%d]=0x%x\n", i, buf[i]);
 #endif
-		
+
 	struct i2c_msg msgs[] = {
 		{
 			.addr	= 0x3A,
@@ -43,24 +44,24 @@ int ddc_write(int len,unsigned char start,unsigned char *buf)
 			.buf	= data,
 		}
 	};
-	
-	if ((p_adap = i2c_get_adapter(bus_id))==NULL){
-        HDCP_ERROR("get adapter %d failed\n", bus_id);        
-        return -ENODEV;
-    }
+
+	p_adap = i2c_get_adapter(bus_id);
+	if (p_adap == NULL) {
+		HDCP_ERROR("get adapter %d failed\n", bus_id);
+		return -ENODEV;
+	}
 
 	if (i2c_transfer(p_adap, msgs, 1) == 1)
 		return 0;
 
-	
-	return -ECOMM;	
-}	
-	
-int ddc_read(int len,unsigned char start,unsigned char *buf)
+	return -ECOMM;
+}
+
+int ddc_read(int len, unsigned char start, unsigned char *buf)
 {
-	struct i2c_adapter *p_adap;	
-	unsigned char bus_id=1;
-	
+	struct i2c_adapter *p_adap;
+	unsigned char bus_id = 1;
+
 	struct i2c_msg msgs[] = {
 		{
 			.addr	= 0x3A,
@@ -74,15 +75,15 @@ int ddc_read(int len,unsigned char start,unsigned char *buf)
 			.buf	= buf,
 		}
 	};
-	
-	if ((p_adap = i2c_get_adapter(bus_id))==NULL){
-        HDCP_ERROR("hdcp get adapter %d failed\n", bus_id);        
-        return -ENODEV;
-    }
+
+	p_adap = i2c_get_adapter(bus_id);
+	if (p_adap == NULL) {
+		HDCP_ERROR("hdcp get adapter %d failed\n", bus_id);
+		return -ENODEV;
+	}
 
 	if (i2c_transfer(p_adap, msgs, 2) == 2)
 		return 0;
 
-	
 	return -ECOMM;
 }

@@ -24,9 +24,9 @@ static int fat_ioctl_get_attributes(struct inode *inode, u32 __user *user_attr)
 {
 	u32 attr;
 
-	mutex_lock(&inode->i_mutex);
+	inode_lock(inode);
 	attr = fat_make_attrs(inode);
-	mutex_unlock(&inode->i_mutex);
+	inode_unlock(inode);
 
 	return put_user(attr, user_attr);
 }
@@ -47,7 +47,7 @@ static int fat_ioctl_set_attributes(struct file *file, u32 __user *user_attr)
 	err = mnt_want_write_file(file);
 	if (err)
 		goto out;
-	mutex_lock(&inode->i_mutex);
+	inode_lock(inode);
 
 	/*
 	 * ATTR_VOLUME and ATTR_DIR cannot be changed; this also
@@ -63,7 +63,7 @@ static int fat_ioctl_set_attributes(struct file *file, u32 __user *user_attr)
 
 	/* Equivalent to a chmod() */
 	ia.ia_valid = ATTR_MODE | ATTR_CTIME;
-	ia.ia_ctime = current_fs_time(inode->i_sb);
+	ia.ia_ctime = current_time(inode);
 	if (is_dir)
 		ia.ia_mode = fat_make_mode(sbi, attr, S_IRWXUGO);
 	else {
@@ -109,7 +109,7 @@ static int fat_ioctl_set_attributes(struct file *file, u32 __user *user_attr)
 	fat_save_attrs(inode, attr);
 	mark_inode_dirty(inode);
 out_unlock_inode:
-	mutex_unlock(&inode->i_mutex);
+	inode_unlock(inode);
 	mnt_drop_write_file(file);
 out:
 	return err;
@@ -194,7 +194,7 @@ static int fat_cont_expand(struct inode *inode, loff_t size)
 	if (err)
 		goto out;
 
-	inode->i_ctime = inode->i_mtime = CURRENT_TIME_SEC;
+	inode->i_ctime = inode->i_mtime = current_time(inode);
 	mark_inode_dirty(inode);
 	if (IS_SYNC(inode)) {
 		int err2;
@@ -246,7 +246,7 @@ static long fat_fallocate(struct file *file, int mode,
 	if (!S_ISREG(inode->i_mode))
 		return -EOPNOTSUPP;
 
-	mutex_lock(&inode->i_mutex);
+	inode_lock(inode);
 	if (mode & FALLOC_FL_KEEP_SIZE) {
 		ondisksize = inode->i_blocks << 9;
 		if ((offset + len) <= ondisksize)
@@ -264,10 +264,7 @@ static long fat_fallocate(struct file *file, int mode,
 				goto error;
 		}
 	} else {
-		/* Ken: Use inode->i_blocks instead of inode->i_size 20150820 */
-		ondisksize = inode->i_blocks << 9;
-		//if ((offset + len) <= i_size_read(inode))
-		if ((offset + len) <= ondisksize)
+		if ((offset + len) <= i_size_read(inode))
 			goto error;
 
 		/* This is just an expanding truncate */
@@ -275,7 +272,7 @@ static long fat_fallocate(struct file *file, int mode,
 	}
 
 error:
-	mutex_unlock(&inode->i_mutex);
+	inode_unlock(inode);
 	return err;
 }
 
@@ -300,7 +297,7 @@ static int fat_free(struct inode *inode, int skip)
 		MSDOS_I(inode)->i_logstart = 0;
 	}
 	MSDOS_I(inode)->i_attrs |= ATTR_ARCH;
-	inode->i_ctime = inode->i_mtime = CURRENT_TIME_SEC;
+	inode->i_ctime = inode->i_mtime = current_time(inode);
 	if (wait) {
 		err = fat_sync_inode(inode);
 		if (err) {
@@ -453,7 +450,7 @@ int fat_setattr(struct dentry *dentry, struct iattr *attr)
 			attr->ia_valid &= ~TIMES_SET_FLAGS;
 	}
 
-	error = inode_change_ok(inode, attr);
+	error = setattr_prepare(dentry, attr);
 	attr->ia_valid = ia_valid;
 	if (error) {
 		if (sbi->options.quiet)

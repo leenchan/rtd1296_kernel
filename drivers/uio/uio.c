@@ -271,12 +271,16 @@ static int uio_dev_add_attributes(struct uio_device *idev)
 			map_found = 1;
 			idev->map_dir = kobject_create_and_add("maps",
 							&idev->dev->kobj);
-			if (!idev->map_dir)
+			if (!idev->map_dir) {
+				ret = -ENOMEM;
 				goto err_map;
+			}
 		}
 		map = kzalloc(sizeof(*map), GFP_KERNEL);
-		if (!map)
-			goto err_map_kobj;
+		if (!map) {
+			ret = -ENOMEM;
+			goto err_map;
+		}
 		kobject_init(&map->kobj, &map_attr_type);
 		map->mem = mem;
 		mem->map = map;
@@ -285,7 +289,7 @@ static int uio_dev_add_attributes(struct uio_device *idev)
 			goto err_map_kobj;
 		ret = kobject_uevent(&map->kobj, KOBJ_ADD);
 		if (ret)
-			goto err_map;
+			goto err_map_kobj;
 	}
 
 	for (pi = 0; pi < MAX_UIO_PORT_REGIONS; pi++) {
@@ -296,12 +300,16 @@ static int uio_dev_add_attributes(struct uio_device *idev)
 			portio_found = 1;
 			idev->portio_dir = kobject_create_and_add("portio",
 							&idev->dev->kobj);
-			if (!idev->portio_dir)
+			if (!idev->portio_dir) {
+				ret = -ENOMEM;
 				goto err_portio;
+			}
 		}
 		portio = kzalloc(sizeof(*portio), GFP_KERNEL);
-		if (!portio)
-			goto err_portio_kobj;
+		if (!portio) {
+			ret = -ENOMEM;
+			goto err_portio;
+		}
 		kobject_init(&portio->kobj, &portio_attr_type);
 		portio->port = port;
 		port->portio = portio;
@@ -311,7 +319,7 @@ static int uio_dev_add_attributes(struct uio_device *idev)
 			goto err_portio_kobj;
 		ret = kobject_uevent(&portio->kobj, KOBJ_ADD);
 		if (ret)
-			goto err_portio;
+			goto err_portio_kobj;
 	}
 
 	return 0;
@@ -381,21 +389,22 @@ static int uio_get_minor(struct uio_device *idev)
 #ifdef CONFIG_UIO_ASSIGN_MINOR
 static int uio_use_minor(struct uio_device *idev, int minor)
 {
-       int retval = -ENOMEM;
+	int retval = -ENOMEM;
 
-       mutex_lock(&minor_lock);
-       retval = idr_alloc(&uio_idr, idev, minor, minor+1, GFP_KERNEL);
-       if (retval >= 0) {
-               idev->minor = retval;
-               retval = 0;
-       } else if (retval == -ENOSPC) {
-               dev_err(idev->dev, "too many uio devices\n");
-               retval = -EINVAL;
-       }
-       mutex_unlock(&minor_lock);
-       return retval;
+	mutex_lock(&minor_lock);
+	retval = idr_alloc(&uio_idr, idev, minor, minor+1, GFP_KERNEL);
+	if (retval >= 0) {
+		idev->minor = retval;
+		retval = 0;
+	} else if (retval == -ENOSPC) {
+		dev_err(idev->dev, "too many uio devices\n");
+		retval = -EINVAL;
+	}
+	mutex_unlock(&minor_lock);
+	return retval;
 }
 #endif
+
 
 static void uio_free_minor(struct uio_device *idev)
 {
@@ -543,6 +552,7 @@ static ssize_t uio_read(struct file *filep, char __user *buf,
 
 		event_count = atomic_read(&idev->event);
 		if (event_count != listener->event_count) {
+			__set_current_state(TASK_RUNNING);
 			if (copy_to_user(buf, &event_count, count))
 				retval = -EFAULT;
 			else {
@@ -835,11 +845,11 @@ int __uio_register_device(struct module *owner,
 	atomic_set(&idev->event, 0);
 
 #ifdef CONFIG_UIO_ASSIGN_MINOR
-       if(info->minor >= 0)
-               ret = uio_use_minor(idev, info->minor);
-       else
+	if(info->minor > 0)
+		ret = uio_use_minor(idev, info->minor);
+	else
 #endif
-               ret = uio_get_minor(idev);
+		ret = uio_get_minor(idev);
 	if (ret)
 		return ret;
 
@@ -903,7 +913,8 @@ void uio_unregister_device(struct uio_info *info)
 
 	uio_dev_del_attributes(idev);
 
-	free_irq(idev->info->irq, idev);
+	if (info->irq && info->irq != UIO_IRQ_CUSTOM)
+		free_irq(info->irq, idev);
 
 	device_destroy(&uio_class, MKDEV(uio_major, idev->minor));
 
@@ -919,6 +930,7 @@ static int __init uio_init(void)
 static void __exit uio_exit(void)
 {
 	release_uio_class();
+	idr_destroy(&uio_idr);
 }
 
 module_init(uio_init)

@@ -44,8 +44,10 @@ static void ohci_work(struct ohci_hcd *);
 
 
 #ifdef CONFIG_USB_PATCH_ON_RTK
+#ifdef CONFIG_USB_EHCI_RTK
 /* Add Workaround to fixed EHCI/OHCI Wrapper can't work simultaneously */
 extern bool RTK_ehci_check_schedule_actived(const char *func);
+#endif
 #endif
 
 #ifdef	CONFIG_PM
@@ -161,6 +163,7 @@ __acquires(ohci->lock)
 	int			autostopped = ohci->autostop;
 
 #ifdef CONFIG_USB_PATCH_ON_RTK
+#ifdef CONFIG_USB_EHCI_RTK
 	/* Add Workaround to fixed EHCI/OHCI Wrapper can't work simultaneously */
 	/* When EHCI schedule actived, don't resume OHCI*/
 	if (RTK_ehci_check_schedule_actived(__func__)) {
@@ -170,6 +173,7 @@ __acquires(ohci->lock)
 		ohci->resuming = 1;
 		init_completion(&ohci->resuming_done);
 	}
+#endif
 #endif
 
 	ohci->autostop = 0;
@@ -334,8 +338,10 @@ static int ohci_bus_suspend (struct usb_hcd *hcd)
 		rc = ohci_rh_suspend (ohci, 0);
 	spin_unlock_irq (&ohci->lock);
 
-	if (rc == 0)
+	if (rc == 0) {
 		del_timer_sync(&ohci->io_watchdog);
+		ohci->prev_frame_no = IO_WATCHDOG_OFF;
+	}
 	return rc;
 }
 

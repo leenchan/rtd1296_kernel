@@ -18,6 +18,7 @@
 #include <linux/atomic.h>
 #include <asm/ptrace.h>
 #include <asm/irq.h>
+#include <asm/sections.h>
 
 /*
  * These correspond to the IORESOURCE_IRQ_* defines in
@@ -102,6 +103,7 @@ typedef irqreturn_t (*irq_handler_t)(int, void *);
  * @flags:	flags (see IRQF_* above)
  * @thread_fn:	interrupt handler function for threaded interrupts
  * @thread:	thread pointer for threaded interrupts
+ * @secondary:	pointer to secondary irqaction (force threading)
  * @thread_flags:	flags related to @thread
  * @thread_mask:	bitmask for keeping track of @thread activity
  * @dir:	pointer to the proc/irq/NN/name entry
@@ -113,6 +115,7 @@ struct irqaction {
 	struct irqaction	*next;
 	irq_handler_t		thread_fn;
 	struct task_struct	*thread;
+	struct irqaction	*secondary;
 	unsigned int		irq;
 	unsigned int		flags;
 	unsigned long		thread_flags;
@@ -122,6 +125,16 @@ struct irqaction {
 } ____cacheline_internodealigned_in_smp;
 
 extern irqreturn_t no_action(int cpl, void *dev_id);
+
+/*
+ * If a (PCI) device interrupt is not connected we set dev->irq to
+ * IRQ_NOTCONNECTED. This causes request_irq() to fail with -ENOTCONN, so we
+ * can distingiush that case from other error returns.
+ *
+ * 0x80000000 is guaranteed to be outside the available range of interrupts
+ * and easy to distinguish from other possible incorrect values.
+ */
+#define IRQ_NOTCONNECTED	(1U << 31)
 
 extern int __must_check
 request_threaded_irq(unsigned int irq, irq_handler_t handler,
@@ -193,6 +206,7 @@ extern void disable_irq(unsigned int irq);
 extern void disable_percpu_irq(unsigned int irq);
 extern void enable_irq(unsigned int irq);
 extern void enable_percpu_irq(unsigned int irq, unsigned int type);
+extern bool irq_percpu_is_enabled(unsigned int irq);
 extern void irq_wake_thread(unsigned int irq, void *dev_id);
 
 /* The following three functions are for the core kernel use only. */
@@ -265,6 +279,9 @@ extern int irq_set_affinity_hint(unsigned int irq, const struct cpumask *m);
 extern int
 irq_set_affinity_notifier(unsigned int irq, struct irq_affinity_notify *notify);
 
+struct cpumask *irq_create_affinity_masks(const struct cpumask *affinity, int nvec);
+int irq_calc_affinity_vectors(const struct cpumask *affinity, int maxvec);
+
 #else /* CONFIG_SMP */
 
 static inline int irq_set_affinity(unsigned int irq, const struct cpumask *m)
@@ -295,6 +312,19 @@ irq_set_affinity_notifier(unsigned int irq, struct irq_affinity_notify *notify)
 {
 	return 0;
 }
+
+static inline struct cpumask *
+irq_create_affinity_masks(const struct cpumask *affinity, int nvec)
+{
+	return NULL;
+}
+
+static inline int
+irq_calc_affinity_vectors(const struct cpumask *affinity, int maxvec)
+{
+	return maxvec;
+}
+
 #endif /* CONFIG_SMP */
 
 /*
@@ -410,10 +440,11 @@ enum
 	NET_TX_SOFTIRQ,
 	NET_RX_SOFTIRQ,
 	BLOCK_SOFTIRQ,
-	BLOCK_IOPOLL_SOFTIRQ,
+	IRQ_POLL_SOFTIRQ,
 	TASKLET_SOFTIRQ,
 	SCHED_SOFTIRQ,
-	HRTIMER_SOFTIRQ,
+	HRTIMER_SOFTIRQ, /* Unused, but kept as tools rely on the
+			    numbering. Sigh! */
 	RCU_SOFTIRQ,    /* Preferable RCU should always be the last softirq */
 
 	NR_SOFTIRQS
@@ -592,10 +623,10 @@ tasklet_hrtimer_init(struct tasklet_hrtimer *ttimer,
 		     clockid_t which_clock, enum hrtimer_mode mode);
 
 static inline
-int tasklet_hrtimer_start(struct tasklet_hrtimer *ttimer, ktime_t time,
-			  const enum hrtimer_mode mode)
+void tasklet_hrtimer_start(struct tasklet_hrtimer *ttimer, ktime_t time,
+			   const enum hrtimer_mode mode)
 {
-	return hrtimer_start(&ttimer->timer, time, mode);
+	hrtimer_start(&ttimer->timer, time, mode);
 }
 
 static inline
@@ -668,5 +699,12 @@ int arch_show_interrupts(struct seq_file *p, int prec);
 extern int early_irq_init(void);
 extern int arch_probe_nr_irqs(void);
 extern int arch_early_irq_init(void);
+
+/*
+ * We want to know which function is an entrypoint of a hardirq or a softirq.
+ */
+#define __irq_entry		 __attribute__((__section__(".irqentry.text")))
+#define __softirq_entry  \
+	__attribute__((__section__(".softirqentry.text")))
 
 #endif

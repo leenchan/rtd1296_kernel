@@ -22,35 +22,80 @@
 #include <linux/of_platform.h>
 #include <linux/of_address.h>
 #include <linux/suspend.h>
+#include <soc/realtek/rtk_chip.h>
 
-#include <soc/realtek/rtd129x_cpu.h>
 #include "../host/xhci.h" //hcy test added
 #include "core.h" //hcy test added
 
 #define WRAP_CTR_reg  0x0
-#define USB_TMP_reg   0x50
-#define USB_TMP_reg_1 0x54
-#define USB_TMP_reg_2 0x58
-#define USB_TMP_reg_3 0x5c
 #define USB2_PHY_reg  0x70
-#define USB_TYPEC_CTRL_CC1_0 0x14c //0x9801334c
 
-#define EN_SWITCH BIT(29)
+#define EN_PHY_PLL_PORT0 BIT(12)
+#define EN_PHY_PLL_PORT1 BIT(13)
 #define DISABLE_MULTI_REQ BIT(1)
+#define USB2_PHY_SWITCH_MASK 0x707
+#define USB2_PHY_SWITCH_DEVICE 0x0
+#define USB2_PHY_SWITCH_HOST 0x606
 
 struct dwc3_rtk {
 	struct platform_device	*usb2_phy;
 	struct platform_device	*usb3_phy;
 	struct device		*dev;
 
-	void __iomem 		*regs;
-	size_t      		regs_size;
+	void __iomem		*regs;
+	size_t		regs_size;
 
 	struct clk		*clk;
-	struct platform_device  *dwc; //hjcy added
+	struct platform_device *dwc; //hjcy added
 
 	struct work_struct work;
 };
+
+#ifdef CONFIG_RTK_USB3PHY
+extern void rtk_usb3_phy_toggle(struct usb_phy *usb3_phy, bool isConnect,
+	    int port);
+#endif
+
+void RTK_dwc3_usb3_phy_toggle(struct device *hcd_dev, bool isConnect, int port)
+{
+	struct device *dwc3_dev = NULL;
+	struct dwc3 *dwc = NULL;
+	if (hcd_dev == NULL) return;
+
+	dwc3_dev = hcd_dev->parent;
+	if (dwc3_dev == NULL) return;
+
+	dwc = dev_get_drvdata(dwc3_dev);
+#ifdef CONFIG_RTK_USB3PHY
+	dev_dbg(dwc3_dev, "%s port=%d\n", __func__, port);
+	if (dwc != NULL)
+		rtk_usb3_phy_toggle(dwc->usb3_phy, isConnect, port);
+#endif
+}
+
+#ifdef CONFIG_RTK_USB2PHY
+extern void rtk_usb2_phy_toggle(struct usb_phy *usb3_phy, bool isConnect,
+	    int port);
+#endif
+
+int RTK_dwc3_usb2_phy_toggle(struct device *hcd_dev, bool isConnect, int port)
+{
+	struct device *dwc3_dev = NULL;
+	struct dwc3 *dwc = NULL;
+	if (hcd_dev == NULL) return -1;
+
+	dwc3_dev = hcd_dev->parent;
+	if (dwc3_dev == NULL) return -1;
+
+	dwc = dev_get_drvdata(dwc3_dev);
+	if (dwc == NULL) return -1;
+
+#ifdef CONFIG_RTK_USB2PHY
+	dev_dbg(dwc3_dev, "%s port=%d\n", __func__, port);
+	rtk_usb2_phy_toggle(dwc->usb2_phy, isConnect, port);
+#endif
+	return 0;
+}
 
 static int dwc3_rtk_register_phys(struct dwc3_rtk *rtk)
 {
@@ -106,6 +151,7 @@ err1:
 	return ret;
 }
 
+/*
 static int dwc3_rtk_remove_child(struct device *dev, void *unused)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -114,41 +160,59 @@ static int dwc3_rtk_remove_child(struct device *dev, void *unused)
 
 	return 0;
 }
+*/
 
-static void dwc3_rtk_int_dr_mode(struct dwc3_rtk *rtk, int dr_mode) {
+static void dwc3_rtk_int_dr_mode(struct dwc3_rtk *rtk, int dr_mode)
+{
 	switch (dr_mode) {
-		case USB_DR_MODE_PERIPHERAL:
-			writel(0x0, rtk->regs + USB_TMP_reg_2);//writel(0x0, IOMEM(0xfe013258));         // in wrapper
-			writel(0x0, rtk->regs + USB2_PHY_reg);//writel(0x0, IOMEM(0xfe013270));         // set Dpm 1'b0
+	case USB_DR_MODE_PERIPHERAL:
+		writel(USB2_PHY_SWITCH_DEVICE |
+			    (~USB2_PHY_SWITCH_MASK & readl(rtk->regs + USB2_PHY_reg)),
+			    rtk->regs + USB2_PHY_reg);
 		break;
-		case USB_DR_MODE_HOST:
-			writel(0x7, rtk->regs + USB_TMP_reg_2);//writel(0x7, IOMEM(0xfe013258));         // in wrapper
-			writel(0x606, rtk->regs + USB2_PHY_reg);//writel(0x606, IOMEM(0xfe013270));       // set Dpm 1'b1
+	case USB_DR_MODE_HOST:
+		writel(USB2_PHY_SWITCH_HOST |
+			    (~USB2_PHY_SWITCH_MASK & readl(rtk->regs + USB2_PHY_reg)),
+			    rtk->regs + USB2_PHY_reg);
 		break;
-		case USB_DR_MODE_OTG:
-			writel(BIT(11), rtk->regs + USB2_PHY_reg);
-			dev_info(rtk->dev, "%s: USB_DR_MODE_OTG USB_TMP_reg_2=BIT(11)\n", __func__);
+	case USB_DR_MODE_OTG:
+		//writel(BIT(11) , rtk->regs + USB2_PHY_reg);
+		dev_info(rtk->dev, "%s: USB_DR_MODE_OTG\n", __func__);
 		break;
 	}
 }
 
-static int dwc3_rtk_init(struct dwc3_rtk *rtk) {
+static int dwc3_rtk_init(struct dwc3_rtk *rtk)
+{
 	struct device		*dev = rtk->dev;
-	struct device_node	*node = dev->of_node;
+	//struct device_node	*node = dev->of_node;
 	void __iomem		*regs = rtk->regs;
 
-	if (get_rtd129x_cpu_revision() == RTD129x_CHIP_REVISION_A00) {
+	if ((get_rtd_chip_id() == CHIP_ID_RTD1295 ||
+		    get_rtd_chip_id() == CHIP_ID_RTD1296) &&
+		    get_rtd_chip_revision() == RTD_CHIP_A00) {
 		writel(DISABLE_MULTI_REQ | readl(regs + WRAP_CTR_reg),
 				regs + WRAP_CTR_reg);
-		dev_info(dev, "[bug fixed] 1295 A00: add workaround to disable multiple request for D-Bus");
+		dev_info(dev, "[bug fixed] 1295/1296 A00: add workaround to "
+			    "disable multiple request for D-Bus");
+	}
+
+	if (get_rtd_chip_id() == CHIP_ID_RTD1395 ||
+		    get_rtd_chip_id() == CHIP_ID_RTD1392) {
+		writel(EN_PHY_PLL_PORT1 | readl(regs + USB2_PHY_reg),
+			    regs + USB2_PHY_reg);
+		dev_info(dev, "[bug fixed] 1395 add workaround to "
+			    "disable usb2 port 2 suspend!");
+
 	}
 	return 0;
 }
 
-extern void rtk_usb_init_power_on(struct device *dev);
-extern int rtk_usb_power_manager_schedule_work(struct device *usb_dev, struct work_struct *work);
+extern void rtk_usb_init_port_power_on(struct device *dev);
+extern int rtk_usb_manager_schedule_work(struct device *usb_dev, struct work_struct *work);
 
-static int dwc3_rtk_probe_dwc3core(struct dwc3_rtk *rtk) {
+static int dwc3_rtk_probe_dwc3core(struct dwc3_rtk *rtk)
+{
 	struct device		*dev = rtk->dev;
 	struct device_node	*node = dev->of_node;
 	struct device_node	*next_node;
@@ -166,32 +230,39 @@ static int dwc3_rtk_probe_dwc3core(struct dwc3_rtk *rtk) {
 		//node =  of_find_compatible_node(NULL, NULL, "synopsys,dwc3");
 		next_node = of_get_next_child(node, NULL);
 		if (next_node != NULL) {
-			int dr_mode = of_usb_get_dr_mode(next_node);
-			dwc3_rtk_int_dr_mode(rtk, dr_mode);
+			struct device *next_dev;
+			int dr_mode;
+
 			rtk->dwc = of_find_device_by_node(next_node);
+			next_dev = &(rtk->dwc)->dev;
+			dr_mode = usb_get_dr_mode(next_dev);
+			dwc3_rtk_int_dr_mode(rtk, dr_mode);
+
+			if (dr_mode == USB_DR_MODE_HOST)
+				rtk_usb_init_port_power_on(dev);
 		}
 	}
-
-	rtk_usb_init_power_on(dev);
 
 	return ret;
 }
 
-static void dwc3_rtk_probe_work(struct work_struct *work) {
+static void dwc3_rtk_probe_work(struct work_struct *work)
+{
 	struct dwc3_rtk *rtk = container_of(work, struct dwc3_rtk, work);
 	struct device		*dev = rtk->dev;
 	int    ret = 0;
 
 	unsigned long probe_time = jiffies;
 
-	dev_info(dev, "%s Start ...\n",__func__);
+	dev_info(dev, "%s Start ...\n", __func__);
 
 	ret = dwc3_rtk_probe_dwc3core(rtk);
 
 	if (ret)
 		dev_err(dev, "%s failed to add dwc3 core\n", __func__);
 
-	dev_info(dev, "%s End ... ok! (take %d ms)\n", __func__, jiffies_to_msecs(jiffies - probe_time));
+	dev_info(dev, "%s End ... ok! (take %d ms)\n", __func__,
+		    jiffies_to_msecs(jiffies - probe_time));
 }
 
 static int dwc3_rtk_probe(struct platform_device *pdev)
@@ -233,20 +304,7 @@ static int dwc3_rtk_probe(struct platform_device *pdev)
 		goto err1;
 	}
 
-#if 0
-	clk = devm_clk_get(dev, "usbdrd30");
-	if (IS_ERR(clk)) {
-		dev_err(dev, "couldn't get clock\n");
-		ret = -EINVAL;
-		goto err1;
-	}
-#endif
 	rtk->dev	= dev;
-#if 0
-	rtk->clk	= clk;
-
-	clk_prepare_enable(rtk->clk);
-#endif
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
@@ -264,10 +322,22 @@ static int dwc3_rtk_probe(struct platform_device *pdev)
 	rtk->regs_size = resource_size(res);
 
 	if (node) {
+		if (of_property_read_bool(node, "dis_u3_port")) {
+			void __iomem *usb_hmac_ctr0 = rtk->regs + 0x60;
+			int val_u3port_dis = BIT(8) | readl(usb_hmac_ctr0);
+
+			writel(val_u3port_dis, usb_hmac_ctr0);
+
+			dev_info(rtk->dev, "%s: disable usb 3.0 port (usb_hmac_ctr0=%x)\n",
+				    __func__, readl(usb_hmac_ctr0));
+		}
+	}
+
+	if (node) {
 		if (of_property_read_bool(node, "delay_probe_work")) {
 			INIT_WORK(&rtk->work, dwc3_rtk_probe_work);
 			if (of_property_read_bool(node, "ordered_probe"))
-				rtk_usb_power_manager_schedule_work(dev, &rtk->work);
+				rtk_usb_manager_schedule_work(dev, &rtk->work);
 			else
 				schedule_work(&rtk->work);
 		} else {
@@ -282,14 +352,12 @@ static int dwc3_rtk_probe(struct platform_device *pdev)
 		ret = -ENODEV;
 		goto err2;
 	}
-	dev_info(dev, "dwc3_rtk_probe ok! (take %d ms)\n", jiffies_to_msecs(jiffies - probe_time));
+	dev_info(dev, "dwc3_rtk_probe ok! (take %d ms)\n",
+		    jiffies_to_msecs(jiffies - probe_time));
 
 	return 0;
 
 err2:
-#if 0
-	clk_disable_unprepare(clk);
-#endif
 err1:
 	return ret;
 }
@@ -311,7 +379,7 @@ static int dwc3_rtk_remove(struct platform_device *pdev)
 static void dwc3_rtk_shutdown(struct platform_device *pdev)
 {
 	struct dwc3_rtk	*rtk = platform_get_drvdata(pdev);
-	struct device	*dev = &pdev->dev;
+	struct device		*dev = &pdev->dev;
 
 	dev_info(dev, "dwc3_rtk_shutdown start ...\n");
 
@@ -327,6 +395,7 @@ static void dwc3_rtk_shutdown(struct platform_device *pdev)
 
 #ifdef CONFIG_OF
 static const struct of_device_id rtk_dwc3_match[] = {
+	{ .compatible = "Realtek,dwc3" },
 	{ .compatible = "Realtek,rtk119x-dwc3" },
 	{ .compatible = "Realtek,rtd129x-dwc3-drd" },
 	{ .compatible = "Realtek,rtd129x-dwc3-u2h" },
@@ -337,12 +406,10 @@ MODULE_DEVICE_TABLE(of, rtk_dwc3_match);
 #endif
 
 #ifdef CONFIG_PM_SLEEP
-extern struct dwc3 *dwc_substance ; //hcy added
-
 static int dwc3_rtk_suspend(struct device *dev)
 {
 	dev_info(dev, "[USB] Enter %s", __func__);
-	if (RTK_PM_STATE == PM_SUSPEND_STANDBY){
+	if (RTK_PM_STATE == PM_SUSPEND_STANDBY) {
 		//For idle mode
 		dev_info(dev, "[USB] %s Idle mode\n", __func__);
 		goto out;
@@ -350,13 +417,6 @@ static int dwc3_rtk_suspend(struct device *dev)
 	//For suspend mode
 	dev_info(dev,  "[USB] %s Suspend mode\n", __func__);
 
-
-//hcy removed	clk_disable(rtk->clk);
-
-#if 0
-	/* reset usb3 */
-	writel(readl(IOMEM(0xfe000000)) & ~(BIT(2)|BIT(4)), IOMEM(0xfe000000));
-#endif
 out:
 	dev_info(dev, "[USB] Exit %s", __func__);
 	return 0;
@@ -365,10 +425,10 @@ out:
 static int dwc3_rtk_resume(struct device *dev)
 {
 	struct dwc3_rtk *rtk = dev_get_drvdata(dev);
-	struct dwc3 * dwc = platform_get_drvdata(rtk->dwc);
+	struct dwc3 *dwc = platform_get_drvdata(rtk->dwc);
 
 	dev_info(dev, "[USB] Enter %s", __func__);
-	if (RTK_PM_STATE == PM_SUSPEND_STANDBY){
+	if (RTK_PM_STATE == PM_SUSPEND_STANDBY) {
 		//For idle mode
 		dev_info(dev, "[USB] %s Idle mode\n", __func__);
 		goto out;
@@ -377,14 +437,6 @@ static int dwc3_rtk_resume(struct device *dev)
 	dev_info(dev,  "[USB] %s Suspend mode\n", __func__);
 
 	dwc3_rtk_init(rtk);
-
-#if 0
-	/* release rst of usb3 */
-	writel(readl(IOMEM(0xfe000000)) | (BIT(2)|BIT(4)), IOMEM(0xfe000000));
-	mdelay(5);
-#endif
-//hcy removed	clk_enable(rtk->clk);
-
 
 	dwc3_rtk_int_dr_mode(rtk, dwc->dr_mode);
 
@@ -415,7 +467,7 @@ static struct platform_driver dwc3_rtk_driver = {
 		.of_match_table = of_match_ptr(rtk_dwc3_match),
 		.pm	= DEV_PM_OPS,
 	},
-	.shutdown	= dwc3_rtk_shutdown,
+	.shutdown 	= dwc3_rtk_shutdown,
 };
 
 module_platform_driver(dwc3_rtk_driver);

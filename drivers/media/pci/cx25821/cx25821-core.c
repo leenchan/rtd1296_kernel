@@ -871,6 +871,10 @@ static int cx25821_dev_setup(struct cx25821_dev *dev)
 	dev->nr = ++cx25821_devcount;
 	sprintf(dev->name, "cx25821[%d]", dev->nr);
 
+	if (dev->nr >= ARRAY_SIZE(card)) {
+		CX25821_INFO("dev->nr >= %zd", ARRAY_SIZE(card));
+		return -ENODEV;
+	}
 	if (dev->pci->device != 0x8210) {
 		pr_info("%s(): Exiting. Incorrect Hardware device = 0x%02x\n",
 			__func__, dev->pci->device);
@@ -885,9 +889,6 @@ static int cx25821_dev_setup(struct cx25821_dev *dev)
 		dev->channels[i].id = i;
 		dev->channels[i].sram_channels = &cx25821_sram_channels[i];
 	}
-
-	if (dev->nr > 1)
-		CX25821_INFO("dev->nr > 1!");
 
 	/* board config */
 	dev->board = 1;		/* card[dev->nr]; */
@@ -1301,15 +1302,10 @@ static int cx25821_initdev(struct pci_dev *pci_dev,
 
 		goto fail_unregister_device;
 	}
-	dev->alloc_ctx = vb2_dma_sg_init_ctx(&pci_dev->dev);
-	if (IS_ERR(dev->alloc_ctx)) {
-		err = PTR_ERR(dev->alloc_ctx);
-		goto fail_unregister_pci;
-	}
 
 	err = cx25821_dev_setup(dev);
 	if (err)
-		goto fail_free_ctx;
+		goto fail_unregister_pci;
 
 	/* print pci info */
 	pci_read_config_byte(pci_dev, PCI_CLASS_REVISION, &dev->pci_rev);
@@ -1319,7 +1315,8 @@ static int cx25821_initdev(struct pci_dev *pci_dev,
 		dev->pci_lat, (unsigned long long)dev->base_io_addr);
 
 	pci_set_master(pci_dev);
-	if (!pci_dma_supported(pci_dev, 0xffffffff)) {
+	err = pci_set_dma_mask(pci_dev, 0xffffffff);
+	if (err) {
 		pr_err("%s/0: Oops: no 32bit PCI DMA ???\n", dev->name);
 		err = -EIO;
 		goto fail_irq;
@@ -1339,8 +1336,6 @@ fail_irq:
 	pr_info("cx25821_initdev() can't get IRQ !\n");
 	cx25821_dev_unregister(dev);
 
-fail_free_ctx:
-	vb2_dma_sg_cleanup_ctx(dev->alloc_ctx);
 fail_unregister_pci:
 	pci_disable_device(pci_dev);
 fail_unregister_device:
@@ -1364,7 +1359,6 @@ static void cx25821_finidev(struct pci_dev *pci_dev)
 		free_irq(pci_dev->irq, dev);
 
 	cx25821_dev_unregister(dev);
-	vb2_dma_sg_cleanup_ctx(dev->alloc_ctx);
 	v4l2_device_unregister(v4l2_dev);
 	kfree(dev);
 }

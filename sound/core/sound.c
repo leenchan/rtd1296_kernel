@@ -330,13 +330,10 @@ int snd_unregister_device(struct device *dev)
 }
 EXPORT_SYMBOL(snd_unregister_device);
 
-#ifdef CONFIG_PROC_FS
+#ifdef CONFIG_SND_PROC_FS
 /*
  *  INFO PART
  */
-
-static struct snd_info_entry *snd_minor_info_entry;
-
 static const char *snd_device_type_name(int type)
 {
 	switch (type) {
@@ -354,9 +351,11 @@ static const char *snd_device_type_name(int type)
 		return "sequencer";
 	case SNDRV_DEVICE_TYPE_TIMER:
 		return "timer";
-    case SNDRV_DEVICE_TYPE_COMPRESS:
-        return "compress audio";
-    default:
+#ifdef CONFIG_RTK_PLATFORM
+	case SNDRV_DEVICE_TYPE_COMPRESS:
+		return "compress audio";
+#endif /* CONFIG_RTK_PLATFORM */
+	 default:
 		return "?";
 	}
 }
@@ -391,23 +390,12 @@ int __init snd_minor_info_init(void)
 	struct snd_info_entry *entry;
 
 	entry = snd_info_create_module_entry(THIS_MODULE, "devices", NULL);
-	if (entry) {
-		entry->c.text.read = snd_minor_info_read;
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
-	snd_minor_info_entry = entry;
-	return 0;
+	if (!entry)
+		return -ENOMEM;
+	entry->c.text.read = snd_minor_info_read;
+	return snd_info_register(entry); /* freed in error path */
 }
-
-int __exit snd_minor_info_done(void)
-{
-	snd_info_free_entry(snd_minor_info_entry);
-	return 0;
-}
-#endif /* CONFIG_PROC_FS */
+#endif /* CONFIG_SND_PROC_FS */
 
 /*
  *  INIT PART
@@ -425,7 +413,6 @@ static int __init alsa_sound_init(void)
 		unregister_chrdev(major, "alsa");
 		return -ENOMEM;
 	}
-	snd_info_minor_register();
 #ifndef MODULE
 	pr_info("Advanced Linux Sound Architecture Driver Initialized.\n");
 #endif
@@ -434,7 +421,6 @@ static int __init alsa_sound_init(void)
 
 static void __exit alsa_sound_exit(void)
 {
-	snd_info_minor_unregister();
 	snd_info_done();
 	unregister_chrdev(major, "alsa");
 }

@@ -1,10 +1,10 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2002  
+* Copyright c                  Realtek Semiconductor Corporation, 2002
 * All rights reserved.
-* 
+*
 * Program : Header File for RTL utilities
-* Abstract : 
-* Author : 
+* Abstract :
+* Author :
 * $Id: rtl_utils.h,v 1.1 2007-12-21 10:29:52 davidhsu Exp $
 *
 * This program is free software; you can redistribute it and/or modify
@@ -42,7 +42,7 @@ void rtl_free(void *APTR);
 	/*Turn on In-memory "ethereal" like pkt sniffing code.*/
 	#define START_SNIFFING rtl8651_romerealRecord
 #else
-	#define START_SNIFFING(x,y) do{}while(0)	
+	#define START_SNIFFING(x,y) do{}while(0)
 #endif
 
 #ifdef CONFIG_RTL865X_ROMEPERF
@@ -51,8 +51,8 @@ void rtl_free(void *APTR);
 	#define PROFILING_START rtl8651_romeperfEnterPoint
 	#define PROFILING_END	rtl8651_romeperfExitPoint
 #else
-	#define PROFILING_START(x)  do{}while(0)	
-	#define PROFILING_END(x) do{}while(0)	
+	#define PROFILING_START(x)  do{}while(0)
+	#define PROFILING_END(x) do{}while(0)
 #endif
 
 /*===================================================================

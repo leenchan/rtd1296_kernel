@@ -81,7 +81,7 @@ static void stmmac_default_data(struct plat_stmmacenet_data *plat)
 	plat->mdio_bus_data->phy_mask = 0;
 
 	plat->dma_cfg->pbl = 32;
-	plat->dma_cfg->burst_len = DMA_AXI_BLEN_256;
+	/* TODO: AXI */
 
 	/* Set default value for multicast hash bins */
 	plat->multicast_filter_bins = HASH_TABLE_SIZE;
@@ -115,8 +115,8 @@ static int quark_default_data(struct plat_stmmacenet_data *plat,
 	plat->mdio_bus_data->phy_mask = 0;
 
 	plat->dma_cfg->pbl = 16;
-	plat->dma_cfg->burst_len = DMA_AXI_BLEN_256;
 	plat->dma_cfg->fixed_burst = 1;
+	/* AXI (TODO) */
 
 	/* Set default value for multicast hash bins */
 	plat->multicast_filter_bins = HASH_TABLE_SIZE;
@@ -163,7 +163,7 @@ static int stmmac_pci_probe(struct pci_dev *pdev,
 {
 	struct stmmac_pci_info *info = (struct stmmac_pci_info *)id->driver_data;
 	struct plat_stmmacenet_data *plat;
-	struct stmmac_priv *priv;
+	struct stmmac_resources res;
 	int i;
 	int ret;
 
@@ -183,7 +183,7 @@ static int stmmac_pci_probe(struct pci_dev *pdev,
 		return -ENOMEM;
 
 	/* Enable pci device */
-	ret = pcim_enable_device(pdev);
+	ret = pci_enable_device(pdev);
 	if (ret) {
 		dev_err(&pdev->dev, "%s: ERROR: failed to enable device\n",
 			__func__);
@@ -214,19 +214,12 @@ static int stmmac_pci_probe(struct pci_dev *pdev,
 
 	pci_enable_msi(pdev);
 
-	priv = stmmac_dvr_probe(&pdev->dev, plat, pcim_iomap_table(pdev)[i]);
-	if (IS_ERR(priv)) {
-		dev_err(&pdev->dev, "%s: main driver probe failed\n", __func__);
-		return PTR_ERR(priv);
-	}
-	priv->dev->irq = pdev->irq;
-	priv->wol_irq = pdev->irq;
+	memset(&res, 0, sizeof(res));
+	res.addr = pcim_iomap_table(pdev)[i];
+	res.wol_irq = pdev->irq;
+	res.irq = pdev->irq;
 
-	pci_set_drvdata(pdev, priv->dev);
-
-	dev_dbg(&pdev->dev, "STMMAC PCI driver registration completed\n");
-
-	return 0;
+	return stmmac_dvr_probe(&pdev->dev, plat, &res);
 }
 
 /**
@@ -238,28 +231,44 @@ static int stmmac_pci_probe(struct pci_dev *pdev,
  */
 static void stmmac_pci_remove(struct pci_dev *pdev)
 {
-	struct net_device *ndev = pci_get_drvdata(pdev);
-
-	stmmac_dvr_remove(ndev);
+	stmmac_dvr_remove(&pdev->dev);
+	pci_disable_device(pdev);
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int stmmac_pci_suspend(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
-	struct net_device *ndev = pci_get_drvdata(pdev);
+	int ret;
 
-	return stmmac_suspend(ndev);
+	ret = stmmac_suspend(dev);
+	if (ret)
+		return ret;
+
+	ret = pci_save_state(pdev);
+	if (ret)
+		return ret;
+
+	pci_disable_device(pdev);
+	pci_wake_from_d3(pdev, true);
+	return 0;
 }
 
 static int stmmac_pci_resume(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
-	struct net_device *ndev = pci_get_drvdata(pdev);
+	int ret;
 
-	return stmmac_resume(ndev);
+	pci_restore_state(pdev);
+	pci_set_power_state(pdev, PCI_D0);
+
+	ret = pci_enable_device(pdev);
+	if (ret)
+		return ret;
+
+	pci_set_master(pdev);
+
+	return stmmac_resume(dev);
 }
-#endif
 
 static SIMPLE_DEV_PM_OPS(stmmac_pm_ops, stmmac_pci_suspend, stmmac_pci_resume);
 

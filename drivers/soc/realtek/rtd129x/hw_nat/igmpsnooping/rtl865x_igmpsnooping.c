@@ -1,7 +1,7 @@
 /*
 * Program :  igmp snooping function
-* Abstract : 
-* Author :qinjunjie 
+* Abstract :
+* Author :qinjunjie
 * Email:qinjunjie1980@hotmail.com
 *
 *  Copyright (c) 2011 Realtek Semiconductor Corp.
@@ -35,7 +35,7 @@
 #include "../common/rtl865x_eventMgr.h"
 #endif
 
-static struct rtl_multicastModule rtl_mCastModuleArray[MAX_MCAST_MODULE_NUM];    
+static struct rtl_multicastModule rtl_mCastModuleArray[MAX_MCAST_MODULE_NUM];
 #if defined(__linux__) && defined(__KERNEL__)
 static struct timer_list igmpSysTimer;	/*igmp timer*/
 #endif
@@ -56,8 +56,8 @@ static uint32 rtl_hashMask=0;
 
 /*the system up time*/
 static uint32 rtl_startTime;
-static uint32 rtl_sysUpSeconds;       
-     
+static uint32 rtl_sysUpSeconds;
+
 #if defined (CONFIG_RTL_HARDWARE_MULTICAST)
 static rtl_multicastEventContext_t reportEventContext;
 static rtl_multicastEventContext_t timerEventContext;
@@ -112,7 +112,7 @@ static uint16 rtl_checksum(uint8 *packetBuf, uint32 packetLen);
 static uint32 rtl_getGroupFwdPortMask(struct rtl_groupEntry * groupEntry, uint32 enableSourceList, uint32 sysTime);
 static void rtl_checkSourceTimer(struct rtl_groupEntry * groupEntry , struct rtl_sourceEntry * sourceEntry);
 static uint32 rtl_getSourceFwdPortMask(struct rtl_groupEntry * groupEntry,uint32 *sourceAddr, uint32 sysTime);
-//static void rtl_checkGroupFilterTimer(struct rtl_groupEntry *groupEntry);             
+//static void rtl_checkGroupFilterTimer(struct rtl_groupEntry *groupEntry);
 static void rtl_checkGroupEntryTimer(struct rtl_groupEntry * groupEntry,uint32 enableSourceList, struct rtl_groupEntry ** hashTable);
 
 static uint32  rtl_getMulticastRouterPortMask(uint32 moduleIndex, uint32 ipVersion, uint32 sysTime);
@@ -130,13 +130,13 @@ static void  rtl_parseMacFrame(uint32 moduleIndex, uint8* MacFrame, uint32 verif
 static void rtl_snoopQuerier(uint32 moduleIndex, uint32 ipVersion, uint32 portNum);
 static uint32 rtl_processQueries(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8* pktBuf, uint32 pktLen);
 /*Process Report Packet*/
-static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf); // process join report packet 
+static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf); // process join report packet
 static  uint32 rtl_processLeave(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf); //process leave/done report packet
-static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf); //process MODE_IS_INCLUDE report packet 
+static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf); //process MODE_IS_INCLUDE report packet
 static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 portNum, uint8 *pktBuf); //process MODE_IS_EXCLUDE report packet
 static  int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf); //process CHANGE_TO_INCLUDE_MODE report packet
 static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 portNum, uint8 *pktBuf); //process CHANGE_TO_EXCLUDE_MODE report packet
-static  int32 rtl_processAllow(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf); //process ALLOW_NEW_SOURCES report packet 
+static  int32 rtl_processAllow(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf); //process ALLOW_NEW_SOURCES report packet
 static  int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNum, uint8 *pktBuf); //process BLOCK_OLD_SOURCES report packet
 static  uint32 rtl_processIgmpv3Mldv2Reports(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf);
 
@@ -156,7 +156,7 @@ static void rtl_multicastSysTimerDestroy(void);
 /************************************************
 			Implementation
   ************************************************/
-  
+
 /**************************
 	Initialize
 **************************/
@@ -172,17 +172,17 @@ int32 rtl_initMulticastSnooping(struct rtl_mCastSnoopingGlobalConfig mCastSnoopi
 	uint32 maxHashTableSize=MAX_HASH_TABLE_SIZE;
 	for(i=0; i<MAX_MCAST_MODULE_NUM; i++)
 	{
-		memset(&(rtl_mCastModuleArray[i]), 0,sizeof(struct rtl_multicastModule));	
-		
+		memset(&(rtl_mCastModuleArray[i]), 0,sizeof(struct rtl_multicastModule));
+
 		for(j=0; j<6; j++)
 		{
 			rtl_mCastModuleArray[i].rtl_gatewayMac[j]=0;
 		}
-		
+
 		rtl_mCastModuleArray[i].rtl_gatewayIpv4Addr=0;
-		rtl_mCastModuleArray[i].rtl_ipv4HashTable=NULL;	
-		
-		#ifdef CONFIG_RTL_MLD_SNOOPING	
+		rtl_mCastModuleArray[i].rtl_ipv4HashTable=NULL;
+
+		#ifdef CONFIG_RTL_MLD_SNOOPING
 		for(j=0; j<4; j++)
 		{
 			rtl_mCastModuleArray[i].rtl_gatewayIpv6Addr[j]=0;
@@ -264,21 +264,21 @@ int32 rtl_initMulticastSnooping(struct rtl_mCastSnoopingGlobalConfig mCastSnoopi
 		      if(mCastSnoopingGlobalConfig.hashTableSize>=maxHashTableSize)
 		      {
 			      rtl_hashTableSize=maxHashTableSize;
-		
+
 			      break;
 		      }
 	 	      maxHashTableSize=maxHashTableSize>>1;
-		
+
 	        }
         }
 
       rtl_hashMask=rtl_hashTableSize-1;
-	  
-	  
+
+
       if(mCastSnoopingGlobalConfig.maxGroupNum==0)
       {
 	      rtl_totalMaxGroupCnt=DEFAULT_MAX_GROUP_COUNT;
-      }	
+      }
       else
       {
 		rtl_totalMaxGroupCnt=mCastSnoopingGlobalConfig.maxGroupNum;
@@ -288,29 +288,29 @@ int32 rtl_initMulticastSnooping(struct rtl_mCastSnoopingGlobalConfig mCastSnoopi
       rtl_groupMemory=NULL;
       rtl_sourceMemory=NULL;
 
-      rtl_groupEntryPool=rtl_initGroupEntryPool(rtl_totalMaxGroupCnt); 
+      rtl_groupEntryPool=rtl_initGroupEntryPool(rtl_totalMaxGroupCnt);
       if(rtl_groupEntryPool==NULL)
       {
 	      return FAILED;
       }
-	  
+
 
 	if(mCastSnoopingGlobalConfig.maxSourceNum==0)
       {
 	      rtl_totalMaxSourceCnt=DEFAULT_MAX_SOURCE_COUNT;
-      }	
+      }
       else
       {
             	rtl_totalMaxSourceCnt=mCastSnoopingGlobalConfig.maxSourceNum;
       }
-	  
-	rtl_sourceEntryPool=rtl_initSourceEntryPool(rtl_totalMaxSourceCnt); 
+
+	rtl_sourceEntryPool=rtl_initSourceEntryPool(rtl_totalMaxSourceCnt);
       if(rtl_sourceEntryPool==NULL)
       {
 	      rtl_totalMaxSourceCnt=0;
 	      return FAILED;
       }
-	  
+
 #if defined(__linux__) && defined(__KERNEL__)
 	rtl_multicastSysTimerInit();
 #endif
@@ -336,21 +336,21 @@ int32 rtl_exitMulticastSnooping(void)
 	rtl_hashTableSize=0;
 	rtl_hashMask=0;
 	memset(&rtl_mCastTimerParas,0,sizeof(struct rtl_mCastTimerParameters));
-	
+
 	if(rtl_groupMemory!=NULL)
 	{
-		rtl_glueFree(rtl_groupMemory);	
+		rtl_glueFree(rtl_groupMemory);
 	}
-	
+
 	rtl_totalMaxGroupCnt=0;
 	rtl_groupMemory=NULL;
 	rtl_groupEntryPool=NULL;
-	
-	
+
+
 	if(rtl_sourceMemory!=NULL)
 	{
 		rtl_glueFree(rtl_sourceMemory);
-	}	  
+	}
 
 	rtl_totalMaxSourceCnt=0;
 	rtl_sourceMemory=NULL;
@@ -361,12 +361,12 @@ int32 rtl_exitMulticastSnooping(void)
 #endif
 
 	 return SUCCESS;
-	
+
 }
 
 static  struct rtl_groupEntry* rtl_initGroupEntryPool(uint32 poolSize)
 {
-	
+
 	uint32 idx=0;
 	struct rtl_groupEntry *poolHead=NULL;
 	struct rtl_groupEntry *entryPtr=NULL;
@@ -379,7 +379,7 @@ static  struct rtl_groupEntry* rtl_initGroupEntryPool(uint32 poolSize)
 	/* Allocate memory */
 	poolHead = (struct rtl_groupEntry *)rtl_glueMalloc(sizeof(struct rtl_groupEntry) * poolSize);
 	rtl_groupMemory=(void *)poolHead;
-	
+
 	if (poolHead != NULL)
 	{
 		memset(poolHead, 0,  (poolSize  * sizeof(struct rtl_groupEntry)));
@@ -387,7 +387,7 @@ static  struct rtl_groupEntry* rtl_initGroupEntryPool(uint32 poolSize)
 
 		/* link the whole group entry pool */
 		for (idx = 0 ; idx < poolSize ; idx++, entryPtr++)
-		{	
+		{
 			if(idx==0)
 			{
 				entryPtr->previous=NULL;
@@ -414,12 +414,12 @@ static  struct rtl_groupEntry* rtl_initGroupEntryPool(uint32 poolSize)
 			}
 		}
 	}
-	
+
 out:
 
 	rtl_glueMutexUnlock();	/* UnLock resource */
 	return poolHead;
-	
+
 }
 
 
@@ -433,7 +433,7 @@ static  struct rtl_groupEntry* rtl_allocateGroupEntry(void)
 {
 	struct rtl_groupEntry *ret = NULL;
 
-	rtl_glueMutexLock();	
+	rtl_glueMutexLock();
 		if (rtl_groupEntryPool!=NULL)
 		{
 			ret = rtl_groupEntryPool;
@@ -444,28 +444,28 @@ static  struct rtl_groupEntry* rtl_allocateGroupEntry(void)
 			rtl_groupEntryPool = rtl_groupEntryPool->next;
 			memset(ret, 0, sizeof(struct rtl_groupEntry));
 		}
-		
-	rtl_glueMutexUnlock();	
-	
+
+	rtl_glueMutexUnlock();
+
 	return ret;
 }
 
 // free a group entry and link it back to the group entry pool, default is link to the pool head
-static  void rtl_freeGroupEntry(struct rtl_groupEntry* groupEntryPtr) 
+static  void rtl_freeGroupEntry(struct rtl_groupEntry* groupEntryPtr)
 {
 	if (!groupEntryPtr)
 	{
 		return;
 	}
-		
-	rtl_glueMutexLock();	
+
+	rtl_glueMutexLock();
 		groupEntryPtr->next = rtl_groupEntryPool;
 		if(rtl_groupEntryPool!=NULL)
 		{
 			rtl_groupEntryPool->previous=groupEntryPtr;
 		}
-		rtl_groupEntryPool=groupEntryPtr;	
-	rtl_glueMutexUnlock();	
+		rtl_groupEntryPool=groupEntryPtr;
+	rtl_glueMutexUnlock();
 }
 
 
@@ -492,7 +492,7 @@ static  struct rtl_sourceEntry* rtl_initSourceEntryPool(uint32 poolSize)
 
 		/* link the whole source entry pool */
 		for (idx = 0 ; idx < poolSize ; idx++, entryPtr++)
-		{	
+		{
 			if(idx==0)
 			{
 				entryPtr->previous=NULL;
@@ -517,10 +517,10 @@ static  struct rtl_sourceEntry* rtl_initSourceEntryPool(uint32 poolSize)
 					entryPtr->next = entryPtr + 1;
 				}
 			}
-			
+
 		}
 	}
-	
+
 out:
 	rtl_glueMutexUnlock();	/* UnLock resource */
 	return poolHead;
@@ -538,9 +538,9 @@ static  struct rtl_sourceEntry* rtl_allocateSourceEntry(void)
 {
 	struct rtl_sourceEntry *ret = NULL;
 
-	rtl_glueMutexLock();	
+	rtl_glueMutexLock();
 		if (rtl_sourceEntryPool!=NULL)
-		{	
+		{
 			ret = rtl_sourceEntryPool;
 			if(rtl_sourceEntryPool->next!=NULL)
 			{
@@ -549,30 +549,30 @@ static  struct rtl_sourceEntry* rtl_allocateSourceEntry(void)
 			rtl_sourceEntryPool = rtl_sourceEntryPool->next;
 			memset(ret, 0, sizeof(struct rtl_sourceEntry));
 		}
-		
-	rtl_glueMutexUnlock();	
-	
+
+	rtl_glueMutexUnlock();
+
 	return ret;
 }
 
 // free a group entry and link it back to the group entry pool, default is link to the pool head
-static  void rtl_freeSourceEntry(struct rtl_sourceEntry* sourceEntryPtr) 
+static  void rtl_freeSourceEntry(struct rtl_sourceEntry* sourceEntryPtr)
 {
 	if (!sourceEntryPtr)
 	{
 		return;
 	}
-		
-	rtl_glueMutexLock();	
+
+	rtl_glueMutexLock();
 		sourceEntryPtr->next = rtl_sourceEntryPool;
 		if(rtl_sourceEntryPool!=NULL)
 		{
 			rtl_sourceEntryPool->previous=sourceEntryPtr;
 		}
 
-		rtl_sourceEntryPool=sourceEntryPtr;	
+		rtl_sourceEntryPool=sourceEntryPtr;
 
-	rtl_glueMutexUnlock();	
+	rtl_glueMutexUnlock();
 }
 
 
@@ -593,17 +593,17 @@ struct rtl_groupEntry* rtl_searchGroupEntry(uint32 moduleIndex, uint32 ipVersion
 		groupPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable[hashIndex];
 
 	}
-	
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
 		hashIndex=rtl_hashMask&multicastAddr[3];
 		groupPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable[hashIndex];
 	}
-#endif	
+#endif
 
 	while (groupPtr!=NULL)
-	{	
+	{
 
 #ifdef CONFIG_RTL_MLD_SNOOPING
 		if(ipVersion==IP_VERSION4)
@@ -613,17 +613,17 @@ struct rtl_groupEntry* rtl_searchGroupEntry(uint32 moduleIndex, uint32 ipVersion
 				return groupPtr;
 			}
 		}
-		
+
 		if(ipVersion==IP_VERSION6)
 		{
 			if(	(multicastAddr[0]==groupPtr->groupAddr[0])&&
 				(multicastAddr[1]==groupPtr->groupAddr[1])&&
 				(multicastAddr[2]==groupPtr->groupAddr[2])&&
 				(multicastAddr[3]==groupPtr->groupAddr[3])
-			)	
+			)
 			{
 				return groupPtr;
-				
+
 			}
 		}
 #else
@@ -660,7 +660,7 @@ static void  rtl_linkGroupEntry(struct rtl_groupEntry* groupEntry ,  struct rtl_
 		groupEntry->next = hashTable[hashIndex];
 		hashTable[hashIndex]=groupEntry;
 		hashTable[hashIndex]->previous=NULL;
-		
+
 	}
 	rtl_glueMutexUnlock();//UnLock resource
 
@@ -669,14 +669,14 @@ static void  rtl_linkGroupEntry(struct rtl_groupEntry* groupEntry ,  struct rtl_
 
 /* unlink a group entry from group list */
 static void rtl_unlinkGroupEntry(struct rtl_groupEntry* groupEntry,  struct rtl_groupEntry ** hashTable, uint32 hashIndex)
-{	
+{
 	if(NULL==groupEntry)
 	{
 		return;
 	}
 	else
 	{
-		rtl_glueMutexLock();  /* lock resource*/	
+		rtl_glueMutexLock();  /* lock resource*/
 		/* unlink entry node*/
 		if(groupEntry==hashTable[hashIndex]) /*unlink group list head*/
 		{
@@ -695,7 +695,7 @@ static void rtl_unlinkGroupEntry(struct rtl_groupEntry* groupEntry,  struct rtl_
 			{
 				groupEntry->previous->next=groupEntry->next;
 			}
-			 
+
 			if(groupEntry->next!=NULL)
 			{
 				groupEntry->next->previous=groupEntry->previous;
@@ -703,7 +703,7 @@ static void rtl_unlinkGroupEntry(struct rtl_groupEntry* groupEntry,  struct rtl_
 			groupEntry->previous=NULL;
 			groupEntry->next=NULL;
 		}
-		
+
 		rtl_glueMutexUnlock();//UnLock resource
 	}
 }
@@ -733,12 +733,12 @@ static void rtl_deleteSourceList(struct rtl_groupEntry* groupEntry)
 }
 
 static void rtl_deleteGroupEntry( struct rtl_groupEntry* groupEntry,struct rtl_groupEntry ** hashTable)
-{	
+{
 	if(groupEntry!=NULL)
 	{
-		
+
 		if(groupEntry->ipVersion==IP_VERSION4)
-		{	
+		{
 			rtl_deleteSourceList(groupEntry);
 			rtl_unlinkGroupEntry(groupEntry, hashTable,(groupEntry->groupAddr[0]&rtl_hashMask));
 			rtl_clearGroupEntry(groupEntry);
@@ -752,7 +752,7 @@ static void rtl_deleteGroupEntry( struct rtl_groupEntry* groupEntry,struct rtl_g
 			rtl_freeGroupEntry(groupEntry);
 		}
 	}
-		
+
 }
 
 static struct rtl_sourceEntry* rtl_searchSourceEntry(uint32 ipVersion, uint32 *sourceAddr, struct rtl_groupEntry *groupEntry)
@@ -767,8 +767,8 @@ static struct rtl_sourceEntry* rtl_searchSourceEntry(uint32 ipVersion, uint32 *s
 				return sourcePtr;
 			}
 		}
-		
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 		if(ipVersion==IP_VERSION6)
 		{
 			if(	(sourceAddr[0]==sourcePtr->sourceAddr[0]) &&
@@ -778,7 +778,7 @@ static struct rtl_sourceEntry* rtl_searchSourceEntry(uint32 ipVersion, uint32 *s
 			)
 			{
 				return sourcePtr;
-					
+
 			}
 		}
 #endif
@@ -792,7 +792,7 @@ static int32 rtl_searchSourceAddr(uint32 ipVersion, uint32 *sourceAddr, uint32 *
 {
 	uint32 i=0;
 	uint32 *srcPtr=sourceArray;
-	
+
 	for(i=0; i<elementCount; i++)
 	{
 		if(ipVersion==IP_VERSION4)
@@ -811,15 +811,15 @@ static int32 rtl_searchSourceAddr(uint32 ipVersion, uint32 *sourceAddr, uint32 *
 				(sourceAddr[2]==srcPtr[2])&&\
 				(sourceAddr[3]==srcPtr[3]))
 			{
-			
+
 				return TRUE;
 			}
-			
+
 			srcPtr=srcPtr+4;
 		}
 #endif
 	}
-	
+
 	return FALSE;
 }
 
@@ -831,7 +831,7 @@ static void rtl_linkSourceEntry(struct rtl_groupEntry *groupEntry,  struct rtl_s
 	}
 	else
 	{
-		rtl_glueMutexLock();  /* lock resource*/	
+		rtl_glueMutexLock();  /* lock resource*/
 
 		if(groupEntry->sourceList!=NULL)
 		{
@@ -840,8 +840,8 @@ static void rtl_linkSourceEntry(struct rtl_groupEntry *groupEntry,  struct rtl_s
 		entryNode->next=groupEntry->sourceList;
 		groupEntry->sourceList=entryNode;
 		groupEntry->sourceList->previous=NULL;
-		
-		rtl_glueMutexUnlock();  /* lock resource*/	
+
+		rtl_glueMutexUnlock();  /* lock resource*/
 	}
 }
 
@@ -854,22 +854,22 @@ static void rtl_unlinkSourceEntry(struct rtl_groupEntry *groupEntry, struct rtl_
 	}
 	else
 	{
-		rtl_glueMutexLock();  /* lock resource*/	
-		/* unlink entry node*/ 
+		rtl_glueMutexLock();  /* lock resource*/
+		/* unlink entry node*/
 		if(sourceEntry==groupEntry->sourceList) /*unlink group list head*/
 		{
-	
+
 			groupEntry->sourceList=sourceEntry->next;
 			if(groupEntry->sourceList!=NULL)
 			{
 				groupEntry->sourceList ->previous=NULL;
 			}
-			
+
 			sourceEntry->previous=NULL;
 			sourceEntry->next=NULL;
 		}
 		else
-		{	
+		{
 			if(sourceEntry->previous!=NULL)
 			{
 				sourceEntry->previous->next=sourceEntry->next;
@@ -882,10 +882,10 @@ static void rtl_unlinkSourceEntry(struct rtl_groupEntry *groupEntry, struct rtl_
 			sourceEntry->previous=NULL;
 			sourceEntry->next=NULL;
 		}
-		
+
 		rtl_glueMutexUnlock();//UnLock resource
 	}
-	
+
 
 }
 
@@ -909,8 +909,8 @@ static void rtl_deleteSourceEntry(struct rtl_groupEntry *groupEntry, struct rtl_
 		rtl_freeSourceEntry(sourceEntry);
 	}
 }
-	
-#if 0	
+
+#if 0
 static int32 rtl_checkPortMask(uint8 pktPortMask)
 {
 	int32 i=0;
@@ -924,7 +924,7 @@ static int32 rtl_checkPortMask(uint8 pktPortMask)
 		}
 		portMaskn=portMaskn<<1;
 	}
-	
+
 	if(count==1)
 	{
 		return SUCCESS;
@@ -936,7 +936,7 @@ static int32 rtl_checkPortMask(uint8 pktPortMask)
 }
 
 static uint32 rtl_mapPortMaskToPortNum(uint8 portMask)
-{	
+{
 	int i;
 	for(i=0; i<MAX_SUPPORT_PORT_NUMBER; i++)
 	{
@@ -1005,7 +1005,7 @@ static int32 rtl_checkMCastAddrMapping(uint32 ipVersion, uint32 *ipAddr, uint8* 
 		{
 			return FALSE;
 		}
-		
+
 		if(macAddr[4]!=(uint8)((ipAddr[0]&0x0000ff00)>>8))
 		{
 			return FALSE;
@@ -1035,7 +1035,7 @@ static int32 rtl_checkMCastAddrMapping(uint32 ipVersion, uint32 *ipAddr, uint8* 
 		{
 			return FALSE;
 		}
-		
+
 		if(macAddr[3]!=(uint8)((ipAddr[3]&0x00ff0000)>>16))
 		{
 			return FALSE;
@@ -1045,19 +1045,19 @@ static int32 rtl_checkMCastAddrMapping(uint32 ipVersion, uint32 *ipAddr, uint8* 
 		{
 			return FALSE;
 		}
-		
+
 		if(macAddr[5]!=(uint8)(ipAddr[3]&0x000000ff))
 		{
 			return FALSE;
 		}
-		
+
 		return TRUE;
 	}
 #endif
 	return FALSE;
 }
 
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+#ifdef CONFIG_RTL_MLD_SNOOPING
 static int32 rtl_compareIpv6Addr(uint32* ipv6Addr1, uint32* ipv6Addr2)
 {
 	int i;
@@ -1091,15 +1091,15 @@ static uint16 rtl_checksum(uint8 *packetBuf, uint32 packetLen)
 	/*note: the first bytes of  packetBuf should be two bytes aligned*/
 	uint32  checksum=0;
 	uint32 count=packetLen;
-	uint16   *ptr= (uint16 *) (packetBuf);	
-	
+	uint16   *ptr= (uint16 *) (packetBuf);
+
 	 while(count>1)
 	 {
 		  checksum+= ntohs(*ptr);
 		  ptr++;
 		  count -= 2;
 	 }
-	 
+
 	if(count>0)
 	{
 		checksum+= *(packetBuf+packetLen-1)<<8; /*the last odd byte is treated as bit 15~8 of unsigned short*/
@@ -1122,23 +1122,23 @@ static uint16 rtl_ipv6L3Checksum(uint8 *pktBuf, uint32 pktLen, union pseudoHeade
 	uint16   *ptr;
 
 	/*compute ipv6 pseudo-header checksum*/
-	ptr= (uint16 *) (ipv6PseudoHdr);	
+	ptr= (uint16 *) (ipv6PseudoHdr);
 	for(count=0; count<20; count++) /*the pseudo header is 40 bytes long*/
 	{
 		  checksum+= ntohs(*ptr);
 		  ptr++;
 	}
-	
+
 	/*compute the checksum of mld buffer*/
 	 count=pktLen;
-	 ptr=(uint16 *) (pktBuf);	
+	 ptr=(uint16 *) (pktBuf);
 	 while(count>1)
 	 {
 		  checksum+= ntohs(*ptr);
 		  ptr++;
 		  count -= 2;
 	 }
-	 
+
 	if(count>0)
 	{
 		checksum+= *(pktBuf+pktLen-1)<<8; /*the last odd byte is treated as bit 15~8 of unsigned short*/
@@ -1150,7 +1150,7 @@ static uint16 rtl_ipv6L3Checksum(uint8 *pktBuf, uint32 pktLen, union pseudoHeade
 
 	/* Return checksum */
 	return ((uint16) ~ checksum);
-	
+
 }
 #endif
 
@@ -1160,7 +1160,7 @@ static uint32 rtl_getGroupFwdPortMask(struct rtl_groupEntry * groupEntry, uint32
 	uint32 portMaskn=PORT0_MASK;
 	uint32 fwdPortMask=0;
 	struct rtl_sourceEntry * sourcePtr=NULL;;
-	
+
 	for(i=0; i<MAX_SUPPORT_PORT_NUMBER; i++)
 	{
 		if(enableSourceList==TRUE)
@@ -1183,9 +1183,9 @@ static uint32 rtl_getGroupFwdPortMask(struct rtl_groupEntry * groupEntry, uint32
 					{
 						sourcePtr=sourcePtr->next;
 				 	}
-				
+
 				}
-				
+
 			}
 		}
 		else
@@ -1198,7 +1198,7 @@ static uint32 rtl_getGroupFwdPortMask(struct rtl_groupEntry * groupEntry, uint32
 		portMaskn=portMaskn<<1;
 	}
 
-	
+
 	return fwdPortMask;
 }
 
@@ -1211,8 +1211,8 @@ static void rtl_checkSourceTimer(struct rtl_groupEntry * groupEntry , struct rtl
 	uint32 portMaskn=PORT0_MASK;
 	uint32 deletePortMask=0;
 	for(i=0; i<MAX_SUPPORT_PORT_NUMBER; i++)
-	{	
-	
+	{
+
 		if(sourceEntry->portTimer[i]==0)/*means not exist*/
 		{
 			deletePortMask|=portMaskn;
@@ -1226,10 +1226,10 @@ static void rtl_checkSourceTimer(struct rtl_groupEntry * groupEntry , struct rtl
 					sourceEntry->portTimer[i]=0;
 					deletePortMask|=portMaskn;
 				}
-				
+
 			}
 		}
-		
+
 		portMaskn=portMaskn<<1;
 	}
 
@@ -1238,7 +1238,7 @@ static void rtl_checkSourceTimer(struct rtl_groupEntry * groupEntry , struct rtl
 		rtl_deleteSourceEntry(groupEntry,sourceEntry);
 	}
 
-	
+
 }
 
 static uint32 rtl_getSourceFwdPortMask(struct rtl_groupEntry * groupEntry,uint32 *sourceAddr, uint32 sysTime)
@@ -1256,9 +1256,9 @@ static uint32 rtl_getSourceFwdPortMask(struct rtl_groupEntry * groupEntry,uint32
 		sourceEntry=rtl_searchSourceEntry((uint32)(groupEntry->ipVersion),sourceAddr, groupEntry);
 		for(i=0; i<MAX_SUPPORT_PORT_NUMBER; i++)
 		{
-			
+
 			if(groupEntry->groupFilterTimer[i]<=sysTime)	/*include mode*/
-			{	
+			{
 				if(sourceEntry!=NULL)
 				{
 					if( sourceEntry->portTimer[i]>sysTime)
@@ -1268,7 +1268,7 @@ static uint32 rtl_getSourceFwdPortMask(struct rtl_groupEntry * groupEntry,uint32
 				}
 			}
 			else/*exclude mode*/
-			{	
+			{
 				if(sourceEntry==NULL)
 				{
 					fwdPortMask|=portMaskn;
@@ -1281,11 +1281,11 @@ static uint32 rtl_getSourceFwdPortMask(struct rtl_groupEntry * groupEntry,uint32
 					}
 				}
 			}
-			
+
 			portMaskn=portMaskn<<1;
 		}
 		return fwdPortMask;
-		
+
 	}
 }
 
@@ -1298,15 +1298,15 @@ static void rtl_checkGroupEntryTimer(struct rtl_groupEntry * groupEntry, uint32 
 	uint32 oldFwdPortMask=0;
 	uint32 tmpFwdPortMask=0;
 	#endif
-	
+
 	uint32 newFwdPortMask=0;
 	struct rtl_sourceEntry *sourceEntry=groupEntry->sourceList;
 	struct rtl_sourceEntry *nextSourceEntry=NULL;
-	
+
 	#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
 	oldFwdPortMask=rtl_getGroupFwdPortMask(groupEntry, enableSourceList, rtl_sysUpSeconds?(rtl_sysUpSeconds-1):0);
 	#endif
-	
+
 	while(sourceEntry!=NULL)
 	{
 		nextSourceEntry=sourceEntry->next;
@@ -1316,18 +1316,18 @@ static void rtl_checkGroupEntryTimer(struct rtl_groupEntry * groupEntry, uint32 
 		rtl_checkSourceTimer(groupEntry, sourceEntry);
 		sourceEntry=nextSourceEntry;
 	}
-	
+
 	newFwdPortMask=rtl_getGroupFwdPortMask(groupEntry, enableSourceList, rtl_sysUpSeconds);
 
 
 	if(newFwdPortMask==0) /*none active port*/
 	{
-		rtl_deleteGroupEntry(groupEntry,hashTable);	
+		rtl_deleteGroupEntry(groupEntry,hashTable);
 	}
 
 	#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
 	if((oldFwdPortMask!=newFwdPortMask) ||(newFwdPortMask==0))
-	{	
+	{
 		timerEventContext.sourceAddr[0]=0;
 
 		tmpFwdPortMask=oldFwdPortMask&(~newFwdPortMask);
@@ -1335,13 +1335,13 @@ static void rtl_checkGroupEntryTimer(struct rtl_groupEntry * groupEntry, uint32 
 		{
 			tmpFwdPortMask=newFwdPortMask & (~oldFwdPortMask);
 		}
-		
+
 #ifdef CONFIG_PROC_FS
 		rtl_mCastModuleArray[timerEventContext.moduleIndex].expireEventCnt++;
 #endif
 		timerEventContext.portMask=(uint32)tmpFwdPortMask;
 		rtl865x_raiseEvent(EVENT_UPDATE_MCAST, &timerEventContext);
-		
+
 	}
 	#endif
 
@@ -1352,18 +1352,18 @@ static void rtl_checkGroupEntryTimer(struct rtl_groupEntry * groupEntry, uint32 
 static int32 rtl_initHashTable(uint32 moduleIndex, uint32 hashTableSize)
 {
 	uint32 i=0;
-	
+
 	/* Allocate memory */
 	rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable=NULL;
 	rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable = (struct rtl_groupEntry **)rtl_glueMalloc(4 * hashTableSize);
 	if (rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable!= NULL)
 	{
 		for (i = 0 ; i < hashTableSize ; i++)
-		{	
+		{
 			rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable[i]=NULL;
 		}
 
-#ifndef CONFIG_RTL_MLD_SNOOPING	
+#ifndef CONFIG_RTL_MLD_SNOOPING
 		return SUCCESS;
 #endif
 
@@ -1374,20 +1374,20 @@ static int32 rtl_initHashTable(uint32 moduleIndex, uint32 hashTableSize)
 		{
 			rtl_glueFree(rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable);
 		}
-		
-#ifndef CONFIG_RTL_MLD_SNOOPING	
+
+#ifndef CONFIG_RTL_MLD_SNOOPING
 		return FAILED;
 #endif
 
 	}
-	
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable=NULL;
 	rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable=  (struct rtl_groupEntry **)rtl_glueMalloc(4 * hashTableSize);
 	if (rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable!=NULL)
 	{
 		for (i = 0 ; i < hashTableSize ; i++)
-		{	
+		{
 
 			rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable[i]=NULL;
 		}
@@ -1404,12 +1404,12 @@ static int32 rtl_initHashTable(uint32 moduleIndex, uint32 hashTableSize)
 		{
 			rtl_glueFree(rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable);
 		}
-		
+
 		return FAILED;
 
 	}
 #endif
-	
+
 
 }
 
@@ -1418,21 +1418,21 @@ static int32 rtl_initHashTable(uint32 moduleIndex, uint32 hashTableSize)
 /**************************
 	Utility
 **************************/
-static void  rtl_parseMacFrame(uint32 moduleIndex, uint8* macFrame, uint32 verifyCheckSum, struct rtl_macFrameInfo* macInfo) 
+static void  rtl_parseMacFrame(uint32 moduleIndex, uint8* macFrame, uint32 verifyCheckSum, struct rtl_macFrameInfo* macInfo)
 {
-	
+
 //MAC Frame :DA(6 bytes)+SA(6 bytes)+ CPU tag(4 bytes) + VlAN tag(Optional, 4 bytes)
 //                   +Type(IPv4:0x0800, IPV6:0x86DD, PPPOE:0x8864, 2 bytes )+Data(46~1500 bytes)+CRC(4 bytes)
 //CPU tag: Realtek Ethertype==0x8899(2 bytes)+protocol==0x9(4 MSB)+priority(2 bits)+reserved(4 bits)+portmask(6 LSB)
 	uint8 *ptr=macFrame;
 
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	int i=0;
 	uint8 nextHeader=0;
 	uint16 extensionHdrLen=0;
 	uint8 routerhead=FALSE;
 	uint8 needchecksum=FALSE;
-	
+
 	uint8 optionDataLen=0;
 	uint8 optionType=0;
 	uint32 ipv6RAO=0;
@@ -1440,26 +1440,26 @@ static void  rtl_parseMacFrame(uint32 moduleIndex, uint8* macFrame, uint32 verif
 
 	uint32 ipAddr[4]={0,0,0,0};
 	union pseudoHeader pHeader;
-	
+
 	memset(macInfo,0,sizeof(struct rtl_macFrameInfo));
 	memset(&pHeader, 0, sizeof(union pseudoHeader));
 
 	ptr=ptr+12;
 
 
-	/*check the presence of VLAN tag*/	
+	/*check the presence of VLAN tag*/
 	if(*(int16 *)(ptr)==(int16)htons(VLAN_PROTOCOL_ID))
 	{
 		ptr=ptr+4;
 	}
 
-	/*ignore packet with PPPOE header*/	
+	/*ignore packet with PPPOE header*/
 	if(*(int16 *)(ptr)==(int16)htons(PPPOE_ETHER_TYPE))
 	{
-		return;	
+		return;
 	}
 
-	
+
 	/*check the presence of ipv4 type*/
 	if(*(int16 *)(ptr)==(int16)htons(IPV4_ETHER_TYPE))
 	{
@@ -1483,7 +1483,7 @@ static void  rtl_parseMacFrame(uint32 moduleIndex, uint8* macFrame, uint32 verif
 		return;
 	}
 	macInfo->checksumFlag=FAILED;
-	
+
 	if(macInfo->ipVersion==IP_VERSION4)
 	{
 		macInfo->ipHdrLen=(uint16)((((struct ipv4Pkt *)(macInfo->ipBuf))->vhl&0x0f)<<2);
@@ -1491,22 +1491,22 @@ static void  rtl_parseMacFrame(uint32 moduleIndex, uint8* macFrame, uint32 verif
 		ptr=ptr+macInfo->ipHdrLen;
 		macInfo->l3PktBuf=ptr;
 		macInfo->macFrameLen=(uint16)((ptr-macFrame)+macInfo->l3PktLen);
-	
+
 /*distinguish different IGMP packet:
-                                                    ip_header_length      destination_ip      igmp_packet_length   igmp_type   group_address         	
+                                                    ip_header_length      destination_ip      igmp_packet_length   igmp_type   group_address
 IGMPv1_general_query:                            20                   224.0.0.1                       8                    0x11                 0
-IGMPv2_general_query:                            24                   224.0.0.1                       8                    0x11                 0                     
-IGMPv2_group_specific_query:			24                   224.0.0.1                       8                    0x11               !=0  
-IGMPv3 _query:                                        24                   224.0.0.1                   >=12                  0x11        according_to_different_situation 
+IGMPv2_general_query:                            24                   224.0.0.1                       8                    0x11                 0
+IGMPv2_group_specific_query:			24                   224.0.0.1                       8                    0x11               !=0
+IGMPv3 _query:                                        24                   224.0.0.1                   >=12                  0x11        according_to_different_situation
 
 IGMPv1_join:                                            20          actual_multicast_address         8                    0x12           actual_multicast_address
 IGMPv2_join:                                            24          actual_multicast_address         8                    0x16           actual_multicast_address
 IGMPv2_leave:                                          24          actual_multicast_address         8                    0x17           actual_multicast_address
 IGMPv3_report:                                         24          actual_multicast_address       >=12                0x22           actual_multicast_address*/
 
-	/* parse IGMP type and version*/	
+	/* parse IGMP type and version*/
 		if(((struct ipv4Pkt *)(macInfo->ipBuf))->protocol==IGMP_PROTOCOL)
-		{	
+		{
 			/*check DVMRP*/
 			if((macInfo->l3PktBuf[0]==DVMRP_TYPE) && (((struct ipv4Pkt *)(macInfo->ipBuf))->destinationIp==htonl(DVMRP_ADDR)) )
 			{
@@ -1516,8 +1516,8 @@ IGMPv3_report:                                         24          actual_multic
 			{
 				/*means unicast*/
 				if((macFrame[0]&0x01)==0)
-				{	
-						if(rtl_compareMacAddr(macFrame, rtl_mCastModuleArray[moduleIndex].rtl_gatewayMac)==TRUE) 
+				{
+						if(rtl_compareMacAddr(macFrame, rtl_mCastModuleArray[moduleIndex].rtl_gatewayMac)==TRUE)
 				       	{
 								if(((struct ipv4Pkt *)(macInfo->ipBuf))->destinationIp==htonl(rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv4Addr))
 								{
@@ -1525,10 +1525,10 @@ IGMPv3_report:                                         24          actual_multic
                							goto otherpro;
 								}
 						}
-			      									
+
 				}
 				else /*means multicast*/
-				{	
+				{
 					ipAddr[0]=ntohl(((struct ipv4Pkt *)(macInfo->ipBuf))->destinationIp);
 					if(rtl_checkMCastAddrMapping(IP_VERSION4,ipAddr,macFrame)==TRUE)
 					{
@@ -1540,10 +1540,10 @@ IGMPv3_report:                                         24          actual_multic
 					}
 				}
 			}
-			
+
 		}
 
-otherpro:	
+otherpro:
 			if(((struct ipv4Pkt *)(macInfo->ipBuf))->protocol==MOSPF_PROTOCOL &&\
 			((((struct ipv4Pkt *)(macInfo->ipBuf))->destinationIp==htonl(IPV4_MOSPF_ADDR1)) ||\
 			(((struct ipv4Pkt *)(macInfo->ipBuf))->destinationIp==htonl(IPV4_MOSPF_ADDR2))))
@@ -1578,19 +1578,19 @@ otherpro:
 	{
 		macInfo->macFrameLen=(uint16)(ptr-macFrame+IPV6_HEADER_LENGTH+ntohs(((struct ipv6Pkt *)(macInfo->ipBuf))->payloadLenth));
 		macInfo->ipHdrLen=IPV6_HEADER_LENGTH;
-		
+
 		nextHeader=((struct ipv6Pkt *)(macInfo->ipBuf))->nextHeader;
 		ptr=ptr+IPV6_HEADER_LENGTH;
 		while((ptr-macInfo->ipBuf)<(ntohs(((struct ipv6Pkt *)(macInfo->ipBuf))->payloadLenth)+IPV6_HEADER_LENGTH))
 		{
-			switch(nextHeader) 
+			switch(nextHeader)
 			{
 				case HOP_BY_HOP_OPTIONS_HEADER:
 					/*parse hop-by-hop option*/
 					nextHeader=ptr[0];
 					extensionHdrLen=((uint16)(ptr[1])+1)*8;
 					ptr=ptr+2;
-					
+
 					while((ptr-macInfo->ipBuf-40)<extensionHdrLen)
 					{
 						optionType=ptr[0];
@@ -1613,7 +1613,7 @@ otherpro:
 						if(ntohl(*(uint32 *)(ptr))==IPV6_ROUTER_ALTER_OPTION)
 						{
 							ipv6RAO=IPV6_ROUTER_ALTER_OPTION;
-							ptr=ptr+4;	
+							ptr=ptr+4;
 							continue;
 						}
 
@@ -1624,7 +1624,7 @@ otherpro:
 							ptr=ptr+optionDataLen+2;
 							continue;
 						}
-					
+
 
 					}
 					/*
@@ -1632,14 +1632,14 @@ otherpro:
 					{
 						rtl_gluePrintf("ipv6 packet parse error\n");
 					}*/
-					
+
 				break;
-				
+
 				case ROUTING_HEADER:
 					nextHeader=ptr[0];
 					extensionHdrLen=((uint16)(ptr[1])+1)*8;
-					
-                                  
+
+
 					 if (ptr[3]>0)
 				   	{
                                           ptr=ptr+extensionHdrLen;
@@ -1649,29 +1649,29 @@ otherpro:
 
 						}
 					     routerhead=TRUE;
-					     
-					     
+
+
 					}
 					else
 					{
                                           ptr=ptr+extensionHdrLen;
 					}
-					
-					
-					
+
+
+
 				break;
-				
+
 				case FRAGMENT_HEADER:
 					nextHeader=ptr[0];
 					ptr=ptr+8;
 				break;
-				
+
 				case DESTINATION_OPTION_HEADER:
 					nextHeader=ptr[0];
 					extensionHdrLen=((uint16)(ptr[1])+1)*8;
 					ptr=ptr+extensionHdrLen;
 				break;
-				
+
 				case ICMP_PROTOCOL:
 					nextHeader=NO_NEXT_HEADER;
 					macInfo->l3PktLen=ntohs(((struct ipv6Pkt *)(macInfo->ipBuf))->payloadLenth)-(uint16)(ptr-macInfo->ipBuf-IPV6_HEADER_LENGTH);
@@ -1686,16 +1686,16 @@ otherpro:
 							ipAddr[1]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[1]);
 							ipAddr[2]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[2]);
 							ipAddr[3]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[3]);
-							
+
 							if(rtl_checkMCastAddrMapping(IP_VERSION6, ipAddr, macFrame)==TRUE)
 							{
 								macInfo->l3Protocol=ICMP_PROTOCOL;
 							}
-							
+
 						}
 						else /*means multicast*/
-						{	
-							
+						{
+
 								ipAddr[0]=htonl(rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[0]);
 								ipAddr[1]=htonl(rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[1]);
 								ipAddr[2]=htonl(rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[2]);
@@ -1704,9 +1704,9 @@ otherpro:
 								(rtl_compareIpv6Addr(((struct ipv6Pkt *)macInfo->ipBuf)->destinationAddr, ipAddr) == TRUE))
 								{
 									macInfo->l3Protocol=ICMP_PROTOCOL;
-								}		
+								}
 
-							
+
 						}
 
 						needchecksum=TRUE;
@@ -1716,15 +1716,15 @@ otherpro:
 							rtl_gluePrintf("router alter option error\n");
 						}*/
 					}
-				
-					
+
+
 				break;
-				
+
 				case PIM_PROTOCOL:
 					nextHeader=NO_NEXT_HEADER;
 					macInfo->l3PktLen=ntohs(((struct ipv6Pkt *)(macInfo->ipBuf))->payloadLenth)-(uint16)(ptr-macInfo->ipBuf-IPV6_HEADER_LENGTH);
 					macInfo->l3PktBuf=ptr;
-					
+
 					ipAddr[0]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[0]);
 					ipAddr[1]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[1]);
 					ipAddr[2]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[2]);
@@ -1734,31 +1734,31 @@ otherpro:
 						macInfo->l3Protocol=PIM_PROTOCOL;
 					}
 					needchecksum=TRUE;
-				
+
 				break;
-				
+
 				case MOSPF_PROTOCOL:
 					nextHeader=NO_NEXT_HEADER;
 					macInfo->l3PktLen=ntohs(((struct ipv6Pkt *)(macInfo->ipBuf))->payloadLenth)-(uint16)(ptr-macInfo->ipBuf-IPV6_HEADER_LENGTH);
 					macInfo->l3PktBuf=ptr;
-					
+
 					ipAddr[0]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[0]);
 					ipAddr[1]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[1]);
 					ipAddr[2]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[2]);
 					ipAddr[3]=ntohl(((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[3]);
-					
+
 					if(IS_IPV6_MOSPF_ADDR1(ipAddr) || IS_IPV6_MOSPF_ADDR2(ipAddr))
 					{
 						macInfo->l3Protocol=MOSPF_PROTOCOL;
 					}
 					needchecksum=TRUE;
 				break;
-				
-				default:		
+
+				default:
 					goto out;
 				break;
 			}
-		
+
 		}
 
 out:
@@ -1768,9 +1768,9 @@ out:
 		       for(i=0; i<4; i++)
 		      {
 			     pHeader.ipv6_pHdr.sourceAddr[i]=((struct ipv6Pkt *)(macInfo->ipBuf))->sourceAddr[i];
-			     
+
 		       }
-           
+
 		      if(routerhead==FALSE)
 		      {
 		             for(i=0;i<4;i++)
@@ -1778,14 +1778,14 @@ out:
 			            pHeader.ipv6_pHdr.destinationAddr[i]=((struct ipv6Pkt *)(macInfo->ipBuf))->destinationAddr[i];
 		      	      }
 		       }
-	      
-		
+
+
 		       pHeader.ipv6_pHdr.nextHeader=macInfo->l3Protocol;
 		       pHeader.ipv6_pHdr.upperLayerPacketLength=htonl((uint32)(macInfo->l3PktLen));
 		       pHeader.ipv6_pHdr.zeroData[0]=0;
 		       pHeader.ipv6_pHdr.zeroData[1]=0;
 		       pHeader.ipv6_pHdr.zeroData[2]=0;
-		
+
 		       if(macInfo->l3PktBuf!=NULL)
 		       {
 		       	if(verifyCheckSum==TRUE)
@@ -1816,7 +1816,7 @@ static uint32  rtl_getMulticastRouterPortMask(uint32 moduleIndex, uint32 ipVersi
 	uint32 portIndex=0;
 	uint32 portMaskn=PORT0_MASK;
 	uint32 routerPortmask=0;
-	
+
 	if(ipVersion==IP_VERSION4)
 	{
 		for(portIndex=0; portIndex<MAX_SUPPORT_PORT_NUMBER; portIndex++)
@@ -1825,28 +1825,28 @@ static uint32  rtl_getMulticastRouterPortMask(uint32 moduleIndex, uint32 ipVersi
 			{
 				routerPortmask=routerPortmask|portMaskn;
 			}
-			
-			if(rtl_mCastModuleArray[moduleIndex].rtl_ipv4MulticastRouters.dvmrpRouter.portTimer[portIndex]>sysTime)
-			{	
-				routerPortmask=routerPortmask|portMaskn;
-			}	
 
-			
-			if(rtl_mCastModuleArray[moduleIndex].rtl_ipv4MulticastRouters.mospfRouter.portTimer[portIndex]>sysTime)
-			{	
+			if(rtl_mCastModuleArray[moduleIndex].rtl_ipv4MulticastRouters.dvmrpRouter.portTimer[portIndex]>sysTime)
+			{
 				routerPortmask=routerPortmask|portMaskn;
-			}		
+			}
+
+
+			if(rtl_mCastModuleArray[moduleIndex].rtl_ipv4MulticastRouters.mospfRouter.portTimer[portIndex]>sysTime)
+			{
+				routerPortmask=routerPortmask|portMaskn;
+			}
 
 
 			if(rtl_mCastModuleArray[moduleIndex].rtl_ipv4MulticastRouters.pimRouter.portTimer[portIndex]>sysTime)
-			{	
+			{
 				routerPortmask=routerPortmask|portMaskn;
-			}	
-		
+			}
+
 			portMaskn=portMaskn<<1;  /*shift to next port mask*/
-			
+
 		}
-	
+
 	}
 
 #ifdef CONFIG_RTL_MLD_SNOOPING
@@ -1855,27 +1855,27 @@ static uint32  rtl_getMulticastRouterPortMask(uint32 moduleIndex, uint32 ipVersi
 		for(portIndex=0; portIndex<MAX_SUPPORT_PORT_NUMBER; portIndex++)
 		{
 			if(rtl_mCastModuleArray[moduleIndex].rtl_ipv6MulticastRouters.querier.portTimer[portIndex]>sysTime)
-			{	
+			{
 
 				routerPortmask=routerPortmask|portMaskn;
-			}		
+			}
 
 			if(rtl_mCastModuleArray[moduleIndex].rtl_ipv6MulticastRouters.mospfRouter.portTimer[portIndex]>sysTime)
-			{	
+			{
 				routerPortmask=routerPortmask|portMaskn;
-			}	
-			
+			}
+
 			if(rtl_mCastModuleArray[moduleIndex].rtl_ipv6MulticastRouters.pimRouter.portTimer[portIndex]>sysTime)
-			{	
+			{
 				routerPortmask=routerPortmask|portMaskn;
-			}	
-			
+			}
+
 			portMaskn=portMaskn<<1;  /*shift to next port mask*/
-			
+
 		}
 
 	}
-#endif	
+#endif
 
 	routerPortmask= routerPortmask |rtl_mCastModuleArray[moduleIndex].staticRouterPortMask;
 
@@ -1887,18 +1887,18 @@ static uint32 rtl_processQueries(uint32 moduleIndex,uint32 ipVersion, uint32 por
 	struct rtl_groupEntry *groupEntry=NULL;
 	struct rtl_sourceEntry*sourceEntry=NULL;
 	uint32 timerIndex=0;
-	uint32 hashIndex=0; 
+	uint32 hashIndex=0;
 	uint32 groupAddress[4]={0,0,0,0};
 	uint32 suppressFlag=0;
 	uint32 *sourceAddr=NULL;
 	uint32 numOfSrc=0;
 	uint32 i=0;
-	
+
 	/*querier timer update and election process*/
 	rtl_snoopQuerier(moduleIndex, ipVersion, portNum);
 
 	if(ipVersion==IP_VERSION4)
-	{	
+	{
 		if(pktLen>=12) /*means igmpv3 query*/
 		{
 			groupAddress[0]=ntohl(((struct igmpv3Query*)pktBuf)->groupAddr);
@@ -1911,7 +1911,7 @@ static uint32 rtl_processQueries(uint32 moduleIndex,uint32 ipVersion, uint32 por
 		{
 			groupAddress[0]=ntohl(((struct igmpv2Pkt *)pktBuf)->groupAddr);
 		}
-		
+
 		if(groupAddress[0]==0) /*means general query*/
 		{
 			goto out;
@@ -1920,7 +1920,7 @@ static uint32 rtl_processQueries(uint32 moduleIndex,uint32 ipVersion, uint32 por
 		{
 			hashIndex=groupAddress[0]&rtl_hashMask;
 		}
-		
+
 	}
 #ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
@@ -1943,9 +1943,9 @@ static uint32 rtl_processQueries(uint32 moduleIndex,uint32 ipVersion, uint32 por
 			groupAddress[1]=ntohl(((struct mldv1Pkt *)pktBuf)->mCastAddr[1]);
 			groupAddress[2]=ntohl(((struct mldv1Pkt *)pktBuf)->mCastAddr[2]);
 			groupAddress[3]=ntohl(((struct mldv1Pkt *)pktBuf)->mCastAddr[3]);
-			
+
 		}
-		
+
 		if(	(groupAddress[0]==0) &&
 			(groupAddress[1]==0) &&
 			(groupAddress[2]==0) &&
@@ -1958,13 +1958,13 @@ static uint32 rtl_processQueries(uint32 moduleIndex,uint32 ipVersion, uint32 por
 			hashIndex=groupAddress[3]&rtl_hashMask;
 		}
 	}
-#endif	
+#endif
 	if(suppressFlag==0)
 	{
-	
+
 		groupEntry=rtl_searchGroupEntry(moduleIndex, ipVersion, groupAddress);
 		if((groupEntry!=NULL))
-		{	
+		{
 			if(numOfSrc==0) /*means group specific query*/
 			{
 				for(timerIndex=0; timerIndex<MAX_SUPPORT_PORT_NUMBER; timerIndex++)
@@ -1972,8 +1972,8 @@ static uint32 rtl_processQueries(uint32 moduleIndex,uint32 ipVersion, uint32 por
 					if(groupEntry->groupFilterTimer[timerIndex]>(rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime))
 					{
 						groupEntry->groupFilterTimer[timerIndex]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
-					}	
-			
+					}
+
 				}
 			}
 			else /*means group and source specific query*/
@@ -1981,10 +1981,10 @@ static uint32 rtl_processQueries(uint32 moduleIndex,uint32 ipVersion, uint32 por
 				if(rtl_mCastModuleArray[moduleIndex].enableSourceList==TRUE)
 				{
 					for(i=0; i<numOfSrc; i++)
-					{	
-						
+					{
+
 						sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr, groupEntry);
-						
+
 						if(sourceEntry!=NULL)
 						{
 							for(timerIndex=0; timerIndex<MAX_SUPPORT_PORT_NUMBER; timerIndex++)
@@ -2010,10 +2010,10 @@ static uint32 rtl_processQueries(uint32 moduleIndex,uint32 ipVersion, uint32 por
 				}
 			}
 		}
-		
-		
+
+
 	}
-	
+
 	#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
 	if(ipVersion==IP_VERSION4)
 	{
@@ -2024,25 +2024,25 @@ static uint32 rtl_processQueries(uint32 moduleIndex,uint32 ipVersion, uint32 por
 	}
 	#endif
 
-out:	
+out:
 	return (~(1<<portNum) & ((1<<MAX_SUPPORT_PORT_NUMBER)-1));
 }
 
 
 static void rtl_snoopQuerier(uint32 moduleIndex, uint32 ipVersion, uint32 portNum)
 {
-	
+
 	if(ipVersion==IP_VERSION4)
 	{
 		rtl_mCastModuleArray[moduleIndex].rtl_ipv4MulticastRouters.querier.portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.querierPresentInterval;/*update timer value*/
 	}
-	
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
 		rtl_mCastModuleArray[moduleIndex].rtl_ipv6MulticastRouters.querier.portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.querierPresentInterval;/*update timer value*/
 	}
-#endif	
+#endif
 	return;
 }
 
@@ -2050,8 +2050,8 @@ static void rtl_snoopQuerier(uint32 moduleIndex, uint32 ipVersion, uint32 portNu
 /*Process Report Packet*/
 static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 portNum, uint8 *pktBuf)
 {
-	
-	
+
+
 	uint32 groupAddress[4]={0, 0, 0, 0};
 	struct rtl_groupEntry* groupEntry=NULL;
 	struct rtl_groupEntry* newGroupEntry=NULL;
@@ -2064,7 +2064,7 @@ static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 port
 	if(ipVersion==IP_VERSION4)
 	{
 		if(pktBuf[0]==0x12)
-		{ 
+		{
 			groupAddress[0]=ntohl(((struct igmpv1Pkt *)pktBuf)->groupAddr);
 		}
 
@@ -2072,7 +2072,7 @@ static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 port
 		{
 			groupAddress[0]=ntohl(((struct igmpv2Pkt *)pktBuf)->groupAddr);
 		}
-		
+
 		hashIndex=groupAddress[0]&rtl_hashMask;
 
 	}
@@ -2081,7 +2081,7 @@ static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 port
 #ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
-		
+
 		groupAddress[0]=ntohl(((struct mldv1Pkt *)pktBuf)->mCastAddr[0]);
 		groupAddress[1]=ntohl(((struct mldv1Pkt *)pktBuf)->mCastAddr[1]);
 		groupAddress[2]=ntohl(((struct mldv1Pkt *)pktBuf)->mCastAddr[2]);
@@ -2089,7 +2089,7 @@ static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 port
 
 		hashIndex=groupAddress[3]&rtl_hashMask;
 	}
-#endif	
+#endif
 
 	groupEntry=rtl_searchGroupEntry(moduleIndex, ipVersion, groupAddress);
 	if(groupEntry==NULL)   /*means new group address, create new group entry*/
@@ -2102,7 +2102,7 @@ static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 port
 		}
 		else
 		{
-			/*set new multicast entry*/	
+			/*set new multicast entry*/
 			#ifdef CONFIG_RTL_MLD_SNOOPING
 			newGroupEntry->groupAddr[0]=groupAddress[0];
 			newGroupEntry->groupAddr[1]=groupAddress[1];
@@ -2111,13 +2111,13 @@ static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 port
 			#else
 			newGroupEntry->groupAddr[0]=groupAddress[0];
 			#endif
-			
+
 			newGroupEntry->sourceList=NULL;
 
 			newGroupEntry->ipVersion=ipVersion;
 
 			newGroupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
-			
+
 			/*must first link into hash table, then call the function of set rtl8306sdm, because of aggregator checking*/
 			if(ipVersion==IP_VERSION4)
 			{
@@ -2128,13 +2128,13 @@ static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 port
 			{
 				rtl_linkGroupEntry(newGroupEntry, rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable, hashIndex);
 			}
-#endif			
+#endif
 
 		}
-		
+
 	}
 	else
-	{  
+	{
 
 		sourceEntry=groupEntry->sourceList;
 		/*delete all the source list*/
@@ -2143,9 +2143,9 @@ static  uint32 rtl_processJoin(uint32 moduleIndex, uint32 ipVersion, uint32 port
 			sourceEntry->portTimer[portNum]=0;
 			sourceEntry=sourceEntry->next;
 		}
-		
+
 		groupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
-	
+
 	}
 
 #if defined (CONFIG_RTL_HARDWARE_MULTICAST)
@@ -2170,13 +2170,13 @@ static  uint32 rtl_processLeave(uint32 moduleIndex, uint32 ipVersion, uint32 por
 
 	uint32 hashIndex=0;
 	uint32 multicastRouterPortMask=rtl_getMulticastRouterPortMask(moduleIndex, ipVersion, rtl_sysUpSeconds);
-	
+
 	if(ipVersion==IP_VERSION4)
 	{
 		groupAddress[0]=ntohl(((struct igmpv2Pkt *)pktBuf)->groupAddr);
 		hashIndex=groupAddress[0]&rtl_hashMask;
 	}
-	
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
@@ -2187,16 +2187,16 @@ static  uint32 rtl_processLeave(uint32 moduleIndex, uint32 ipVersion, uint32 por
 
 		hashIndex=groupAddress[3]&rtl_hashMask;
 	}
-#endif	
+#endif
 
 	      groupEntry=rtl_searchGroupEntry(moduleIndex, ipVersion, groupAddress);
 	      /*lower the timer of the group*/
 	      if(groupEntry!=NULL)
-	      {   
+	      {
 
 		     if(groupEntry->groupFilterTimer[portNum]>rtl_sysUpSeconds)
 		     {
-                  
+
 				if(rtl_mCastModuleArray[moduleIndex].enableFastLeave==TRUE)
 				{
 					groupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds;
@@ -2208,7 +2208,7 @@ static  uint32 rtl_processLeave(uint32 moduleIndex, uint32 ipVersion, uint32 por
 						groupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
 					}
 				}
-				
+
                    }
 
 		     sourceEntry=groupEntry->sourceList;
@@ -2227,15 +2227,15 @@ static  uint32 rtl_processLeave(uint32 moduleIndex, uint32 ipVersion, uint32 por
 							sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
 						}
 					}
-					
+
 				}
 
 				sourceEntry=sourceEntry->next;
 		      }
 
-		
-	      }	
-	
+
+	      }
+
 	#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
 	if(ipVersion==IP_VERSION4)
 	{
@@ -2245,7 +2245,7 @@ static  uint32 rtl_processLeave(uint32 moduleIndex, uint32 ipVersion, uint32 por
 		rtl865x_raiseEvent(EVENT_UPDATE_MCAST, &reportEventContext);
 	}
 	#endif
-	
+
 	return (multicastRouterPortMask&(~(1<<portNum))&0x3f);
 }
 
@@ -2258,7 +2258,7 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 	struct rtl_groupEntry* newGroupEntry=NULL;
 	struct rtl_sourceEntry *sourceEntry=NULL;
 	struct rtl_sourceEntry *newSourceEntry=NULL;
-	
+
 	uint32 hashIndex=0;
 
 	uint16 numOfSrc=0;
@@ -2280,13 +2280,13 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 		groupAddress[1]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[1]);
 		groupAddress[2]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[2]);
 		groupAddress[3]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[3]);
-		
+
 		numOfSrc=ntohs(((struct mCastAddrRecord *)pktBuf)->numOfSrc);
 		sourceAddr=&(((struct mCastAddrRecord *)pktBuf)->srcList);
 		hashIndex=groupAddress[3]&rtl_hashMask;
-	
+
 	}
-#endif	
+#endif
 
 	groupEntry=rtl_searchGroupEntry(moduleIndex, ipVersion, groupAddress);
 	if(groupEntry==NULL)   /*means new group address, create new group entry*/
@@ -2298,7 +2298,7 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 			return FAILED;
 		}
 		else
-		{	
+		{
 			/*set new multicast entry*/
 #ifdef CONFIG_RTL_MLD_SNOOPING
 			newGroupEntry->groupAddr[0]=groupAddress[0];
@@ -2312,15 +2312,15 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 			newGroupEntry->ipVersion=ipVersion;
 
 			newGroupEntry->sourceList=NULL;
-			
+
 			/*end of set group entry*/
-			
+
 			/*must first link into hash table, then call the function of set rtl8306sdm, because of aggregator checking*/
 			if(ipVersion==IP_VERSION4)
 			{
 				rtl_linkGroupEntry(newGroupEntry, rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable, hashIndex);
 			}
-			
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 			if(ipVersion==IP_VERSION6)
 			{
@@ -2334,7 +2334,7 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 				for(j=0; j<numOfSrc; j++)
 				{
 
-					
+
 					newSourceEntry=rtl_allocateSourceEntry();
 					if(newSourceEntry==NULL)
 					{
@@ -2342,15 +2342,15 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 						return FAILED;
 					}
 					else
-					{	
-					
+					{
+
 						if(ipVersion==IP_VERSION4)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 						}
 #ifdef CONFIG_RTL_MLD_SNOOPING
 						if(ipVersion==IP_VERSION6)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 							newSourceEntry->sourceAddr[1]=sourceAddr[1];
 							newSourceEntry->sourceAddr[2]=sourceAddr[2];
@@ -2362,38 +2362,38 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 					}
 
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
-					
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 					if(ipVersion==IP_VERSION6)
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif					
+#endif
 				}
-			
+
 			}
 			else
-			{	
+			{
 				newGroupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 			}
-		
-			
+
+
 		}
 
-		
+
 	}
 	else /*means it can be found in the forward hash table*/
-	{  
+	{
 
 		if(rtl_mCastModuleArray[moduleIndex].enableSourceList==TRUE)
 		{
 			/*here to handle the source list*/
 			for(j=0; j<numOfSrc; j++)
 			{
-				
+
 				sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr,groupEntry);
 				if(sourceEntry==NULL)
 				{
@@ -2404,35 +2404,35 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 						return FAILED;
 					}
 					else
-					{	
-					
+					{
+
 						if(ipVersion==IP_VERSION4)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
-						
+
 						}
 #ifdef CONFIG_RTL_MLD_SNOOPING
 						if(ipVersion==IP_VERSION6)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 							newSourceEntry->sourceAddr[1]=sourceAddr[1];
 							newSourceEntry->sourceAddr[2]=sourceAddr[2];
 							newSourceEntry->sourceAddr[3]=sourceAddr[3];
 						}
-#endif						
+#endif
 						newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 						rtl_linkSourceEntry(groupEntry,newSourceEntry);
 					}
 
 				}
 				else
-				{		
+				{
 					/*just update source timer*/
 					sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 				}
-					
+
 				if(ipVersion==IP_VERSION4)
-				{	
+				{
 					sourceAddr++;
 				}
 #ifdef CONFIG_RTL_MLD_SNOOPING
@@ -2440,7 +2440,7 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 				{
 					sourceAddr=sourceAddr+4;
 				}
-#endif				
+#endif
 			}
 
 		}
@@ -2448,7 +2448,7 @@ static  int32 rtl_processIsInclude(uint32 moduleIndex, uint32 ipVersion, uint32 
 		{
 			groupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 		}
-		
+
 	}
 
 	#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
@@ -2474,7 +2474,7 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 	struct rtl_groupEntry* newGroupEntry=NULL;
 	struct rtl_sourceEntry *sourceEntry=NULL;
 	struct rtl_sourceEntry *newSourceEntry=NULL;
-	
+
 	uint32 hashIndex=0;
 	uint16 numOfSrc=0;
 	uint32 *sourceArray=NULL;
@@ -2488,20 +2488,20 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 		sourceAddr=&(((struct groupRecord *)pktBuf)->srcList);
 		hashIndex=groupAddress[0]&rtl_hashMask;
 	}
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
-		
+
 		groupAddress[0]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[0]);
 		groupAddress[1]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[1]);
 		groupAddress[2]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[2]);
 		groupAddress[3]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[3]);
-		
+
 		numOfSrc=ntohs(((struct mCastAddrRecord *)pktBuf)->numOfSrc);
 		sourceArray=&(((struct mCastAddrRecord *)pktBuf)->srcList);
 		sourceAddr=&(((struct mCastAddrRecord *)pktBuf)->srcList);
 		hashIndex=groupAddress[3]&rtl_hashMask;
-	
+
 	}
 #endif
 	groupEntry=rtl_searchGroupEntry(moduleIndex, ipVersion, groupAddress);
@@ -2514,9 +2514,9 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 			return FAILED;
 		}
 		else
-		{	
-			/*set new multicast entry*/		
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+		{
+			/*set new multicast entry*/
+#ifdef CONFIG_RTL_MLD_SNOOPING
 			newGroupEntry->groupAddr[0]=groupAddress[0];
 			newGroupEntry->groupAddr[1]=groupAddress[1];
 			newGroupEntry->groupAddr[2]=groupAddress[2];
@@ -2533,7 +2533,7 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 			newGroupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 
 			/*end of set group entry*/
-			
+
 			/*must first link into hash table, then call the function of set rtl8306sdm, because of aggregator checking*/
 			if(ipVersion==IP_VERSION4)
 			{
@@ -2557,46 +2557,46 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 						return FAILED;
 					}
 					else
-					{	
-					
+					{
+
 						if(ipVersion==IP_VERSION4)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 						}
 #ifdef CONFIG_RTL_MLD_SNOOPING
 						if(ipVersion==IP_VERSION6)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 							newSourceEntry->sourceAddr[1]=sourceAddr[1];
 							newSourceEntry->sourceAddr[2]=sourceAddr[2];
 							newSourceEntry->sourceAddr[3]=sourceAddr[3];
 						}
-#endif						
+#endif
 						/*time out the sources included in the MODE_IS_EXCLUDE report*/
 						newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds;
 						rtl_linkSourceEntry(newGroupEntry,newSourceEntry);
 					}
 
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
-					
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 					if(ipVersion==IP_VERSION6)
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif								
+#endif
 				}
 
 			}
-				
+
 		}
 
 	}
 	else /*means group address can be found in the forward hash table*/
-	{  
+	{
 
 		if(groupEntry->groupFilterTimer[portNum]<=rtl_sysUpSeconds) /*means include mode*/
 		{
@@ -2618,9 +2618,9 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 				/*(B-A) time out*/
 				for(j=0; j<numOfSrc; j++)
 				{
-					
+
 					sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr,groupEntry);
-					
+
 					if(sourceEntry==NULL)
 					{
 						newSourceEntry=rtl_allocateSourceEntry();
@@ -2630,22 +2630,22 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 							return FAILED;
 						}
 						else
-						{	
-						
+						{
+
 							if(ipVersion==IP_VERSION4)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
-							
+
 							}
 #ifdef CONFIG_RTL_MLD_SNOOPING
 							if(ipVersion==IP_VERSION6)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
 								newSourceEntry->sourceAddr[1]=sourceAddr[1];
 								newSourceEntry->sourceAddr[2]=sourceAddr[2];
 								newSourceEntry->sourceAddr[3]=sourceAddr[3];
 							}
-#endif							
+#endif
 							newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds;
 							rtl_linkSourceEntry(groupEntry,newSourceEntry);
 						}
@@ -2659,9 +2659,9 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 						}
 					}
 
-				
+
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
 #ifdef CONFIG_RTL_MLD_SNOOPING
@@ -2669,10 +2669,10 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif					
+#endif
 				}
 			}
-			
+
 		}
 		else/*means exclude mode*/
 		{
@@ -2694,7 +2694,7 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 				for(j=0; j<numOfSrc; j++)
 				{
 					sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr,groupEntry);
-					
+
 					if(sourceEntry==NULL)
 					{
 						newSourceEntry=rtl_allocateSourceEntry();
@@ -2704,23 +2704,23 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 							return FAILED;
 						}
 						else
-						{	
-						
+						{
+
 							if(ipVersion==IP_VERSION4)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
-							
+
 							}
 #ifdef CONFIG_RTL_MLD_SNOOPING
 							if(ipVersion==IP_VERSION6)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
 								newSourceEntry->sourceAddr[1]=sourceAddr[1];
 								newSourceEntry->sourceAddr[2]=sourceAddr[2];
 								newSourceEntry->sourceAddr[3]=sourceAddr[3];
 							}
-#endif							
-						
+#endif
+
 							newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 							rtl_linkSourceEntry(groupEntry,newSourceEntry);
 						}
@@ -2733,9 +2733,9 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 							sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 						}
 					}
-					
+
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
 #ifdef CONFIG_RTL_MLD_SNOOPING
@@ -2743,11 +2743,11 @@ static  int32 rtl_processIsExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif					
+#endif
 				}
 			}
-		
-			
+
+
 		}
 
 		groupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
@@ -2775,7 +2775,7 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 	struct rtl_groupEntry* newGroupEntry=NULL;
 	struct rtl_sourceEntry *sourceEntry=NULL;
 	struct rtl_sourceEntry *newSourceEntry=NULL;
-	
+
 	uint32 hashIndex=0;
 	uint16 numOfSrc=0;
 	uint32 *sourceAddr=NULL;
@@ -2787,20 +2787,20 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 		sourceAddr=&(((struct groupRecord *)pktBuf)->srcList);
 		hashIndex=groupAddress[0]&rtl_hashMask;
 	}
-	
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
-		
+
 		groupAddress[0]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[0]);
 		groupAddress[1]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[1]);
 		groupAddress[2]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[2]);
 		groupAddress[3]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[3]);
-		
+
 		numOfSrc=ntohs(((struct mCastAddrRecord *)pktBuf)->numOfSrc);
 		sourceAddr=&(((struct mCastAddrRecord *)pktBuf)->srcList);
 		hashIndex=groupAddress[3]&rtl_hashMask;
-	
+
 	}
 #endif
 
@@ -2814,9 +2814,9 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 			return FAILED;
 		}
 		else
-		{	
+		{
 			/*set new multicast entry*/
-	#ifdef CONFIG_RTL_MLD_SNOOPING	
+	#ifdef CONFIG_RTL_MLD_SNOOPING
 			newGroupEntry->groupAddr[0]=groupAddress[0];
 			newGroupEntry->groupAddr[1]=groupAddress[1];
 			newGroupEntry->groupAddr[2]=groupAddress[2];
@@ -2829,21 +2829,21 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 			newGroupEntry->ipVersion=ipVersion;
 
 			newGroupEntry->sourceList=NULL;
-			
+
 			/*end of set group entry*/
-			
+
 			/*must first link into hash table, then call the function of set rtl8306sdm, because of aggregator checking*/
 			if(ipVersion==IP_VERSION4)
 			{
 				rtl_linkGroupEntry(newGroupEntry, rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable, hashIndex);
 			}
-			
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 			if(ipVersion==IP_VERSION6)
 			{
 				rtl_linkGroupEntry(newGroupEntry, rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable, hashIndex);
 			}
-#endif			
+#endif
 
 			if(rtl_mCastModuleArray[moduleIndex].enableSourceList==TRUE)
 			{
@@ -2852,7 +2852,7 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 				for(j=0; j<numOfSrc; j++)
 				{
 
-					
+
 					newSourceEntry=rtl_allocateSourceEntry();
 					if(newSourceEntry==NULL)
 					{
@@ -2860,62 +2860,62 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 						return FAILED;
 					}
 					else
-					{	
-					
+					{
+
 						if(ipVersion==IP_VERSION4)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
-							
+
 						}
-						
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 						if(ipVersion==IP_VERSION6)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 							newSourceEntry->sourceAddr[1]=sourceAddr[1];
 							newSourceEntry->sourceAddr[2]=sourceAddr[2];
 							newSourceEntry->sourceAddr[3]=sourceAddr[3];
 						}
-#endif						
+#endif
 						newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 						rtl_linkSourceEntry(newGroupEntry,newSourceEntry);
 					}
-						
+
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
-					
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 					if(ipVersion==IP_VERSION6)
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif					
-					
+#endif
+
 				}
 			}
 			else
-			{	
+			{
 				newGroupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 			}
-			
-			
+
+
 		}
 
 	}
 	else /*means it can be found in the forward hash table*/
-	{  
+	{
 
 		if(rtl_mCastModuleArray[moduleIndex].enableSourceList==TRUE)
 		{
 			/*here to handle the source list*/
-			
+
 			for(j=0; j<numOfSrc; j++)
 			{
 
 				sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr,groupEntry);
-		
+
 				if(sourceEntry==NULL)
 				{
 					newSourceEntry=rtl_allocateSourceEntry();
@@ -2925,80 +2925,80 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 						return FAILED;
 					}
 					else
-					{	
-					
+					{
+
 						if(ipVersion==IP_VERSION4)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
-						
+
 						}
-						
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 						if(ipVersion==IP_VERSION6)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 							newSourceEntry->sourceAddr[1]=sourceAddr[1];
 							newSourceEntry->sourceAddr[2]=sourceAddr[2];
 							newSourceEntry->sourceAddr[3]=sourceAddr[3];
 						}
-#endif						
+#endif
 						newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 						rtl_linkSourceEntry(groupEntry,newSourceEntry);
 					}
 
 				}
 				else
-				{		
+				{
 					/*just update source timer*/
-					sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;		
+					sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 				}
-					
+
 				if(ipVersion==IP_VERSION4)
-				{	
+				{
 					sourceAddr++;
 				}
-				
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 				if(ipVersion==IP_VERSION6)
 				{
 					sourceAddr=sourceAddr+4;
 				}
-#endif				
-				
+#endif
+
 			}
-                      
+
 	//		if(rtl_mCastModuleArray[moduleIndex].enableFastLeave==TRUE)         /*lower the timer of (A-B) or (X-A)*/
 		//	{
 			    sourceEntry=groupEntry->sourceList;
-				  
+
 	                  if(ipVersion==IP_VERSION4)
 	                  {
-	                             sourceAddr=&(((struct groupRecord *)pktBuf)->srcList);		
+	                             sourceAddr=&(((struct groupRecord *)pktBuf)->srcList);
 	                  }
-					  
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	                  if(ipVersion==IP_VERSION6)
-	                  {			
+	                  {
 		                      sourceAddr=&(((struct mCastAddrRecord *)pktBuf)->srcList);
 	                  }
-#endif	  
+#endif
 				while(sourceEntry)
-				{				  
+				{
 				         if((rtl_searchSourceAddr(ipVersion, sourceEntry->sourceAddr, sourceAddr, numOfSrc)==FALSE)&&(sourceEntry->portTimer[portNum]>(rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime)))
-					 {      
+					 {
 						if(sourceEntry->portTimer[portNum]>(rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime))
 						{
-							sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;						
+							sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
 						}
 
 					 }
 				         sourceEntry=sourceEntry->next;
 				}
-				
+
                             if(groupEntry->groupFilterTimer[portNum]>rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime)   /*lower the group timer if in exclude mode*/
                             {
 					groupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
-			
+
 				}
 
 				if((numOfSrc==0)&&(rtl_mCastModuleArray[moduleIndex].enableFastLeave==TRUE))
@@ -3007,9 +3007,9 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 		     			{
 						groupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds;
 			 		}
-						
+
 					sourceEntry=groupEntry->sourceList;
-					
+
 					while(sourceEntry)
 					{
 						if(sourceEntry->portTimer[portNum]>rtl_sysUpSeconds)
@@ -3018,11 +3018,11 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 						}
 		 				sourceEntry=sourceEntry->next;
 					}
-					
+
 				}
 		}
 		else
-		{	
+		{
 			if((numOfSrc==0)&&(groupEntry->groupFilterTimer[portNum]>rtl_sysUpSeconds))
 			{
 		     	 		if(rtl_mCastModuleArray[moduleIndex].enableFastLeave==TRUE)
@@ -3032,7 +3032,7 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 					else
 					{
 						groupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
-					}			
+					}
 			}
 			else
 			{
@@ -3040,7 +3040,7 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 			}
 
 		}
-	
+
 
 	}
 
@@ -3055,7 +3055,7 @@ static int32 rtl_processToInclude(uint32 moduleIndex, uint32 ipVersion,  uint32 
 	#endif
 
 return SUCCESS;
-	
+
 }
 
 static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 portNum , uint8 *pktBuf)
@@ -3066,7 +3066,7 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 	struct rtl_groupEntry* newGroupEntry=NULL;
 	struct rtl_sourceEntry *sourceEntry=NULL;
 	struct rtl_sourceEntry *newSourceEntry=NULL;
-	
+
 	uint32 hashIndex=0;
 	uint16 numOfSrc=0;
 	uint32 *sourceArray=NULL;
@@ -3081,20 +3081,20 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 		hashIndex=groupAddress[0]&rtl_hashMask;
 	}
 
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
-		
+
 		groupAddress[0]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[0]);
 		groupAddress[1]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[1]);
 		groupAddress[2]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[2]);
 		groupAddress[3]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[3]);
-		
+
 		numOfSrc=ntohs(((struct mCastAddrRecord *)pktBuf)->numOfSrc);
 		sourceArray=&(((struct mCastAddrRecord *)pktBuf)->srcList);
 		sourceAddr=&(((struct mCastAddrRecord *)pktBuf)->srcList);
 		hashIndex=groupAddress[3]&rtl_hashMask;
-	
+
 	}
 #endif
 
@@ -3108,9 +3108,9 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 			return FAILED;
 		}
 		else
-		{	
+		{
 			/*set new multicast entry*/
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+#ifdef CONFIG_RTL_MLD_SNOOPING
 			newGroupEntry->groupAddr[0]=groupAddress[0];
 			newGroupEntry->groupAddr[1]=groupAddress[1];
 			newGroupEntry->groupAddr[2]=groupAddress[2];
@@ -3122,18 +3122,18 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 			newGroupEntry->ipVersion=ipVersion;
 
 			newGroupEntry->sourceList=NULL;
-			
+
 			/*means the filter mode is exclude*/
 			newGroupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
-			
+
 			/*end of set group entry*/
-			
+
 			/*must first link into hash table, then call the function of set rtl8306sdm, because of aggregator checking*/
 			if(ipVersion==IP_VERSION4)
 			{
 				rtl_linkGroupEntry(newGroupEntry, rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable, hashIndex);
 			}
-			
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 			if(ipVersion==IP_VERSION6)
 			{
@@ -3152,29 +3152,29 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 						return FAILED;
 					}
 					else
-					{	
-					
+					{
+
 						if(ipVersion==IP_VERSION4)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 						}
-						
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 						if(ipVersion==IP_VERSION6)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 							newSourceEntry->sourceAddr[1]=sourceAddr[1];
 							newSourceEntry->sourceAddr[2]=sourceAddr[2];
 							newSourceEntry->sourceAddr[3]=sourceAddr[3];
 						}
-#endif						
+#endif
 						/*time out the sources included  in the TO_EXCLUDE report */
 						newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds;
 						rtl_linkSourceEntry(newGroupEntry,newSourceEntry);
 					}
-						
+
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
 
@@ -3183,19 +3183,19 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif					
-					
+#endif
+
 				}
 
 			}
-			
-			
+
+
 		}
-		
+
 	}
 	else /*means group address can be found in the forward hash table*/
-	{  
-	
+	{
+
 		if(groupEntry->groupFilterTimer[portNum]<=rtl_sysUpSeconds) /*means include mode*/
 		{
 
@@ -3217,7 +3217,7 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 				for(j=0; j<numOfSrc; j++)
 				{
 					sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr,groupEntry);
-					
+
 					if(sourceEntry==NULL)
 					{
 						newSourceEntry=rtl_allocateSourceEntry();
@@ -3227,24 +3227,24 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 							return FAILED;
 						}
 						else
-						{	
-						
+						{
+
 							if(ipVersion==IP_VERSION4)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
-							
+
 							}
-							
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 							if(ipVersion==IP_VERSION6)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
 								newSourceEntry->sourceAddr[1]=sourceAddr[1];
 								newSourceEntry->sourceAddr[2]=sourceAddr[2];
 								newSourceEntry->sourceAddr[3]=sourceAddr[3];
 							}
-#endif							
-						
+#endif
+
 							/*B-A time out*/
 							newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds;
 							rtl_linkSourceEntry(groupEntry,newSourceEntry);
@@ -3266,20 +3266,20 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 					}
 
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
-					
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 					if(ipVersion==IP_VERSION6)
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif					
+#endif
 				}
 
-			}	
-			
+			}
+
 		}
 		else/*means exclude mode*/
 		{
@@ -3302,7 +3302,7 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 				for(j=0; j<numOfSrc; j++)
 				{
 					sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr,groupEntry);
-					
+
 					if(sourceEntry==NULL)
 					{
 						newSourceEntry=rtl_allocateSourceEntry();
@@ -3312,58 +3312,58 @@ static  int32 rtl_processToExclude(uint32 moduleIndex, uint32 ipVersion,uint32 p
 							return FAILED;
 						}
 						else
-						{	
-						
+						{
+
 							if(ipVersion==IP_VERSION4)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
 							}
-							
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 							if(ipVersion==IP_VERSION6)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
 								newSourceEntry->sourceAddr[1]=sourceAddr[1];
 								newSourceEntry->sourceAddr[2]=sourceAddr[2];
-								newSourceEntry->sourceAddr[3]=sourceAddr[3];	
+								newSourceEntry->sourceAddr[3]=sourceAddr[3];
 							}
-#endif							
+#endif
                                                  newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
-                                                 rtl_linkSourceEntry(groupEntry,newSourceEntry);													
-							
+                                                 rtl_linkSourceEntry(groupEntry,newSourceEntry);
+
 						}
 
 					}
 					else
-					{	
-						if((sourceEntry->portTimer[portNum]==0)||(sourceEntry->portTimer[portNum]>(rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime)))                                                          
+					{
+						if((sourceEntry->portTimer[portNum]==0)||(sourceEntry->portTimer[portNum]>(rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime)))
 						{
 							sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
 						}
 					}
-				
+
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
-					
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 					if(ipVersion==IP_VERSION6)
 					{
 						sourceAddr=sourceAddr+4;
 					}
 #endif
-					
+
 				}
 			}
-		
-			
+
+
 		}
 
 		/*switch to exclude mode or update exclude mode filter timer*/
 		groupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
-		
-	
+
+
 
 	}
 
@@ -3388,12 +3388,12 @@ static  int32 rtl_processAllow(uint32 moduleIndex, uint32 ipVersion, uint32 port
 	struct rtl_groupEntry* newGroupEntry=NULL;
 	struct rtl_sourceEntry *sourceEntry=NULL;
 	struct rtl_sourceEntry *newSourceEntry=NULL;
-	
+
 	uint32 hashIndex=0;
 	uint16 numOfSrc=0;
 	uint32 *sourceAddr=NULL;
 
-	
+
 
 	if(ipVersion==IP_VERSION4)
 	{
@@ -3403,21 +3403,21 @@ static  int32 rtl_processAllow(uint32 moduleIndex, uint32 ipVersion, uint32 port
 		hashIndex=groupAddress[0]&rtl_hashMask;
 	}
 
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
-		
+
 		groupAddress[0]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[0]);
 		groupAddress[1]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[1]);
 		groupAddress[2]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[2]);
 		groupAddress[3]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[3]);
-		
+
 		numOfSrc=ntohs(((struct mCastAddrRecord *)pktBuf)->numOfSrc);
 		sourceAddr=&(((struct mCastAddrRecord *)pktBuf)->srcList);
 		hashIndex=groupAddress[3]&rtl_hashMask;
-	
+
 	}
-#endif	
+#endif
 
 	groupEntry=rtl_searchGroupEntry(moduleIndex, ipVersion, groupAddress);
 	if(groupEntry==NULL)   /*means new group address, create new group entry*/
@@ -3429,9 +3429,9 @@ static  int32 rtl_processAllow(uint32 moduleIndex, uint32 ipVersion, uint32 port
 			return FAILED;
 		}
 		else
-		{	
+		{
 			/*set new multicast entry*/
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+#ifdef CONFIG_RTL_MLD_SNOOPING
 			newGroupEntry->groupAddr[0]=groupAddress[0];
 			newGroupEntry->groupAddr[1]=groupAddress[1];
 			newGroupEntry->groupAddr[2]=groupAddress[2];
@@ -3440,13 +3440,13 @@ static  int32 rtl_processAllow(uint32 moduleIndex, uint32 ipVersion, uint32 port
 			newGroupEntry->groupAddr[0]=groupAddress[0];
 #endif
 
-		
+
 			newGroupEntry->ipVersion=ipVersion;
 
 			newGroupEntry->sourceList=NULL;
-			
+
 			/*end of set group entry*/
-			
+
 			/*must first link into hash table, then call the function of set rtl8306sdm, because of aggregator checking*/
 			if(ipVersion==IP_VERSION4)
 			{
@@ -3466,7 +3466,7 @@ static  int32 rtl_processAllow(uint32 moduleIndex, uint32 ipVersion, uint32 port
 				for(j=0; j<numOfSrc; j++)
 				{
 
-					
+
 					newSourceEntry=rtl_allocateSourceEntry();
 					if(newSourceEntry==NULL)
 					{
@@ -3474,59 +3474,59 @@ static  int32 rtl_processAllow(uint32 moduleIndex, uint32 ipVersion, uint32 port
 						return FAILED;
 					}
 					else
-					{	
-					
+					{
+
 						if(ipVersion==IP_VERSION4)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 						}
-						
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 						if(ipVersion==IP_VERSION6)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 							newSourceEntry->sourceAddr[1]=sourceAddr[1];
 							newSourceEntry->sourceAddr[2]=sourceAddr[2];
 							newSourceEntry->sourceAddr[3]=sourceAddr[3];
 						}
-#endif						
+#endif
 						newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 						rtl_linkSourceEntry(newGroupEntry,newSourceEntry);
 					}
-					
+
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
-					
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 					if(ipVersion==IP_VERSION6)
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif					
+#endif
 				}
 			}
 			else
 			{
 				newGroupEntry->groupFilterTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;;
 			}
-	
+
 		}
 
-	
-		
+
+
 	}
 	else /*means it can be found in the forward hash table*/
-	{  
+	{
 		if(rtl_mCastModuleArray[moduleIndex].enableSourceList==TRUE)
 		{
 			/*here to handle the source list*/
 			for(j=0; j<numOfSrc; j++)
 			{
-			
+
 				sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr,groupEntry);
-			
+
 				if(sourceEntry==NULL)
 				{
 					newSourceEntry=rtl_allocateSourceEntry();
@@ -3536,44 +3536,44 @@ static  int32 rtl_processAllow(uint32 moduleIndex, uint32 ipVersion, uint32 port
 						return FAILED;
 					}
 					else
-					{	
-					
+					{
+
 						if(ipVersion==IP_VERSION4)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 						}
-						
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 						if(ipVersion==IP_VERSION6)
-						{	
+						{
 							newSourceEntry->sourceAddr[0]=sourceAddr[0];
 							newSourceEntry->sourceAddr[1]=sourceAddr[1];
 							newSourceEntry->sourceAddr[2]=sourceAddr[2];
 							newSourceEntry->sourceAddr[3]=sourceAddr[3];
 						}
-#endif						
+#endif
 						newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 						rtl_linkSourceEntry(groupEntry,newSourceEntry);
 					}
 
 				}
 				else
-				{		
+				{
 					/*just update source timer*/
-					sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;		
+					sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.groupMemberAgingTime;
 				}
-					
+
 				if(ipVersion==IP_VERSION4)
-				{	
+				{
 					sourceAddr++;
 				}
-				
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 				if(ipVersion==IP_VERSION6)
 				{
 					sourceAddr=sourceAddr+4;
 				}
-#endif				
+#endif
 			}
 		}
 		else
@@ -3605,7 +3605,7 @@ static int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNu
 	struct rtl_sourceEntry *sourceEntry=NULL;
 	struct rtl_sourceEntry *newSourceEntry=NULL;
 //	struct rtl_sourceEntry *nextSourceEntry=NULL;
-	
+
 	uint32 hashIndex=0;
 	uint16 numOfSrc=0;
 	uint32 *sourceAddr=NULL;
@@ -3618,15 +3618,15 @@ static int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNu
 		hashIndex=groupAddress[0]&rtl_hashMask;
 	}
 
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
-		
+
 		groupAddress[0]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[0]);
 		groupAddress[1]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[1]);
 		groupAddress[2]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[2]);
 		groupAddress[3]=ntohl(((struct mCastAddrRecord *)pktBuf)->mCastAddr[3]);
-		
+
 		numOfSrc=ntohs(((struct mCastAddrRecord *)pktBuf)->numOfSrc);
 		sourceAddr=&(((struct mCastAddrRecord *)pktBuf)->srcList);
 		hashIndex=groupAddress[3]&rtl_hashMask;
@@ -3635,8 +3635,8 @@ static int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNu
 
 	groupEntry=rtl_searchGroupEntry(moduleIndex, ipVersion, groupAddress);
 	if(groupEntry!=NULL)
-	{  
-				
+	{
+
 		if(groupEntry->groupFilterTimer[portNum]>rtl_sysUpSeconds) /*means exclude mode*/
 		{
 			if(rtl_mCastModuleArray[moduleIndex].enableSourceList==TRUE)
@@ -3645,9 +3645,9 @@ static int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNu
 				/*A-X-Y=filter timer*/
 				for(j=0; j<numOfSrc; j++)
 				{
-					
+
 					sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr,groupEntry);
-				
+
 					if(sourceEntry==NULL)
 					{
 						newSourceEntry=rtl_allocateSourceEntry();
@@ -3657,24 +3657,24 @@ static int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNu
 							return FAILED;
 						}
 						else
-						{	
-						
+						{
+
 							if(ipVersion==IP_VERSION4)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
-							
+
 							}
-							
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 							if(ipVersion==IP_VERSION6)
-							{	
+							{
 								newSourceEntry->sourceAddr[0]=sourceAddr[0];
 								newSourceEntry->sourceAddr[1]=sourceAddr[1];
 								newSourceEntry->sourceAddr[2]=sourceAddr[2];
 								newSourceEntry->sourceAddr[3]=sourceAddr[3];
 							}
-#endif                           
-                                                
+#endif
+
                                                  if(groupEntry->groupFilterTimer[portNum]>(rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime))
                                                  {
                                                  	newSourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
@@ -3685,13 +3685,13 @@ static int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNu
 							}
 
                                                  rtl_linkSourceEntry(groupEntry,newSourceEntry);
-							
+
 						}
 
 					}
 					else
 					{
-						    
+
                                        	if(rtl_mCastModuleArray[moduleIndex].enableFastLeave==TRUE)
 						{
 						   	sourceEntry->portTimer[portNum]=rtl_sysUpSeconds;
@@ -3706,21 +3706,21 @@ static int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNu
 
 					}
 
-				
+
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
-					
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 					if(ipVersion==IP_VERSION6)
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif					
-					
+#endif
+
 				}
-                            
+
 			}
 			#if 0
 			else
@@ -3739,7 +3739,7 @@ static int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNu
 				        sourceEntry=rtl_searchSourceEntry(ipVersion, sourceAddr,groupEntry);
 					if(sourceEntry!=NULL)
 					{
-						
+
 						if(rtl_mCastModuleArray[moduleIndex].enableFastLeave==TRUE)
 						{
 							sourceEntry->portTimer[portNum]=rtl_sysUpSeconds;
@@ -3751,25 +3751,25 @@ static int32 rtl_processBlock(uint32 moduleIndex, uint32 ipVersion,uint32 portNu
 								sourceEntry->portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.lastMemberAgingTime;
 							}
 						}
-					}	
+					}
 
 					if(ipVersion==IP_VERSION4)
-					{	
+					{
 						sourceAddr++;
 					}
-					
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 					if(ipVersion==IP_VERSION6)
 					{
 						sourceAddr=sourceAddr+4;
 					}
-#endif					
+#endif
 			     	}
 
 			}
 
 	        }
-	
+
 	}
 
 	#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
@@ -3796,7 +3796,7 @@ static uint32 rtl_processIgmpv3Mldv2Reports(uint32 moduleIndex, uint32 ipVersion
 	uint16 numOfSrc=0;
 	int32 returnVal=0;
 	uint32 multicastRouterPortMask=rtl_getMulticastRouterPortMask(moduleIndex, ipVersion, rtl_sysUpSeconds);
-	
+
 	if(ipVersion==IP_VERSION4)
 	{
 		numOfRecords=ntohs(((struct igmpv3Report *)pktBuf)->numOfRecords);
@@ -3808,7 +3808,7 @@ static uint32 rtl_processIgmpv3Mldv2Reports(uint32 moduleIndex, uint32 ipVersion
 
 #ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
-	{	
+	{
 		numOfRecords=ntohs(((struct mldv2Report *)pktBuf)->numOfRecords);
 		if(numOfRecords!=0)
 		{
@@ -3816,48 +3816,48 @@ static uint32 rtl_processIgmpv3Mldv2Reports(uint32 moduleIndex, uint32 ipVersion
 		}
 	}
 #endif
-	
+
 	for(i=0; i<numOfRecords; i++)
 	{
 		if(ipVersion==IP_VERSION4)
 		{
 			recordType=((struct groupRecord *)groupRecords)->type;
 		}
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+#ifdef CONFIG_RTL_MLD_SNOOPING
 		if(ipVersion==IP_VERSION6)
 		{
 			recordType=((struct mCastAddrRecord *)groupRecords)->type;
 		}
-#endif		
-	
+#endif
+
 		switch(recordType)
 		{
 			case MODE_IS_INCLUDE:
 				returnVal=rtl_processIsInclude(moduleIndex, ipVersion, portNum, groupRecords);
 			break;
-			
+
 			case MODE_IS_EXCLUDE:
 				returnVal=rtl_processIsExclude(moduleIndex, ipVersion, portNum, groupRecords);
 			break;
-			
+
 			case CHANGE_TO_INCLUDE_MODE:
 				returnVal=rtl_processToInclude(moduleIndex, ipVersion, portNum, groupRecords);
 			break;
-			
+
 			case CHANGE_TO_EXCLUDE_MODE:
 				returnVal=rtl_processToExclude(moduleIndex, ipVersion, portNum, groupRecords);
 			break;
-			
+
 			case ALLOW_NEW_SOURCES:
 				returnVal=rtl_processAllow(moduleIndex, ipVersion, portNum, groupRecords);
 			break;
-			
+
 			case BLOCK_OLD_SOURCES:
 				returnVal=rtl_processBlock(moduleIndex, ipVersion, portNum, groupRecords);
 			break;
-			
+
 			default:break;
-			
+
 		}
 
 		if(ipVersion==IP_VERSION4)
@@ -3866,42 +3866,42 @@ static uint32 rtl_processIgmpv3Mldv2Reports(uint32 moduleIndex, uint32 ipVersion
 			/*shift pointer to another group record*/
 			groupRecords=groupRecords+8+numOfSrc*4+(((struct groupRecord *)(groupRecords))->auxLen)*4;
 		}
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+#ifdef CONFIG_RTL_MLD_SNOOPING
 		if(ipVersion==IP_VERSION6)
 		{
 			numOfSrc=ntohs(((struct mCastAddrRecord *)groupRecords)->numOfSrc);
 			/*shift pointer to another group record*/
 			groupRecords=groupRecords+20+numOfSrc*16+(((struct mCastAddrRecord *)(groupRecords))->auxLen)*4;
 		}
-#endif		
+#endif
 	}
 
 	return (multicastRouterPortMask&(~(1<<portNum))&((1<<MAX_SUPPORT_PORT_NUMBER)-1));
-	
+
 }
 
 static uint32 rtl_processIgmpMld(uint32 moduleIndex, uint32 ipVersion, uint8* pktBuf, uint32 pktLen, uint32 portNum)
-{	
+{
 	uint32 fwdPortMask=0;
 
 	#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
 	reportEventContext.moduleIndex=moduleIndex;
 	#endif
-	
+
 	switch(pktBuf[0])
 	{
 		case IGMP_QUERY:
 			fwdPortMask=rtl_processQueries(moduleIndex, ipVersion, portNum, pktBuf, pktLen);
 		break;
-			
+
 		case IGMPV1_REPORT:
 			 fwdPortMask=rtl_processJoin(moduleIndex, ipVersion, portNum, pktBuf);
 		break;
-			
-		case IGMPV2_REPORT:	
+
+		case IGMPV2_REPORT:
 			 fwdPortMask=rtl_processJoin(moduleIndex, ipVersion, portNum, pktBuf);
 		break;
-			
+
 		case IGMPV2_LEAVE:
 			 fwdPortMask=rtl_processLeave(moduleIndex, ipVersion, portNum, pktBuf);
 		break;
@@ -3913,15 +3913,15 @@ static uint32 rtl_processIgmpMld(uint32 moduleIndex, uint32 ipVersion, uint8* pk
 		case MLD_QUERY:
 			fwdPortMask=rtl_processQueries(moduleIndex, ipVersion, portNum, pktBuf, pktLen);
 		break;
-			
+
 		case MLDV1_REPORT:
 			 fwdPortMask=rtl_processJoin(moduleIndex, ipVersion, portNum, pktBuf);
 		break;
-			
-		case MLDV1_DONE:	
+
+		case MLDV1_DONE:
 			 fwdPortMask=rtl_processLeave(moduleIndex, ipVersion, portNum, pktBuf);
 		break;
-			
+
 		case MLDV2_REPORT:
 			 fwdPortMask=rtl_processIgmpv3Mldv2Reports(moduleIndex, ipVersion, portNum, pktBuf);
 		break;
@@ -3929,17 +3929,17 @@ static uint32 rtl_processIgmpMld(uint32 moduleIndex, uint32 ipVersion, uint8* pk
 		default:
 			fwdPortMask=((~(1<<portNum))&((1<<MAX_SUPPORT_PORT_NUMBER)-1));
 		break;
-	}						
-	
+	}
+
 	return fwdPortMask;
-			
+
 }
 
 
 
 static uint32 rtl_processDvmrp(uint32 moduleIndex, uint32 ipVersion, uint8* pktBuf, uint32 pktLen, uint32 portNum)
 {
-	
+
 	if(ipVersion==IP_VERSION4)
 	{
 		rtl_mCastModuleArray[moduleIndex].rtl_ipv4MulticastRouters.dvmrpRouter.portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.dvmrpRouterAgingTime; /*update timer*/
@@ -3960,18 +3960,18 @@ static uint32 rtl_processDvmrp(uint32 moduleIndex, uint32 ipVersion, uint8* pktB
 }
 
 static uint32 rtl_processMospf(uint32 moduleIndex,uint32 ipVersion, uint8* pktBuf, uint32 pktLen, uint32 portNum)
-{ 
+{
 	struct ipv4MospfHdr *ipv4MospfHeader=(struct ipv4MospfHdr*)pktBuf;
 	struct ipv4MospfHello *ipv4HelloPkt=(struct ipv4MospfHello*)pktBuf;
-	
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	struct ipv6MospfHdr *ipv6MospfHeader=(struct ipv6MospfHdr*)pktBuf;
 	struct ipv6MospfHello *ipv6HelloPkt=(struct ipv6MospfHello*)pktBuf;
 #endif
 
 
 	if(ipVersion==IP_VERSION4)
-	{	
+	{
 		/*mospf is built based on ospfv2*/
 		if((ipv4MospfHeader->version==2) && (ipv4MospfHeader->type==MOSPF_HELLO_TYPE))
 		{
@@ -3982,15 +3982,15 @@ static uint32 rtl_processMospf(uint32 moduleIndex,uint32 ipVersion, uint8* pktBu
 		}
 	}
 
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
-	{	
+	{
 		if((ipv6MospfHeader->version==3) && (ipv6MospfHeader->type==MOSPF_HELLO_TYPE))
 		{
 			if((ipv6HelloPkt->options[2] & 0x04)!=0)
 			{
 				rtl_mCastModuleArray[moduleIndex].rtl_ipv6MulticastRouters.mospfRouter.portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.mospfRouterAgingTime; /*update timer*/
-			
+
 			}
 		}
 	}
@@ -4007,18 +4007,18 @@ static uint32 rtl_processMospf(uint32 moduleIndex,uint32 ipVersion, uint8* pktBu
 	#endif
 
 	return ((~(1<<portNum))&((1<<MAX_SUPPORT_PORT_NUMBER)-1));
-	
+
 }
 
 static uint32 rtl_processPim(uint32 moduleIndex, uint32 ipVersion, uint8* pktBuf, uint32 pktLen, uint32 portNum)
 {
 	if(ipVersion==IP_VERSION4)
-	{	
+	{
 		rtl_mCastModuleArray[moduleIndex].rtl_ipv4MulticastRouters.pimRouter.portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.pimRouterAgingTime; /*update timer*/
-		
+
 	}
-	
-#ifdef CONFIG_RTL_MLD_SNOOPING	
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	if(ipVersion==IP_VERSION6)
 	{
 		rtl_mCastModuleArray[moduleIndex].rtl_ipv6MulticastRouters.pimRouter.portTimer[portNum]=rtl_sysUpSeconds+rtl_mCastTimerParas.pimRouterAgingTime; /*update timer*/
@@ -4056,7 +4056,7 @@ int32 rtl_registerIgmpSnoopingModule(uint32 *moduleIndex)
 {
 	int32 i=0;
 	uint32 index=0xFFFFFFFF;
-	
+
 	*moduleIndex=0xFFFFFFFF;
 
 	for(i=0; i<MAX_MCAST_MODULE_NUM; i++)
@@ -4072,7 +4072,7 @@ int32 rtl_registerIgmpSnoopingModule(uint32 *moduleIndex)
 	{
 		return FAILED;
 	}
-	
+
 
 	if(rtl_mCastModuleArray[index].enableSnooping==FALSE)
 	{
@@ -4083,23 +4083,23 @@ int32 rtl_registerIgmpSnoopingModule(uint32 *moduleIndex)
 			rtl_mCastModuleArray[index].rtl_ipv4MulticastRouters.dvmrpRouter.portTimer[i]=0;
 			rtl_mCastModuleArray[index].rtl_ipv4MulticastRouters.pimRouter.portTimer[i]=0;
 			rtl_mCastModuleArray[index].rtl_ipv4MulticastRouters.mospfRouter.portTimer[i]=0;
-			
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 			rtl_mCastModuleArray[index].rtl_ipv6MulticastRouters.querier.portTimer[i]=0;
 			rtl_mCastModuleArray[index].rtl_ipv6MulticastRouters.dvmrpRouter.portTimer[i]=0;
 			rtl_mCastModuleArray[index].rtl_ipv6MulticastRouters.pimRouter.portTimer[i]=0;
 			rtl_mCastModuleArray[index].rtl_ipv6MulticastRouters.mospfRouter.portTimer[i]=0;
-#endif			
+#endif
 	      }
-	
+
 	      /*initialize hash table*/
 	      rtl_initHashTable(index, rtl_hashTableSize);
-	
+
 	      if((rtl_mCastModuleArray[index].rtl_ipv4HashTable==NULL) )
 	      {
 		      return FAILED;
 	      }
-		  
+
 #ifdef CONFIG_RTL_MLD_SNOOPING
 		if(rtl_mCastModuleArray[index].rtl_ipv6HashTable==NULL)
 		{
@@ -4114,10 +4114,10 @@ int32 rtl_registerIgmpSnoopingModule(uint32 *moduleIndex)
       		{
 	      		rtl_mCastModuleArray[index].rtl_gatewayMac[i]=0;
       		}
-	
+
 		rtl_mCastModuleArray[index]. rtl_gatewayIpv4Addr=0;
 
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+#ifdef CONFIG_RTL_MLD_SNOOPING
 		 for(i=0; i<4; i++)
       		{
 	      		rtl_mCastModuleArray[index].rtl_gatewayIpv6Addr[i]=0;
@@ -4148,44 +4148,44 @@ int32 rtl_registerIgmpSnoopingModule(uint32 *moduleIndex)
 
 /*
 @func int32	| rtl_unregisterIgmpSnoopingModule	|  Unregister an igmp snooping module.
-@parm  uint32	| moduleIndex	| Igmp snooping module index. 
+@parm  uint32	| moduleIndex	| Igmp snooping module index.
 @rvalue SUCCESS	|Unregister igmp snooping module successfully.
 @rvalue FAILED	|Unregister igmp snooping module failed.
-@comm 
+@comm
  This function should be called once a second to maintain multicast timer list.
 */
 int32 rtl_unregisterIgmpSnoopingModule(uint32 moduleIndex)
 {
 	uint32 i=0;
 	struct rtl_groupEntry *groupEntryPtr=NULL;
-	
+
 	if(moduleIndex>=MAX_MCAST_MODULE_NUM)
 	{
 		return FAILED;
 	}
-	
+
        if(rtl_mCastModuleArray[moduleIndex].enableSnooping==TRUE)
        {
-	
+
 		 rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv4Addr=0;
-		 
+
           	 for(i=0; i<6; i++)
      		{
 	   		 rtl_mCastModuleArray[moduleIndex].rtl_gatewayMac[i]=0;
       		}
-			
-#ifdef CONFIG_RTL_MLD_SNOOPING					 
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 		for(i=0;i<4;i++)
 		{
 			rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[i]=0;
 		}
-#endif	
+#endif
 
 	 	 /*delete ipv4 multicast entry*/
         	for(i=0;i<rtl_hashTableSize;i++)
 	     	{
 			groupEntryPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable[i];
-				
+
 			while(groupEntryPtr!=NULL)
 			{
 				rtl_deleteGroupEntry(groupEntryPtr, rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable);
@@ -4195,12 +4195,12 @@ int32 rtl_unregisterIgmpSnoopingModule(uint32 moduleIndex)
 		rtl_glueFree(rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable);
 		rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable=NULL;
 		memset(&(rtl_mCastModuleArray[moduleIndex].rtl_ipv4MulticastRouters), 0, sizeof(struct rtl_multicastRouters));
-		
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 		/*delete ipv6 multicast entry*/
 		for(i=0; i<rtl_hashTableSize; i++)
 		{
-		
+
 			groupEntryPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable[i];
 			while(groupEntryPtr!=NULL)
 			{
@@ -4224,24 +4224,24 @@ int32 rtl_unregisterIgmpSnoopingModule(uint32 moduleIndex)
 #endif
 	       return SUCCESS;
        }
-	   
+
 	 return SUCCESS;
-	
+
 }
 
 static void _rtl865x_configIgmpSnoopingExpire(int32 disableExpire)
 {
 	uint32 maxTime=0xffffffff;
-	
+
 	if((rtl_mCastTimerParas.disableExpire==FALSE) && (disableExpire==TRUE))
 	{
 		rtl_mCastTimerParas.disableExpire=TRUE;
 	}
-		
+
 	if((rtl_mCastTimerParas.disableExpire==TRUE) && (disableExpire==FALSE) )
 	{
 #if defined(__linux__) && defined(__KERNEL__)
-		struct timeval currentTimeVector; 
+		struct timeval currentTimeVector;
 		do_gettimeofday(&currentTimeVector);
 		/*reset start time*/
 		if(currentTimeVector.tv_sec>=rtl_sysUpSeconds)
@@ -4256,7 +4256,7 @@ static void _rtl865x_configIgmpSnoopingExpire(int32 disableExpire)
 #endif
 		rtl_mCastTimerParas.disableExpire=FALSE;
 	}
-	
+
 
 	return;
 }
@@ -4274,7 +4274,7 @@ void rtl_setMulticastParameters(struct rtl_mCastTimerParameters mCastTimerParame
 	{
 		rtl_mCastTimerParas.groupMemberAgingTime= mCastTimerParameters.groupMemberAgingTime;
 	}
-	
+
 	if(mCastTimerParameters.lastMemberAgingTime!=0)
 	{
 		rtl_mCastTimerParas.lastMemberAgingTime= mCastTimerParameters.lastMemberAgingTime;
@@ -4282,29 +4282,29 @@ void rtl_setMulticastParameters(struct rtl_mCastTimerParameters mCastTimerParame
 
 	if(mCastTimerParameters.querierPresentInterval!=0)
 	{
-	
+
 		rtl_mCastTimerParas.querierPresentInterval=mCastTimerParameters.querierPresentInterval;
 	}
 
 
 	if(mCastTimerParameters.dvmrpRouterAgingTime!=0)
 	{
-	
+
 		rtl_mCastTimerParas.dvmrpRouterAgingTime=mCastTimerParameters.dvmrpRouterAgingTime;
 	}
 
 	if(mCastTimerParameters.mospfRouterAgingTime!=0)
 	{
-	
+
 		rtl_mCastTimerParas.mospfRouterAgingTime=mCastTimerParameters.mospfRouterAgingTime;
 	}
 
 	if(mCastTimerParameters.pimRouterAgingTime!=0)
 	{
-	
+
 		rtl_mCastTimerParas.pimRouterAgingTime=mCastTimerParameters.pimRouterAgingTime;
 	}
-	
+
 	return;
 }
 
@@ -4322,22 +4322,22 @@ int32 rtl_configIgmpSnoopingModule(uint32 moduleIndex, struct rtl_mCastSnoopingL
 	{
 		return FAILED;
 	}
-	
+
 	if(mCastSnoopingLocalConfig==NULL)
 	{
 		return FAILED;
 	}
-	
+
 	if(rtl_mCastModuleArray[moduleIndex].enableSnooping==FALSE)
 	{
 		return FAILED;
 	}
-	
+
 	rtl_mCastModuleArray[moduleIndex].enableSourceList=mCastSnoopingLocalConfig->enableSourceList;
 	rtl_mCastModuleArray[moduleIndex].enableFastLeave=mCastSnoopingLocalConfig->enableFastLeave;
 	rtl_mCastModuleArray[moduleIndex].unknownMCastFloodMap=mCastSnoopingLocalConfig->unknownMcastFloodMap;
 	rtl_mCastModuleArray[moduleIndex].staticRouterPortMask=mCastSnoopingLocalConfig->staticRouterPortMask;
-		
+
 	rtl_mCastModuleArray[moduleIndex].rtl_gatewayMac[0]=mCastSnoopingLocalConfig->gatewayMac[0];
 	rtl_mCastModuleArray[moduleIndex].rtl_gatewayMac[1]=mCastSnoopingLocalConfig->gatewayMac[1];
 	rtl_mCastModuleArray[moduleIndex].rtl_gatewayMac[2]=mCastSnoopingLocalConfig->gatewayMac[2];
@@ -4348,8 +4348,8 @@ int32 rtl_configIgmpSnoopingModule(uint32 moduleIndex, struct rtl_mCastSnoopingL
 
 
 	rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv4Addr=mCastSnoopingLocalConfig->gatewayIpv4Addr;
-	
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 	rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[0]=mCastSnoopingLocalConfig->gatewayIpv6Addr[0];
 	rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[1]=mCastSnoopingLocalConfig->gatewayIpv6Addr[1];
 	rtl_mCastModuleArray[moduleIndex].rtl_gatewayIpv6Addr[2]=mCastSnoopingLocalConfig->gatewayIpv6Addr[2];
@@ -4362,7 +4362,7 @@ int32 rtl_configIgmpSnoopingModule(uint32 moduleIndex, struct rtl_mCastSnoopingL
 @func int32	| rtl_maintainMulticastSnoopingTimerList	|   Maintain igmp snooping internal timer list.
 @parm  uint32	| currentSystemTime	|The current system time (unit: seconds).
 @rvalue SUCCESS	|Always return SUCCESS.
-@comm 
+@comm
  This function should be called every second
 */
 int32 rtl_maintainMulticastSnoopingTimerList(uint32 currentSystemTime)
@@ -4380,7 +4380,7 @@ int32 rtl_maintainMulticastSnoopingTimerList(uint32 currentSystemTime)
 	{
 		return SUCCESS;
 	}
-	
+
 	/*handle timer conter overflow*/
 	if(currentSystemTime>rtl_startTime)
 	{
@@ -4408,8 +4408,8 @@ int32 rtl_maintainMulticastSnoopingTimerList(uint32 currentSystemTime)
 				 {
 					groupEntryPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable[i];
 					while(groupEntryPtr)              /*traverse each group list*/
-					{	
-						nextEntry=groupEntryPtr->next; 
+					{
+						nextEntry=groupEntryPtr->next;
 						#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
 						timerEventContext.groupAddr[0]=groupEntryPtr->groupAddr[0];
 						#endif
@@ -4418,8 +4418,8 @@ int32 rtl_maintainMulticastSnoopingTimerList(uint32 currentSystemTime)
 					}
 				 }
 			}
-			
-#ifdef CONFIG_RTL_MLD_SNOOPING		
+
+#ifdef CONFIG_RTL_MLD_SNOOPING
 			/*maintain ipv6 group entry  timer */
 			for(i=0; i<rtl_hashTableSize; i++)
 			{
@@ -4428,8 +4428,8 @@ int32 rtl_maintainMulticastSnoopingTimerList(uint32 currentSystemTime)
 				{
 					groupEntryPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable[i];
 					while(groupEntryPtr)              /*traverse each group list*/
-					{	
-						nextEntry=groupEntryPtr->next; 
+					{
+						nextEntry=groupEntryPtr->next;
 						rtl_checkGroupEntryTimer(groupEntryPtr, rtl_mCastModuleArray[moduleIndex].enableSourceList, rtl_mCastModuleArray[moduleIndex].rtl_ipv6HashTable);
 						groupEntryPtr=nextEntry;/*because expired group entry  will be cleared*/
 					}
@@ -4447,7 +4447,7 @@ int32 rtl_maintainMulticastSnoopingTimerList(uint32 currentSystemTime)
 @func int32	| rtl_igmpMldProcess	|  API to process an incoming igmp packet.
 @parm  uint32	| moduleIndex	| Igmp snooping module index.
 @parm  uint8 *	| macFrame	| Data pointer of igmp mac frame.
-@parm  uint32	| portNum	| Input parameter to specify at which port this igmp packet was recieved 
+@parm  uint32	| portNum	| Input parameter to specify at which port this igmp packet was recieved
 @parm  uint32 *	| fwdPortMask	| Output parameter to tell where to relay this igmp packet.
 @rvalue SUCCESS	|Doing igmp snooping successfully.
 @rvalue FAILED	|Doing igmp snooping failed.
@@ -4467,7 +4467,7 @@ int32 rtl_igmpMldProcess(uint32 moduleIndex, uint8 * macFrame,  uint32 portNum, 
 	{
 		return FAILED;
 	}
-	
+
 	//rtl_parseMacFrame(moduleIndex, macFrame, TRUE, &macFrameInfo);
 	rtl_parseMacFrame(moduleIndex, macFrame, FALSE, &macFrameInfo);
 	if(  rtl_mCastModuleArray[moduleIndex].enableSnooping==TRUE)
@@ -4476,14 +4476,14 @@ int32 rtl_igmpMldProcess(uint32 moduleIndex, uint8 * macFrame,  uint32 portNum, 
 		{
 			return FAILED;
 		}
-		
+
 		if((macFrameInfo.ipVersion!=IP_VERSION4) && (macFrameInfo.ipVersion!=IP_VERSION6))
 		{
-		
+
 			return FAILED;
 		}
-		
-#ifndef CONFIG_RTL_MLD_SNOOPING	
+
+#ifndef CONFIG_RTL_MLD_SNOOPING
 		if (macFrameInfo.ipVersion==IP_VERSION6)
 		{
 			return FAILED;
@@ -4524,16 +4524,16 @@ int32 rtl_igmpMldProcess(uint32 moduleIndex, uint8 * macFrame,  uint32 portNum, 
 			case MOSPF_PROTOCOL:
 				*fwdPortMask=rtl_processMospf(moduleIndex, (uint32)(macFrameInfo.ipVersion), macFrameInfo.l3PktBuf, macFrameInfo.l3PktLen,portNum);
 			break;
-				
+
 			case PIM_PROTOCOL:
 				*fwdPortMask=rtl_processPim(moduleIndex, (uint32)(macFrameInfo.ipVersion), macFrameInfo.l3PktBuf, macFrameInfo.l3PktLen, portNum);
 			break;
 
 			default: break;
 		}
-		
+
 	}
-	
+
 	return SUCCESS;
 }
 
@@ -4550,12 +4550,12 @@ int32 rtl_getMulticastDataFwdPortMask(uint32 moduleIndex, struct rtl_multicastDa
 {
 	int32 retVal=FAILED;
 	struct rtl_multicastFwdInfo multicastFwdInfo;
-	
+
 	if(moduleIndex>=MAX_MCAST_MODULE_NUM)
 	{
 		return FAILED;
 	}
-		
+
 	if(multicastDataInfo==NULL)
 	{
 		return FAILED;
@@ -4565,13 +4565,13 @@ int32 rtl_getMulticastDataFwdPortMask(uint32 moduleIndex, struct rtl_multicastDa
 	{
 		return FAILED;
 	}
-	
+
 	retVal=rtl_getMulticastDataFwdInfo( moduleIndex, multicastDataInfo, &multicastFwdInfo);
 
 	*fwdPortMask=multicastFwdInfo.fwdPortMask;
 
 	return retVal;
-	
+
 }
 
 
@@ -4586,7 +4586,7 @@ int32 rtl_getMulticastDataFwdInfo(uint32 moduleIndex, struct rtl_multicastDataIn
 	{
 		return FAILED;
 	}
-		
+
 	if(multicastDataInfo==NULL)
 	{
 		return FAILED;
@@ -4604,21 +4604,21 @@ int32 rtl_getMulticastDataFwdInfo(uint32 moduleIndex, struct rtl_multicastDataIn
 		multicastFwdInfo->reservedMCast=TRUE;
 		multicastFwdInfo->fwdPortMask=0xFFFFFFFF;
 		multicastFwdInfo->cpuFlag=TRUE;
-		
+
 		return FAILED;
 	}
-	
+
 	if(IN_MULTICAST_RESV1(multicastDataInfo->groupAddr[0]) )
 	{
 		multicastFwdInfo->reservedMCast=TRUE;
 		multicastFwdInfo->fwdPortMask=0xFFFFFFFF;
 		multicastFwdInfo->cpuFlag=TRUE;
-		
+
 		return FAILED;
 	}
-	
-	groupEntry=rtl_searchGroupEntry(moduleIndex,multicastDataInfo->ipVersion, multicastDataInfo->groupAddr); 
-	
+
+	groupEntry=rtl_searchGroupEntry(moduleIndex,multicastDataInfo->ipVersion, multicastDataInfo->groupAddr);
+
 	if(groupEntry==NULL)
 	{
 		multicastFwdInfo->unknownMCast=TRUE;
@@ -4645,11 +4645,11 @@ int32 rtl_getMulticastDataFwdInfo(uint32 moduleIndex, struct rtl_multicastDataIn
 		{
 			if(groupEntry!=NULL)
 			{
-				multicastFwdInfo->fwdPortMask=(uint32)rtl_getGroupFwdPortMask(groupEntry,0, rtl_sysUpSeconds);	
+				multicastFwdInfo->fwdPortMask=(uint32)rtl_getGroupFwdPortMask(groupEntry,0, rtl_sysUpSeconds);
 			}
 
 		}
-		
+
 		multicastFwdInfo->fwdPortMask=(multicastFwdInfo->fwdPortMask|multicastRouterPortMask);
 
 		#if defined (CONFIG_RTL_HARDWARE_MULTICAST)
@@ -4660,31 +4660,31 @@ int32 rtl_getMulticastDataFwdInfo(uint32 moduleIndex, struct rtl_multicastDataIn
 		#endif
 
 		return SUCCESS;
-	
+
 	}
 	return FAILED;
-	
+
 }
 
 #if defined(__linux__) && defined(__KERNEL__)
 
 static void rtl_multicastSysTimerExpired(uint32 expireDada)
 {
-	struct timeval currentTimeVector; 
-	
+	struct timeval currentTimeVector;
+
 	do_gettimeofday(&currentTimeVector);
 	rtl_maintainMulticastSnoopingTimerList((uint32)(currentTimeVector.tv_sec));
 	mod_timer(&igmpSysTimer, jiffies+HZ);
-	
+
 }
 
 static void rtl_multicastSysTimerInit(void)
 {
-	struct timeval startTimeVector; 
+	struct timeval startTimeVector;
 	do_gettimeofday(&startTimeVector);
 	rtl_startTime=(uint32)(startTimeVector.tv_sec);
-	rtl_sysUpSeconds=0;  
-	
+	rtl_sysUpSeconds=0;
+
 	init_timer(&igmpSysTimer);
 	igmpSysTimer.data=igmpSysTimer.expires;
 	igmpSysTimer.expires=jiffies+HZ;
@@ -4707,7 +4707,7 @@ int32 rtl_getDeviceIgmpSnoopingModuleIndex(rtl_multicastDeviceInfo_t *devInfo,ui
 	{
 		return FAILED;
 	}
-	
+
 	for(i=0; i<MAX_MCAST_MODULE_NUM; i++)
 	{
 		if(rtl_mCastModuleArray[i].enableSnooping==TRUE)
@@ -4719,7 +4719,7 @@ int32 rtl_getDeviceIgmpSnoopingModuleIndex(rtl_multicastDeviceInfo_t *devInfo,ui
 			}
 		}
 	}
-	
+
 	return FAILED;
 }
 
@@ -4754,7 +4754,7 @@ int32 rtl_setIgmpSnoopingModuleDevInfo(uint32 moduleIndex,rtl_multicastDeviceInf
 	}
 
 	memcpy(&rtl_mCastModuleArray[moduleIndex].deviceInfo,devInfo, sizeof(rtl_multicastDeviceInfo_t));
-	
+
 	return SUCCESS;
 }
 
@@ -4770,9 +4770,9 @@ int32 rtl_setIgmpSnoopingModuleStaticRouterPortMask(uint32 moduleIndex,uint32 st
 		return FAILED;
 	}
 
-	
+
 	rtl_mCastModuleArray[moduleIndex].staticRouterPortMask=staticRouterPortMask;
-	
+
 	return SUCCESS;
 }
 
@@ -4782,19 +4782,19 @@ int32 rtl_getgmpSnoopingModuleStaticRouterPortMask(uint32 moduleIndex,uint32 *st
 	{
 		return FAILED;
 	}
-	
+
 	if(staticRouterPortMask==NULL)
 	{
 		return FAILED;
 	}
-	
+
 	if(rtl_mCastModuleArray[moduleIndex].enableSnooping==FALSE)
 	{
 		return FAILED;
 	}
 
 	*staticRouterPortMask=rtl_mCastModuleArray[moduleIndex].staticRouterPortMask;
-	
+
 	return SUCCESS;
 }
 
@@ -4812,7 +4812,7 @@ int32 rtl_setIgmpSnoopingModuleUnknownMCastFloodMap(uint32 moduleIndex,uint32 un
 	}
 
 	rtl_mCastModuleArray[moduleIndex].unknownMCastFloodMap=unknownMCastFloodMap;
-	
+
 	return SUCCESS;
 }
 
@@ -4822,19 +4822,19 @@ int32 rtl_getIgmpSnoopingModuleUnknownMCastFloodMap(uint32 moduleIndex,uint32 *u
 	{
 		return FAILED;
 	}
-	
+
 	if(unknownMCastFloodMap==NULL)
 	{
 		return FAILED;
 	}
-	
+
 	if(rtl_mCastModuleArray[moduleIndex].enableSnooping==FALSE)
 	{
 		return FAILED;
 	}
 
 	*unknownMCastFloodMap=rtl_mCastModuleArray[moduleIndex].unknownMCastFloodMap;
-	
+
 	return SUCCESS;
 }
 
@@ -4857,12 +4857,12 @@ int32 rtl_getIgmpSnoopingModuleDevInfo(uint32 moduleIndex,rtl_multicastDeviceInf
 		return FAILED;
 	}
 	memset(devInfo,0,sizeof(rtl_multicastDeviceInfo_t));
-	
+
 	if(rtl_mCastModuleArray[moduleIndex].enableSnooping==FALSE)
 	{
 		return FAILED;
 	}
-	
+
 	memcpy(devInfo,&rtl_mCastModuleArray[moduleIndex].deviceInfo, sizeof(rtl_multicastDeviceInfo_t));
 	return SUCCESS;
 }
@@ -4880,7 +4880,7 @@ int igmp_show(struct seq_file *s, void *v)
 	for(moduleIndex=0; moduleIndex<MAX_MCAST_MODULE_NUM ;moduleIndex++)
 	{
 		if(rtl_mCastModuleArray[moduleIndex].enableSnooping==TRUE)
-		{	
+		{
 			groupCnt=0;
 			seq_printf(s, "---------------------------------------------\n");
 			seq_printf(s, "module index:%d,",moduleIndex);
@@ -4890,14 +4890,14 @@ int igmp_show(struct seq_file *s, void *v)
 			for(i=0;i<rtl_hashTableSize;i++)
 		     	{
 				groupEntryPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable[i];
-					
+
 				while(groupEntryPtr!=NULL)
 				{
 					groupCnt++;
 					seq_printf(s, "[%d]group address:%d.%d.%d.%d\n",groupCnt,
 						groupEntryPtr->groupAddr[0]>>24, (groupEntryPtr->groupAddr[0]&0x00ff0000)>>16,
 						(groupEntryPtr->groupAddr[0]&0x0000ff00)>>8, (groupEntryPtr->groupAddr[0]&0xff));
-				
+
 					for(j=0;j<MAX_SUPPORT_PORT_NUMBER;j++)
 					{
 						if(groupEntryPtr->groupFilterTimer[j]>=rtl_sysUpSeconds)
@@ -4910,7 +4910,7 @@ int igmp_show(struct seq_file *s, void *v)
 
 						}
 					}
-					
+
 					sourceEntryPtr=groupEntryPtr->sourceList;
 					while(sourceEntryPtr!=NULL)
 					{
@@ -4951,8 +4951,8 @@ void rtl865x_igmpLinkStatusChangeCallback(uint32 moduleIndex, rtl_igmpPortInfo_t
 	int32 clearFlag=FALSE;
 	struct rtl_groupEntry *groupEntryPtr;
 	struct rtl_sourceEntry *sourceEntryPtr;
-	
-	
+
+
 	if(portInfo==NULL)
 	{
 		return ;
@@ -4962,19 +4962,19 @@ void rtl865x_igmpLinkStatusChangeCallback(uint32 moduleIndex, rtl_igmpPortInfo_t
 	{
 		return ;
 	}
-	
+
 
 	if(rtl_mCastModuleArray[moduleIndex].enableSnooping==TRUE)
 	{
-		
+
 		for(i=0;i<rtl_hashTableSize;i++)
 	     	{
 			groupEntryPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable[i];
-				
+
 			while(groupEntryPtr!=NULL)
 			{
 				clearFlag=FALSE;
-					
+
 				for(j=0;j<MAX_SUPPORT_PORT_NUMBER;j++)
 				{
 					if(( (1<<j) & (portInfo->linkPortMask)) ==0)
@@ -4985,13 +4985,13 @@ void rtl865x_igmpLinkStatusChangeCallback(uint32 moduleIndex, rtl_igmpPortInfo_t
 							clearFlag=TRUE;
 						}
 					}
-				
+
 				}
-				
+
 				sourceEntryPtr=groupEntryPtr->sourceList;
 				while(sourceEntryPtr!=NULL)
 				{
-					
+
 
 					for(j=0;j<MAX_SUPPORT_PORT_NUMBER;j++)
 					{
@@ -5003,7 +5003,7 @@ void rtl865x_igmpLinkStatusChangeCallback(uint32 moduleIndex, rtl_igmpPortInfo_t
 								clearFlag=TRUE;
 							}
 						}
-						
+
 					}
 					sourceEntryPtr=sourceEntryPtr->next;
 				}
@@ -5012,25 +5012,25 @@ void rtl865x_igmpLinkStatusChangeCallback(uint32 moduleIndex, rtl_igmpPortInfo_t
 				{
 					strcpy(linkEventContext.devName,rtl_mCastModuleArray[moduleIndex].deviceInfo.devName);
 					linkEventContext.moduleIndex=moduleIndex;
-					
+
 					linkEventContext.groupAddr[0]=groupEntryPtr->groupAddr[0];
 					linkEventContext.groupAddr[1]=groupEntryPtr->groupAddr[1];
 					linkEventContext.groupAddr[2]=groupEntryPtr->groupAddr[2];
 					linkEventContext.groupAddr[3]=groupEntryPtr->groupAddr[3];
-					
+
 					linkEventContext.sourceAddr[0]=0;
 					linkEventContext.sourceAddr[1]=0;
 					linkEventContext.sourceAddr[2]=0;
 					linkEventContext.sourceAddr[3]=0;
-					
+
 					rtl865x_raiseEvent(EVENT_UPDATE_MCAST, &linkEventContext);
 				}
 #endif
-				
+
 				groupEntryPtr=groupEntryPtr->next;
 			}
 	       }
-	
+
 	}
 
 	return ;
@@ -5041,21 +5041,21 @@ int32 rtl_getGroupInfo(uint32 groupAddr, struct rtl_groupInfo * groupInfo)
 	int32 moduleIndex;
 	int32 hashIndex;
 	struct rtl_groupEntry *groupEntryPtr;
-	
+
 	if(groupInfo==NULL)
 	{
 		return FAILED;
 	}
 
 	memset(groupInfo, 0 , sizeof(struct rtl_groupInfo));
-	
+
 	for(moduleIndex=0; moduleIndex<MAX_MCAST_MODULE_NUM ;moduleIndex++)
 	{
 		if(rtl_mCastModuleArray[moduleIndex].enableSnooping==TRUE)
 		{
 			hashIndex=rtl_hashMask&groupAddr;
 			groupEntryPtr=rtl_mCastModuleArray[moduleIndex].rtl_ipv4HashTable[hashIndex];
-				
+
 			while(groupEntryPtr!=NULL)
 			{
 				if(groupEntryPtr->groupAddr[0]==groupAddr)
@@ -5065,7 +5065,7 @@ int32 rtl_getGroupInfo(uint32 groupAddr, struct rtl_groupInfo * groupInfo)
 				}
 				groupEntryPtr=groupEntryPtr->next;
 			}
-		      
+
 		}
 	}
 

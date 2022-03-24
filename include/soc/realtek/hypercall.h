@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Realtek Semiconductor Corporation
+ * Copyright (C) 2018 Realtek Semiconductor Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -10,12 +10,11 @@
 #ifndef __SOC_RTK_HYPERCALL_H__
 #define __SOC_RTK_HYPERCALL_H__
 
-#ifdef CONFIG_RTK_XEN_GPIO
-extern int xen_rtk_interdomain_gpio_lock(unsigned long timeout);
-extern int xen_rtk_interdomain_gpio_unlock(unsigned long timeout);
+#include <xen/interface/rtk-hypercall.h>
 
-#define xen_gpio_lock(t)	xen_rtk_interdomain_gpio_lock(t)
-#define xen_gpio_unlock(t)	xen_rtk_interdomain_gpio_unlock(t)
-#endif //CONFIG_RTK_XEN_GPIO
+#ifdef CONFIG_RTK_XEN_HYPERCALL
+unsigned int rtk_xen_domain_lock(unsigned long timeout, RTK_DOMAIN_LOCK lock_type);
+int rtk_xen_domain_unlock(unsigned int ticket, RTK_DOMAIN_LOCK lock_type);
+#endif// CONFIG_RTK_XEN_HYPERCALL
 
 #endif //__SOC_RTK_HYPERCALL_H__

@@ -43,12 +43,16 @@ static struct ehci_rtk {
 	struct work_struct work;
 };
 
+#ifdef CONFIG_RTK_USB_RLE0599_PHY
 extern void rtk_rle0599_phy_toggle(struct usb_phy *usb2_phy, bool isConnect);
+#endif
 
-int RTK_ehci_usb2_phy_toggle(struct device *hcd_dev, bool isConnect) {
+int RTK_ehci_usb2_phy_toggle(struct device *hcd_dev, bool isConnect)
+{
 	struct usb_phy *phy = NULL;
 
-	if (hcd_dev == NULL) return -ENODEV;
+	if (hcd_dev == NULL)
+		return -ENODEV;
 
 	phy = devm_usb_get_phy_by_phandle(hcd_dev, "usb-phy", 0);
 	if (IS_ERR(phy)) {
@@ -57,15 +61,18 @@ int RTK_ehci_usb2_phy_toggle(struct device *hcd_dev, bool isConnect) {
 	}
 
 	dev_dbg(hcd_dev, "%s\n", __func__);
+#ifdef CONFIG_RTK_USB_RLE0599_PHY
 	if (phy != NULL)
 		rtk_rle0599_phy_toggle(phy, isConnect);
+#endif
 	return 0;
 }
 
-extern int rtk_usb_init_power_on(struct device *usb_dev);
-extern int rtk_usb_power_manager_schedule_work(struct device *usb_dev, struct work_struct *work);
+extern int rtk_usb_init_port_power_on(struct device *usb_dev);
+extern int rtk_usb_manager_schedule_work(struct device *usb_dev, struct work_struct *work);
 
-static void ehci_rtk_probe_work(struct work_struct *work) {
+static void ehci_rtk_probe_work(struct work_struct *work)
+{
 	struct ehci_rtk *rtk = container_of(work, struct ehci_rtk, work);
 	struct device		*dev = rtk->dev;
 	struct usb_hcd *hcd = ehci_to_hcd(rtk->ehci);
@@ -76,7 +83,7 @@ static void ehci_rtk_probe_work(struct work_struct *work) {
 
 	unsigned long probe_time = jiffies;
 
-	dev_info(dev, "%s Start ...\n",__func__);
+	dev_info(dev, "%s Start ...\n", __func__);
 
 	usb_phy_init(phy);
 
@@ -86,9 +93,10 @@ static void ehci_rtk_probe_work(struct work_struct *work) {
 		usb_put_hcd(hcd);
 	}
 
-	rtk_usb_init_power_on(dev);
+	rtk_usb_init_port_power_on(dev);
 
-	dev_info(dev, "%s End ... ok! (take %d ms)\n", __func__, jiffies_to_msecs(jiffies - probe_time));
+	dev_info(dev, "%s End ... ok! (take %d ms)\n", __func__,
+			jiffies_to_msecs(jiffies - probe_time));
 	return;
 }
 
@@ -168,10 +176,12 @@ static int ehci_rtk_drv_probe(struct platform_device *pdev)
 	ehci = hcd_to_ehci(hcd);
 	ehci->caps = hcd->regs;
 
+#ifdef CONFIG_USB_PATCH_ON_RTK
 	if (of_property_read_bool(pdev->dev.of_node, "fixed_async_list_addr_bug")) {
 		dev_info(&pdev->dev, "%s Enable fixed_async_list_addr_bug\n", __func__);
 		ehci->fixed_async_list_addr_bug  = 1;
 	}
+#endif
 
 	if (of_property_read_bool(pdev->dev.of_node, "delay_probe_work")) {
 		struct ehci_rtk *rtk;
@@ -187,7 +197,7 @@ static int ehci_rtk_drv_probe(struct platform_device *pdev)
 		rtk->phy = phy;
 		INIT_WORK(&rtk->work, ehci_rtk_probe_work);
 		if (of_property_read_bool(pdev->dev.of_node, "ordered_probe"))
-			rtk_usb_power_manager_schedule_work(&pdev->dev, &rtk->work);
+			rtk_usb_manager_schedule_work(&pdev->dev, &rtk->work);
 		else
 			schedule_work(&rtk->work);
 	} else {
@@ -230,7 +240,8 @@ static int ehci_rtk_drv_remove(struct platform_device *pdev)
 
 #ifdef CONFIG_USB_PATCH_ON_RTK
 /* Add Workaround to fixed EHCI/OHCI Wrapper can't work simultaneously */
-bool RTK_ehci_check_schedule_actived(const char *func) {
+bool RTK_ehci_check_schedule_actived(const char *func)
+{
 	static struct ehci_hcd *ehci = NULL;
 	struct device_node *node = NULL;
 	struct platform_device *pdev = NULL;
@@ -275,7 +286,7 @@ static int rtk_ehci_suspend(struct device *dev)
 
 	dev_info(dev, "[USB] Enter %s", __func__);
 
-	if (RTK_PM_STATE == PM_SUSPEND_STANDBY){
+	if (RTK_PM_STATE == PM_SUSPEND_STANDBY) {
 		//For idle mode
 		dev_info(dev, "[USB] %s Idle mode\n", __func__);
 		goto out;
@@ -310,7 +321,7 @@ static int rtk_ehci_resume(struct device *dev)
 	struct usb_phy *phy;
 
 	dev_info(dev, "[USB] Enter %s", __func__);
-	if (RTK_PM_STATE == PM_SUSPEND_STANDBY){
+	if (RTK_PM_STATE == PM_SUSPEND_STANDBY) {
 		//For idle mode
 		dev_info(dev, "[USB] %s Idle mode\n", __func__);
 		goto out;
@@ -343,7 +354,7 @@ static const struct dev_pm_ops rtk_ehci_pm_ops = {
 };
 
 static const struct of_device_id ehci_rtk_dt_ids[] = {
-	{ .compatible = "Realtek,rtk119x-ehci", },
+	{ .compatible = "Realtek,rtd119x-ehci", },
 	{ .compatible = "Realtek,rtd129x-ehci", },
 	{},
 };

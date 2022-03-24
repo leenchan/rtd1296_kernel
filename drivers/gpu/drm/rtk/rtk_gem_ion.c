@@ -104,7 +104,7 @@ struct rtk_gem_ion_object *rtk_gem_ion_create(struct drm_device *drm, size_t siz
 
     size = round_up(size, PAGE_SIZE);
 
-    DRM_DEBUG_PRIME("[%s:%d] size = %zu, flags = 0x%x\n", __func__, __LINE__,
+    DRM_DEBUG_KMS("[%s:%d] size = %zu, flags = 0x%x\n", __func__, __LINE__,
             size, flags);
 
     ion_obj = __rtk_gem_ion_create(drm, size);
@@ -116,7 +116,6 @@ struct rtk_gem_ion_object *rtk_gem_ion_create(struct drm_device *drm, size_t siz
 
     if (IS_ERR(ion_obj->handle))
         goto error;
-    DRM_DEBUG_PRIME("[%s %d] ion_alloc handle %p\n", __FUNCTION__, __LINE__, ion_obj->handle);
 
     ion_obj->vaddr = ion_map_kernel(rtk_gem_ion_get_client(), ion_obj->handle);
     {
@@ -165,13 +164,12 @@ err_handle_create:
 void rtk_gem_ion_free_object(struct drm_gem_object *gem_obj)
 {
     struct rtk_gem_ion_object *ion_obj;
+
     ion_obj = to_rtk_gem_ion_obj(gem_obj);
 
     if (ion_obj->handle) {
-        DRM_DEBUG_PRIME("[%s %d] ion_free %p\n", __FUNCTION__, __LINE__, ion_obj->handle);
         ion_free(rtk_gem_ion_get_client(), ion_obj->handle);
     } else if (gem_obj->import_attach) {
-        DRM_DEBUG_PRIME("[%s %d] drm_prime_gem_destroy %p\n", __FUNCTION__, __LINE__, gem_obj);
         drm_prime_gem_destroy(gem_obj, ion_obj->sgt);
     }
 
@@ -207,7 +205,7 @@ int rtk_gem_ion_dumb_create(struct drm_file *file_priv,
     args->pitch = DIV_ROUND_UP(args->width * args->bpp, 8);
     args->size = args->pitch * args->height;
 
-     DRM_DEBUG_PRIME("DRM %s on [ %d x %d, bpp=%d, flags=0x%x]\n", __func__,
+    DRM_DEBUG_KMS("DRM %s on [ %d x %d, bpp=%d, flags=0x%x]\n", __func__,
             args->width, args->height, args->bpp, args->flags);
 
     ion_obj = rtk_gem_ion_create_with_handle(file_priv, drm, args->size, args->flags,
@@ -223,7 +221,7 @@ int rtk_gem_ion_dumb_map_offset(struct drm_file *file_priv,
 
     mutex_lock(&drm->struct_mutex);
 
-    gem_obj = drm_gem_object_lookup(drm, file_priv, handle);
+    gem_obj = drm_gem_object_lookup(file_priv, handle);
     if (!gem_obj) {
         dev_err(drm->dev, "failed to lookup GEM object\n");
         mutex_unlock(&drm->struct_mutex);
@@ -278,6 +276,7 @@ struct sg_table *rtk_gem_ion_prime_get_sg_table(struct drm_gem_object *obj)
     struct rtk_gem_ion_object *ion_obj = to_rtk_gem_ion_obj(obj);
     struct sg_table *ion_sgt = NULL;
     struct sg_table *sgt = NULL;
+
     DRM_DEBUG_PRIME("[%s:%d]\n", __func__, __LINE__);
 
     ion_sgt = ion_sg_table(rtk_gem_ion_get_client(), ion_obj->handle);

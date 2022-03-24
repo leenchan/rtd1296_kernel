@@ -30,23 +30,6 @@
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <linux/netfilter/nf_nat.h>
 
-#if defined(CONFIG_RTL_819X)
-#include <linux/inetdevice.h>
-#include <net/rtl/rtl_types.h>
-#include <net/rtl/rtl865x_netif.h>
-#include <net/rtl/rtl_nic.h>
-#include <net/rtl/features/rtl_ps_hooks.h>
-#include <net/rtl/features/rtl_ps_log.h>
-#endif /* CONFIG_RTL_819X */
-
-#if defined(CONFIG_RTL_LAYERED_DRIVER) && defined(CONFIG_RTL_LAYERED_DRIVER_L4) && defined(CONFIG_RTL_HARDWARE_NAT)
-#include <net/rtl/rtl865x_nat.h>
-#endif /* CONFIG_RTL_LAYERED_DRIVER && CONFIG_RTL_LAYERED_DRIVER_L4 && CONFIG_RTL_HARDWARE_NAT */
-
-#if defined (CONFIG_RTL_HARDWARE_NAT) && defined (CONFIG_RTL_INBOUND_COLLISION_AVOIDANCE)
-extern __DRAM_GEN int gHwNatEnabled;
-#endif
-
 static DEFINE_SPINLOCK(nf_nat_lock);
 
 static DEFINE_MUTEX(nf_nat_proto_mutex);
@@ -55,6 +38,9 @@ static const struct nf_nat_l3proto __rcu *nf_nat_l3protos[NFPROTO_NUMPROTO]
 static const struct nf_nat_l4proto __rcu **nf_nat_l4protos[NFPROTO_NUMPROTO]
 						__read_mostly;
 
+static struct hlist_head *nf_nat_bysource __read_mostly;
+static unsigned int nf_nat_htable_size __read_mostly;
+static unsigned int nf_nat_hash_rnd __read_mostly;
 
 inline const struct nf_nat_l3proto *
 __nf_nat_l3proto_find(u8 family)
@@ -100,7 +86,7 @@ out:
 	rcu_read_unlock();
 }
 
-int nf_xfrm_me_harder(struct sk_buff *skb, unsigned int family)
+int nf_xfrm_me_harder(struct net *net, struct sk_buff *skb, unsigned int family)
 {
 	struct flowi fl;
 	unsigned int hh_len;
@@ -116,7 +102,7 @@ int nf_xfrm_me_harder(struct sk_buff *skb, unsigned int family)
 		dst = ((struct xfrm_dst *)dst)->route;
 	dst_hold(dst);
 
-	dst = xfrm_lookup(dev_net(dst->dev), dst, &fl, skb->sk, 0);
+	dst = xfrm_lookup(net, dst, &fl, skb->sk, 0);
 	if (IS_ERR(dst))
 		return PTR_ERR(dst);
 
@@ -135,16 +121,17 @@ EXPORT_SYMBOL(nf_xfrm_me_harder);
 
 /* We keep an extra hash for each conntrack, for fast searching. */
 static inline unsigned int
-hash_by_src(const struct net *net, u16 zone,
-	    const struct nf_conntrack_tuple *tuple)
+hash_by_src(const struct net *n, const struct nf_conntrack_tuple *tuple)
 {
 	unsigned int hash;
 
+	get_random_once(&nf_nat_hash_rnd, sizeof(nf_nat_hash_rnd));
+
 	/* Original src, to ensure we map it consistently if poss. */
 	hash = jhash2((u32 *)&tuple->src, sizeof(tuple->src) / sizeof(u32),
-		      tuple->dst.protonum ^ zone ^ nf_conntrack_hash_rnd);
+		      tuple->dst.protonum ^ nf_nat_hash_rnd ^ net_hash_mix(n));
 
-	return reciprocal_scale(hash, net->ct.nat_htable_size);
+	return reciprocal_scale(hash, nf_nat_htable_size);
 }
 
 /* Is this tuple already taken? (not by us) */
@@ -202,20 +189,21 @@ same_src(const struct nf_conn *ct,
 
 /* Only called for SRC manip */
 static int
-find_appropriate_src(struct net *net, u16 zone,
+find_appropriate_src(struct net *net,
+		     const struct nf_conntrack_zone *zone,
 		     const struct nf_nat_l3proto *l3proto,
 		     const struct nf_nat_l4proto *l4proto,
 		     const struct nf_conntrack_tuple *tuple,
 		     struct nf_conntrack_tuple *result,
 		     const struct nf_nat_range *range)
 {
-	unsigned int h = hash_by_src(net, zone, tuple);
-	const struct nf_conn_nat *nat;
+	unsigned int h = hash_by_src(net, tuple);
 	const struct nf_conn *ct;
 
-	hlist_for_each_entry_rcu(nat, &net->ct.nat_bysource[h], bysource) {
-		ct = nat->ct;
-		if (same_src(ct, tuple) && nf_ct_zone(ct) == zone) {
+	hlist_for_each_entry_rcu(ct, &nf_nat_bysource[h], nat_bysource) {
+		if (same_src(ct, tuple) &&
+		    net_eq(net, nf_ct_net(ct)) &&
+		    nf_ct_zone_equal(ct, zone, IP_CT_DIR_ORIGINAL)) {
 			/* Copy source part from reply tuple. */
 			nf_ct_invert_tuplepr(result,
 				       &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
@@ -235,7 +223,8 @@ find_appropriate_src(struct net *net, u16 zone,
  * the ip with the lowest src-ip/dst-ip/proto usage.
  */
 static void
-find_best_ips_proto(u16 zone, struct nf_conntrack_tuple *tuple,
+find_best_ips_proto(const struct nf_conntrack_zone *zone,
+		    struct nf_conntrack_tuple *tuple,
 		    const struct nf_nat_range *range,
 		    const struct nf_conn *ct,
 		    enum nf_nat_manip_type maniptype)
@@ -275,7 +264,7 @@ find_best_ips_proto(u16 zone, struct nf_conntrack_tuple *tuple,
 	 */
 	j = jhash2((u32 *)&tuple->src.u3, sizeof(tuple->src.u3) / sizeof(u32),
 		   range->flags & NF_NAT_RANGE_PERSISTENT ?
-			0 : (__force u32)tuple->dst.u3.all[max] ^ zone);
+			0 : (__force u32)tuple->dst.u3.all[max] ^ zone->id);
 
 	full_range = false;
 	for (i = 0; i <= max; i++) {
@@ -314,10 +303,12 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 		 struct nf_conn *ct,
 		 enum nf_nat_manip_type maniptype)
 {
+	const struct nf_conntrack_zone *zone;
 	const struct nf_nat_l3proto *l3proto;
 	const struct nf_nat_l4proto *l4proto;
 	struct net *net = nf_ct_net(ct);
-	u16 zone = nf_ct_zone(ct);
+
+	zone = nf_ct_zone(ct);
 
 	rcu_read_lock();
 	l3proto = __nf_nat_l3proto_find(orig_tuple->src.l3num);
@@ -358,45 +349,6 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 
 	/* Only bother mapping if it's not already in range and unique */
 	if (!(range->flags & NF_NAT_RANGE_PROTO_RANDOM_ALL)) {
-#if defined(CONFIG_RTL_HARDWARE_NAT) && defined(CONFIG_RTL_INBOUND_COLLISION_AVOIDANCE)
-	/* Only bother mapping if it's not already in range and unique */
-	if ((!(range->flags & NF_NAT_RANGE_PROTO_SPECIFIED) ||
-	     l4proto->in_range(tuple, maniptype, &range->min_proto, &range->max_proto)) &&
-	    !nf_nat_used_tuple(tuple, ct)) {
-		if ((gHwNatEnabled) && (maniptype == NF_NAT_MANIP_SRC) &&
-			((orig_tuple->dst.protonum == IPPROTO_TCP) ||(orig_tuple->dst.protonum == IPPROTO_UDP)))
-		{
-			unsigned int asicNaptHashScore = 0;
-			rtl865x_napt_entry rtl865xNaptEntry;
-
-			rtl865xNaptEntry.protocol = (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.protonum == IPPROTO_TCP) ? 1 : 0;
-
-			rtl865xNaptEntry.intIp = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip;
-			rtl865xNaptEntry.remIp = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3.ip;
-			rtl865xNaptEntry.extIp = tuple->src.u3.ip;
-			rtl865xNaptEntry.intPort = rtl865xNaptEntry.protocol ? ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.tcp.port : ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.udp.port;
-			rtl865xNaptEntry.remPort = rtl865xNaptEntry.protocol ? ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.tcp.port : ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.udp.port;
-			rtl865xNaptEntry.extPort = rtl865xNaptEntry.protocol ? tuple->src.u.tcp.port : tuple->src.u.udp.port;
-
-			rtl865x_getAsicNaptHashScore(&rtl865xNaptEntry, &asicNaptHashScore);
-			/*
-			printk("%s:%d:maniptype is %d,%s (%u.%u.%u.%u:%u ->  %u.%u.%u.%u:%u ->%u.%u.%u.%u:%u),asicNaptHashScore is %d\n\n\n",
-				__FUNCTION__,__LINE__,maniptype, proto?"tcp":"udp",
-				NIPQUAD(sip), sp, NIPQUAD(gip), gp, NIPQUAD(dip), dp,asicNaptHashScore);
-			*/
-			if (asicNaptHashScore == 100)
-			{
-				rtl865x_preReserveConn(&rtl865xNaptEntry);
-				goto out;
-			}
-
-		}
-		else
-		{
-			goto out;
-		}
-	}
-#else /* CONFIG_RTL_HARDWARE_NAT && CONFIG_RTL_INBOUND_COLLISION_AVOIDANCE */
 		if (range->flags & NF_NAT_RANGE_PROTO_SPECIFIED) {
 			if (l4proto->in_range(tuple, maniptype,
 					      &range->min_proto,
@@ -407,7 +359,6 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 		} else if (!nf_nat_used_tuple(tuple, ct)) {
 			goto out;
 		}
-#endif /* CONFIG_RTL_HARDWARE_NAT && CONFIG_RTL_INBOUND_COLLISION_AVOIDANCE */
 	}
 
 	/* Last change: get protocol to try to obtain unique tuple. */
@@ -471,20 +422,20 @@ nf_nat_setup_info(struct nf_conn *ct,
 			ct->status |= IPS_DST_NAT;
 
 		if (nfct_help(ct))
-			nfct_seqadj_ext_add(ct);
+			if (!nfct_seqadj_ext_add(ct))
+				return NF_DROP;
 	}
 
 	if (maniptype == NF_NAT_MANIP_SRC) {
 		unsigned int srchash;
 
-		srchash = hash_by_src(net, nf_ct_zone(ct),
+		srchash = hash_by_src(net,
 				      &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple);
 		spin_lock_bh(&nf_nat_lock);
 		/* nf_conntrack_alter_reply might re-allocate extension aera */
 		nat = nfct_nat(ct);
-		nat->ct = ct;
-		hlist_add_head_rcu(&nat->bysource,
-				   &net->ct.nat_bysource[srchash]);
+		hlist_add_head_rcu(&ct->nat_bysource,
+				   &nf_nat_bysource[srchash]);
 		spin_unlock_bh(&nf_nat_lock);
 	}
 
@@ -524,15 +475,6 @@ nf_nat_alloc_null_binding(struct nf_conn *ct, unsigned int hooknum)
 }
 EXPORT_SYMBOL_GPL(nf_nat_alloc_null_binding);
 
-#if 1//defined(CONFIG_RTL_ETH_DRIVER_REFINE)
-#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
-extern int fast_nat_fw;
-#endif
-#if defined(CONFIG_RTL_HARDWARE_NAT)
-extern int gHwNatEnabled;
-#endif /* CONFIG_RTL_HARDWARE_NAT */
-#endif
-
 /* Do packet manipulations according to nf_nat_setup_info. */
 unsigned int nf_nat_packet(struct nf_conn *ct,
 			   enum ip_conntrack_info ctinfo,
@@ -544,10 +486,6 @@ unsigned int nf_nat_packet(struct nf_conn *ct,
 	enum ip_conntrack_dir dir = CTINFO2DIR(ctinfo);
 	unsigned long statusbit;
 	enum nf_nat_manip_type mtype = HOOK2MANIP(hooknum);
-#if defined(CONFIG_RTL_819X)
-	rtl_nf_conntrack_inso_s conn_info;
-#endif /* CONFIG_RTL_819X */
-
 
 	if (mtype == NF_NAT_MANIP_SRC)
 		statusbit = IPS_SRC_NAT;
@@ -570,29 +508,6 @@ unsigned int nf_nat_packet(struct nf_conn *ct,
 						target.dst.protonum);
 		if (!l3proto->manip_pkt(skb, 0, l4proto, &target, mtype))
 			return NF_DROP;
-
-		#if defined(CONFIG_RTL_819X)
-		#if 1//defined(CONFIG_RTL_ETH_DRIVER_REFINE)
-		if (
-			#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
-			fast_nat_fw
-			#else
-			0 //mark_hap
-			#endif
-			#if defined(CONFIG_RTL_HARDWARE_NAT)
-			|| gHwNatEnabled
-			#endif
-			)
-		#endif
-		{
-			conn_info.ct = ct;
-			conn_info.skb = skb;
-			conn_info.hooknum = hooknum;
-			conn_info.ctinfo = ctinfo;
-			rtl_nf_nat_packet_hooks(&conn_info);
-		}
-		#endif /* CONFIG_RTL_819X */
-
 	}
 	return NF_ACCEPT;
 }
@@ -607,10 +522,6 @@ struct nf_nat_proto_clean {
 static int nf_nat_proto_remove(struct nf_conn *i, void *data)
 {
 	const struct nf_nat_proto_clean *clean = data;
-	struct nf_conn_nat *nat = nfct_nat(i);
-
-	if (!nat)
-		return 0;
 
 	if ((clean->l3proto && nf_ct_l3num(i) != clean->l3proto) ||
 	    (clean->l4proto && nf_ct_protonum(i) != clean->l4proto))
@@ -621,12 +532,10 @@ static int nf_nat_proto_remove(struct nf_conn *i, void *data)
 
 static int nf_nat_proto_clean(struct nf_conn *ct, void *data)
 {
-	struct nf_conn_nat *nat = nfct_nat(ct);
-
 	if (nf_nat_proto_remove(ct, data))
 		return 1;
 
-	if (!nat || !nat->ct)
+	if ((ct->status & IPS_SRC_NAT_DONE) == 0)
 		return 0;
 
 	/* This netns is being destroyed, and conntrack has nat null binding.
@@ -635,16 +544,10 @@ static int nf_nat_proto_clean(struct nf_conn *ct, void *data)
 	 * Else, when the conntrack is destoyed, nf_nat_cleanup_conntrack()
 	 * will delete entry from already-freed table.
 	 */
-	if (!del_timer(&ct->timeout))
-		return 1;
-
 	spin_lock_bh(&nf_nat_lock);
-	hlist_del_rcu(&nat->bysource);
+	hlist_del_rcu(&ct->nat_bysource);
 	ct->status &= ~IPS_NAT_DONE_MASK;
-	nat->ct = NULL;
 	spin_unlock_bh(&nf_nat_lock);
-
-	add_timer(&ct->timeout);
 
 	/* don't delete conntrack.  Although that would make things a lot
 	 * simpler, we'd end up flushing all conntracks on nat rmmod.
@@ -769,37 +672,17 @@ EXPORT_SYMBOL_GPL(nf_nat_l3proto_unregister);
 /* No one using conntrack by the time this called. */
 static void nf_nat_cleanup_conntrack(struct nf_conn *ct)
 {
-	struct nf_conn_nat *nat = nf_ct_ext_find(ct, NF_CT_EXT_NAT);
-
-	if (nat == NULL || nat->ct == NULL)
-		return;
-
-	NF_CT_ASSERT(nat->ct->status & IPS_SRC_NAT_DONE);
-
-	spin_lock_bh(&nf_nat_lock);
-	hlist_del_rcu(&nat->bysource);
-	spin_unlock_bh(&nf_nat_lock);
-}
-
-static void nf_nat_move_storage(void *new, void *old)
-{
-	struct nf_conn_nat *new_nat = new;
-	struct nf_conn_nat *old_nat = old;
-	struct nf_conn *ct = old_nat->ct;
-
-	if (!ct || !(ct->status & IPS_SRC_NAT_DONE))
-		return;
-
-	spin_lock_bh(&nf_nat_lock);
-	hlist_replace_rcu(&old_nat->bysource, &new_nat->bysource);
-	spin_unlock_bh(&nf_nat_lock);
+	if (ct->status & IPS_SRC_NAT_DONE) {
+		spin_lock_bh(&nf_nat_lock);
+		hlist_del_rcu(&ct->nat_bysource);
+		spin_unlock_bh(&nf_nat_lock);
+	}
 }
 
 static struct nf_ct_ext_type nat_extend __read_mostly = {
 	.len		= sizeof(struct nf_conn_nat),
 	.align		= __alignof__(struct nf_conn_nat),
 	.destroy	= nf_nat_cleanup_conntrack,
-	.move		= nf_nat_move_storage,
 	.id		= NF_CT_EXT_NAT,
 	.flags		= NF_CT_EXT_F_PREALLOC,
 };
@@ -896,7 +779,7 @@ nfnetlink_parse_nat_setup(struct nf_conn *ct,
 	if (err < 0)
 		return err;
 
-	return nf_nat_setup_info(ct, &range, manip);
+	return nf_nat_setup_info(ct, &range, manip) == NF_DROP ? -ENOMEM : 0;
 }
 #else
 static int
@@ -908,27 +791,14 @@ nfnetlink_parse_nat_setup(struct nf_conn *ct,
 }
 #endif
 
-static int __net_init nf_nat_net_init(struct net *net)
-{
-	/* Leave them the same for the moment. */
-	net->ct.nat_htable_size = net->ct.htable_size;
-	net->ct.nat_bysource = nf_ct_alloc_hashtable(&net->ct.nat_htable_size, 0);
-	if (!net->ct.nat_bysource)
-		return -ENOMEM;
-	return 0;
-}
-
 static void __net_exit nf_nat_net_exit(struct net *net)
 {
 	struct nf_nat_proto_clean clean = {};
 
 	nf_ct_iterate_cleanup(net, nf_nat_proto_clean, &clean, 0, 0);
-	synchronize_rcu();
-	nf_ct_free_hashtable(net->ct.nat_bysource, net->ct.nat_htable_size);
 }
 
 static struct pernet_operations nf_nat_net_ops = {
-	.init = nf_nat_net_init,
 	.exit = nf_nat_net_exit,
 };
 
@@ -941,8 +811,16 @@ static int __init nf_nat_init(void)
 {
 	int ret;
 
+	/* Leave them the same for the moment. */
+	nf_nat_htable_size = nf_conntrack_htable_size;
+
+	nf_nat_bysource = nf_ct_alloc_hashtable(&nf_nat_htable_size, 0);
+	if (!nf_nat_bysource)
+		return -ENOMEM;
+
 	ret = nf_ct_extend_register(&nat_extend);
 	if (ret < 0) {
+		nf_ct_free_hashtable(nf_nat_bysource, nf_nat_htable_size);
 		printk(KERN_ERR "nf_nat_core: Unable to register extension\n");
 		return ret;
 	}
@@ -963,14 +841,10 @@ static int __init nf_nat_init(void)
 	BUG_ON(nf_nat_decode_session_hook != NULL);
 	RCU_INIT_POINTER(nf_nat_decode_session_hook, __nf_nat_decode_session);
 #endif
-
-	#if defined(CONFIG_RTL_819X)
-	rtl_nat_init_hooks();
-	#endif /* CONFIG_RTL_819X */
-
 	return 0;
 
  cleanup_extend:
+	nf_ct_free_hashtable(nf_nat_bysource, nf_nat_htable_size);
 	nf_ct_extend_unregister(&nat_extend);
 	return ret;
 }
@@ -979,10 +853,6 @@ static void __exit nf_nat_cleanup(void)
 {
 	unsigned int i;
 
-	#if defined(CONFIG_RTL_819X)
-	rtl_nat_cleanup_hooks();
-	#endif /* CONFIG_RTL_819X */
-
 	unregister_pernet_subsys(&nf_nat_net_ops);
 	nf_ct_extend_unregister(&nat_extend);
 	nf_ct_helper_expectfn_unregister(&follow_master_nat);
@@ -990,9 +860,12 @@ static void __exit nf_nat_cleanup(void)
 #ifdef CONFIG_XFRM
 	RCU_INIT_POINTER(nf_nat_decode_session_hook, NULL);
 #endif
+	synchronize_rcu();
+
 	for (i = 0; i < NFPROTO_NUMPROTO; i++)
 		kfree(nf_nat_l4protos[i]);
 	synchronize_net();
+	nf_ct_free_hashtable(nf_nat_bysource, nf_nat_htable_size);
 }
 
 MODULE_LICENSE("GPL");

@@ -12,23 +12,69 @@
 #ifndef _DPTX_REG_H_INCLUDED_
 #define _DPTX_REG_H_INCLUDED_
 
-/*#define _BIT0                  1 << 0
-#define _BIT1                  1 << 1
-#define _BIT2                  1 << 2
-#define _BIT3                  1 << 3
-#define _BIT4                  1 << 4
-#define _BIT5                  1 << 5
-#define _BIT6                  1 << 6
-#define _BIT7                  1 << 7*/
+static inline void SetBit(void __iomem *base, unsigned int offset,
+		unsigned int mask, unsigned int value)
+{
+	unsigned int reg;
 
-#define _BIT0                       0x01
-#define _BIT1                       0x02
-#define _BIT2                       0x04
-#define _BIT3                       0x08
-#define _BIT4                       0x10
-#define _BIT5                       0x20
-#define _BIT6                       0x40
-#define _BIT7                       0x80
+	reg = readl(base + offset);
+	reg &= mask;
+	reg |= value;
+	writel(reg, base + offset);
+}
+
+static inline void SetReg(void __iomem *base, unsigned int offset, unsigned int value)
+{
+	writel(value, base + offset);
+}
+
+static inline int __maybe_unused GetBit(void __iomem *base, unsigned int offset, unsigned int mask)
+{
+	unsigned int reg;
+
+	reg = readl(base + offset);
+	reg &= mask;
+
+	return reg;
+}
+
+static inline unsigned int GetReg(void __iomem *base, unsigned int offset)
+{
+	return readl(base + offset);
+}
+
+#define _BIT0		0x00000001
+#define _BIT1		0x00000002
+#define _BIT2		0x00000004
+#define _BIT3		0x00000008
+#define _BIT4		0x00000010
+#define _BIT5		0x00000020
+#define _BIT6		0x00000040
+#define _BIT7		0x00000080
+#define _BIT8		0x00000100
+#define _BIT9		0x00000200
+#define _BIT10		0x00000400
+#define _BIT11		0x00000800
+#define _BIT12		0x00001000
+#define _BIT13		0x00002000
+#define _BIT14		0x00004000
+#define _BIT15		0x00008000
+#define _BIT16		0x00010000
+#define _BIT17		0x00020000
+#define _BIT18		0x00040000
+#define _BIT19		0x00080000
+#define _BIT20		0x00100000
+#define _BIT21		0x00200000
+#define _BIT22		0x00400000
+#define _BIT23		0x00800000
+#define _BIT24		0x01000000
+#define _BIT25		0x02000000
+#define _BIT26		0x04000000
+#define _BIT27		0x08000000
+#define _BIT28		0x10000000
+#define _BIT29		0x20000000
+#define _BIT30		0x40000000
+#define _BIT31		0x80000000
 
 //--------------------------------------
 //        DPTX Digital PHY CTRL
@@ -474,5 +520,56 @@
 #define PBD_F8_AUX_DEBUG                                            0xBE0
 
 
+//--------------------------------------
+//        LVDS Combo AIF
+//--------------------------------------
+#define AIF_MISC		0x0
+#define AIF_EDP1		0x40
+#define AIF_EDP2		0x44
+#define CT_CTRL			0x100
+#define CT_COE_1		0x108
+#define CT_COE_2		0x10c
+#define CT_COE_3		0x110
+#define CT_COE_4		0x114
+#define CT_COE_5		0x118
+#define CT_COE_6		0x11c
+#define DH_WIDTH		0x404
+#define DH_TOTAL		0x408
+#define DH_DEN_START_END	0x40c
+#define DV_DEN_START_END_F1	0x410
+#define DV_TOTAL		0x418
+#define DV_VS_START_END_F1	0x41c
+#define DV_SYNC_INT		0x42c
+
+
+//--------------------------------------
+//       LVDS and EDP PLL Control Register
+//--------------------------------------
+#define DISP_PLL_DIV2	0x24
+#define PLL_HDMI	0x190
+#define PLL_HDMI_LDO1	0x230
+#define PLL_EDP1	0x248
+#define PLL_EDP2	0x24c
+#define PLL_PIXEL1	0x250
+#define PLL_PIXEL2	0x254
+
+//--------------------------------------
+//       EDP PLL_SSC_DIG Control Register
+//--------------------------------------
+#define PLL_SSC_DIG_EDP0	0x5e0
+#define PLL_SSC_DIG_EDP1	0x5e4
+#define PLL_SSC_DIG_EDP2	0x5e8
+#define PLL_SSC_DIG_EDP3	0x5ec
+#define PLL_SSC_DIG_EDP4	0x5f0
+#define PLL_SSC_DIG_EDP5	0x5f4
+#define PLL_SSC_DIG_EDP_DBG1	0x5f8
+#define PLL_SSC_DIG_EDP_DBG2	0x5fc
+
+//--------------------------------------
+//       PIXEL PLL_SSC_DIG Control Register
+//--------------------------------------
+#define PLL_SSC_DIG_PIXEL0	0x600
+#define PLL_SSC_DIG_PIXEL1	0x604
+#define PLL_SSC_DIG_PIXEL2	0x608
 
 #endif

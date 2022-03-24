@@ -18,12 +18,11 @@ static inline void pm_set_vt_switch(int do_switch)
 #endif
 
 #ifdef CONFIG_VT_CONSOLE_SLEEP
-extern int pm_prepare_console(void);
+extern void pm_prepare_console(void);
 extern void pm_restore_console(void);
 #else
-static inline int pm_prepare_console(void)
+static inline void pm_prepare_console(void)
 {
-	return 0;
 }
 
 static inline void pm_restore_console(void)
@@ -40,7 +39,9 @@ typedef int __bitwise suspend_state_t;
 #define PM_SUSPEND_MIN		PM_SUSPEND_FREEZE
 #define PM_SUSPEND_MAX		((__force suspend_state_t) 4)
 
-extern int RTK_PM_STATE;	//For RTD129x idle mode support.
+#ifdef CONFIG_RTK_PLATFORM
+extern int RTK_PM_STATE;
+#endif /* CONFIG_RTK_PLATFORM */
 
 enum suspend_stat_step {
 	SUSPEND_FREEZE = 1,
@@ -204,6 +205,36 @@ struct platform_freeze_ops {
 extern void suspend_set_ops(const struct platform_suspend_ops *ops);
 extern int suspend_valid_only_mem(suspend_state_t state);
 
+extern unsigned int pm_suspend_global_flags;
+
+#define PM_SUSPEND_FLAG_FW_SUSPEND	(1 << 0)
+#define PM_SUSPEND_FLAG_FW_RESUME	(1 << 1)
+
+static inline void pm_suspend_clear_flags(void)
+{
+	pm_suspend_global_flags = 0;
+}
+
+static inline void pm_set_suspend_via_firmware(void)
+{
+	pm_suspend_global_flags |= PM_SUSPEND_FLAG_FW_SUSPEND;
+}
+
+static inline void pm_set_resume_via_firmware(void)
+{
+	pm_suspend_global_flags |= PM_SUSPEND_FLAG_FW_RESUME;
+}
+
+static inline bool pm_suspend_via_firmware(void)
+{
+	return !!(pm_suspend_global_flags & PM_SUSPEND_FLAG_FW_SUSPEND);
+}
+
+static inline bool pm_resume_via_firmware(void)
+{
+	return !!(pm_suspend_global_flags & PM_SUSPEND_FLAG_FW_RESUME);
+}
+
 /* Suspend-to-idle state machnine. */
 enum freeze_state {
 	FREEZE_STATE_NONE,      /* Not suspended/suspending. */
@@ -218,6 +249,7 @@ static inline bool idle_should_freeze(void)
 	return unlikely(suspend_freeze_state == FREEZE_STATE_ENTER);
 }
 
+extern void __init pm_states_init(void);
 extern void freeze_set_ops(const struct platform_freeze_ops *ops);
 extern void freeze_wake(void);
 
@@ -243,9 +275,16 @@ extern int pm_suspend(suspend_state_t state);
 #else /* !CONFIG_SUSPEND */
 #define suspend_valid_only_mem	NULL
 
+static inline void pm_suspend_clear_flags(void) {}
+static inline void pm_set_suspend_via_firmware(void) {}
+static inline void pm_set_resume_via_firmware(void) {}
+static inline bool pm_suspend_via_firmware(void) { return false; }
+static inline bool pm_resume_via_firmware(void) { return false; }
+
 static inline void suspend_set_ops(const struct platform_suspend_ops *ops) {}
 static inline int pm_suspend(suspend_state_t state) { return -ENOSYS; }
 static inline bool idle_should_freeze(void) { return false; }
+static inline void __init pm_states_init(void) {}
 static inline void freeze_set_ops(const struct platform_freeze_ops *ops) {}
 static inline void freeze_wake(void) {}
 #endif /* !CONFIG_SUSPEND */
@@ -343,6 +382,8 @@ extern int swsusp_page_is_forbidden(struct page *);
 extern void swsusp_set_page_free(struct page *);
 extern void swsusp_unset_page_free(struct page *);
 extern unsigned long get_safe_page(gfp_t gfp_mask);
+extern asmlinkage int swsusp_arch_suspend(void);
+extern asmlinkage int swsusp_arch_resume(void);
 
 extern void hibernation_set_ops(const struct platform_hibernation_ops *ops);
 extern int hibernate(void);
@@ -389,10 +430,12 @@ extern int unregister_pm_notifier(struct notifier_block *nb);
 
 /* drivers/base/power/wakeup.c */
 extern bool events_check_enabled;
+extern unsigned int pm_wakeup_irq;
 
 extern bool pm_wakeup_pending(void);
 extern void pm_system_wakeup(void);
 extern void pm_wakeup_clear(void);
+extern void pm_system_irq_wakeup(unsigned int irq_number);
 extern bool pm_get_wakeup_count(unsigned int *count, bool block);
 extern bool pm_save_wakeup_count(unsigned int count);
 extern void pm_wakep_autosleep_enabled(bool set);
@@ -443,6 +486,7 @@ static inline int unregister_pm_notifier(struct notifier_block *nb)
 static inline bool pm_wakeup_pending(void) { return false; }
 static inline void pm_system_wakeup(void) {}
 static inline void pm_wakeup_clear(void) {}
+static inline void pm_system_irq_wakeup(unsigned int irq_number) {}
 
 static inline void lock_system_sleep(void) {}
 static inline void unlock_system_sleep(void) {}

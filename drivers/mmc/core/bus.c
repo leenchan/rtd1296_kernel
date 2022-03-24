@@ -149,13 +149,14 @@ static int mmc_bus_suspend(struct device *dev)
 	struct mmc_card *card = mmc_dev_to_card(dev);
 	struct mmc_host *host = card->host;
 	int ret;
-        printk(KERN_ERR "mmc_bus_suspend\n");
 
 	ret = pm_generic_suspend(dev);
 	if (ret)
 		return ret;
 
 	ret = host->bus_ops->suspend(host);
+	if (ret)
+		pm_generic_resume(dev);
 
 	return ret;
 }
@@ -165,7 +166,6 @@ static int mmc_bus_resume(struct device *dev)
 	struct mmc_card *card = mmc_dev_to_card(dev);
 	struct mmc_host *host = card->host;
 	int ret;
-	printk(KERN_ERR "mmc_bus_resume\n");
 
 	ret = host->bus_ops->resume(host);
 	if (ret)
@@ -173,7 +173,6 @@ static int mmc_bus_resume(struct device *dev)
 			mmc_hostname(host), ret);
 
 	ret = pm_generic_resume(dev);
-
 	return ret;
 }
 #endif
@@ -264,7 +263,7 @@ struct mmc_card *mmc_alloc_card(struct mmc_host *host, struct device_type *type)
 {
 	struct mmc_card *card;
 
-	card = kzalloc(sizeof(struct mmc_card), GFP_KERNEL | GFP_DMA);
+	card = kzalloc(sizeof(struct mmc_card), GFP_KERNEL);
 	if (!card)
 		return ERR_PTR(-ENOMEM);
 
@@ -302,16 +301,6 @@ int mmc_add_card(struct mmc_card *card)
 	switch (card->type) {
 	case MMC_TYPE_MMC:
 		type = "MMC";
-		sector_t real_size = card->ext_csd.sectors;
-		if(real_size > 0x2200000 )    //32gb
-			real_size = 0x3900000;		
-		else if( (real_size > 0x1200000) && (real_size < 0x2200000) ) //16gb
-			real_size = 0x1c80000;
-		else if( (real_size > 0xb40000) && (real_size < 0x1200000) )  //8gb
-			real_size = 0xe40000;
-		else
-			real_size = 0x720000;     //4gb
-		card->ext_csd.sectors = real_size;
 		break;
 	case MMC_TYPE_SD:
 		type = "SD";
@@ -346,12 +335,13 @@ int mmc_add_card(struct mmc_card *card)
 			mmc_card_ddr52(card) ? "DDR " : "",
 			type);
 	} else {
-		pr_info("%s: new %s%s%s%s%s card at address %04x\n",
+		pr_info("%s: new %s%s%s%s%s%s card at address %04x\n",
 			mmc_hostname(card->host),
 			mmc_card_uhs(card) ? "ultra high speed " :
 			(mmc_card_hs(card) ? "high speed " : ""),
 			mmc_card_hs400(card) ? "HS400 " :
 			(mmc_card_hs200(card) ? "HS200 " : ""),
+			mmc_card_hs400es(card) ? "Enhanced strobe " : "",
 			mmc_card_ddr52(card) ? "DDR " : "",
 			uhs_bus_speed_mode, type, card->rca);
 	}
@@ -362,6 +352,8 @@ int mmc_add_card(struct mmc_card *card)
 	mmc_init_context_info(card->host);
 
 	card->dev.of_node = mmc_of_find_child_device(card->host, 0);
+
+	device_enable_async_suspend(&card->dev);
 
 	ret = device_add(&card->dev);
 	if (ret)

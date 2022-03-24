@@ -438,8 +438,8 @@ typedef uint32 ipaddr_t;
 typedef struct inv6_addr_s {
 	union {
 		__u8 u6_addr8[16];
-		__be16 u6_addr16[8];
-		__be32 u6_addr32[4];
+		uint16 u6_addr16[8];
+		uint32 u6_addr32[4];
 	} inv6_u;
 #define v6_addr			inv6_u.u6_addr8
 #define v6_addr16		inv6_u.u6_addr16
@@ -470,14 +470,14 @@ typedef struct ether_addr_s {
 
 #if 1
 #if defined(CONFIG_RTL_JUMBO_FRAME)
-#if defined(CONFIG_RTD_1295_HWNAT)
+#if defined(CONFIG_RTD_1295_HWNAT) && !defined(CONFIG_RTL_836X_SUPPORT)
 #define MBUF_LEN	9220
-#else /* CONFIG_RTD_1295_HWNAT */
+#else /* CONFIG_RTD_1295_HWNAT && !CONFIG_RTL_836X_SUPPORT */
 #define MBUF_LEN	2100
-#endif /* CONFIG_RTD_1295_HWNAT */
+#endif /* CONFIG_RTD_1295_HWNAT && !CONFIG_RTL_836X_SUPPORT */
 #else
 #define MBUF_LEN	1540 //8: double vlan tag, 4: L2 CRC //1536
-#endif
+#endif /* CONFIG_RTL_JUMBO_FRAME */
 #define CROSS_LAN_MBUF_LEN		(MBUF_LEN+RX_OFFSET+16) // 16: WAPI MIC or 8+4: tkip MIC/ICV
 #else
 #define MBUF_LEN	1700
@@ -738,11 +738,13 @@ extern int lock_owner_rx;
 extern int lock_owner_tx;
 extern int lock_owner_buf;
 extern int lock_owner_hw;
+extern int lock_owner_event;
 extern spinlock_t lock_eth_other;
 extern spinlock_t lock_eth_rx;
 extern spinlock_t lock_eth_tx;
 extern spinlock_t lock_eth_buf;
 extern spinlock_t lock_eth_hw;
+extern spinlock_t lock_eth_event;
 
 #if 1
 /* ============ release version ============ */
@@ -760,6 +762,9 @@ extern spinlock_t lock_eth_hw;
 
 #define SMP_LOCK_ETH_HW(__x__)			spin_lock_irqsave(&lock_eth_hw, (__x__))
 #define SMP_UNLOCK_ETH_HW(__x__) 		spin_unlock_irqrestore(&lock_eth_hw, (__x__))
+
+#define SMP_LOCK_ETH_EVENT(__x__)		spin_lock_irqsave(&lock_eth_event, (__x__))
+#define SMP_UNLOCK_ETH_EVENT(__x__) 		spin_unlock_irqrestore(&lock_eth_event, (__x__))
 #else
 
 /* ============ debug version ============ */
@@ -972,5 +977,10 @@ void rtl_periodic_watchdog_kick(unsigned int count, unsigned int times);
 #if defined(CONFIG_RTL_8197F) && defined(CONFIG_RTL_8211F_SUPPORT)
 extern int gpio_simulate_mdc_mdio;
 #endif
+
+/*
+ * Hardware multicast debug option
+ */
+#define CONFIG_HW_MCAST_DEBUG 1
 
 #endif

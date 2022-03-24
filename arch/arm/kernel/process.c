@@ -54,18 +54,6 @@ static const char *isa_modes[] __maybe_unused = {
   "ARM" , "Thumb" , "Jazelle", "ThumbEE"
 };
 
-#ifdef CONFIG_SMP
-void arch_trigger_all_cpu_backtrace(bool include_self)
-{
-	smp_send_all_cpu_backtrace();
-}
-#else
-void arch_trigger_all_cpu_backtrace(bool include_self)
-{
-	dump_stack();
-}
-#endif
-
 /*
  * This is our default idle handler.
  */
@@ -92,7 +80,6 @@ void arch_cpu_idle_prepare(void)
 
 void arch_cpu_idle_enter(void)
 {
-	idle_notifier_call_chain(IDLE_START);
 	ledtrig_cpu(CPU_LED_IDLE_START);
 #ifdef CONFIG_PL310_ERRATA_769419
 	wmb();
@@ -102,15 +89,7 @@ void arch_cpu_idle_enter(void)
 void arch_cpu_idle_exit(void)
 {
 	ledtrig_cpu(CPU_LED_IDLE_END);
-	idle_notifier_call_chain(IDLE_END);
 }
-
-#ifdef CONFIG_HOTPLUG_CPU
-void arch_cpu_idle_dead(void)
-{
-	cpu_die();
-}
-#endif
 
 /*
  * dump a block of kernel memory from around the given address
@@ -148,13 +127,13 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 		for (j = 0; j < 8; j++) {
 			u32	data;
 			if (probe_kernel_address(p, data)) {
-				printk(" ********");
+				pr_cont(" ********");
 			} else {
-				printk(" %08x", data);
+				pr_cont(" %08x", data);
 			}
 			++p;
 		}
-		printk("\n");
+		pr_cont("\n");
 	}
 }
 
@@ -187,6 +166,26 @@ void __show_regs(struct pt_regs *regs)
 {
 	unsigned long flags;
 	char buf[64];
+#ifndef CONFIG_CPU_V7M
+	unsigned int domain, fs;
+#ifdef CONFIG_CPU_SW_DOMAIN_PAN
+	/*
+	 * Get the domain register for the parent context. In user
+	 * mode, we don't save the DACR, so lets use what it should
+	 * be. For other modes, we place it after the pt_regs struct.
+	 */
+	if (user_mode(regs)) {
+		domain = DACR_UACCESS_ENABLE;
+		fs = get_fs();
+	} else {
+		domain = to_svc_pt_regs(regs)->dacr;
+		fs = to_svc_pt_regs(regs)->addr_limit;
+	}
+#else
+	domain = get_domain();
+	fs = get_fs();
+#endif
+#endif
 
 	show_regs_print_info(KERN_DEFAULT);
 
@@ -215,25 +214,12 @@ void __show_regs(struct pt_regs *regs)
 
 #ifndef CONFIG_CPU_V7M
 	{
-		unsigned int domain = get_domain();
 		const char *segment;
-
-#ifdef CONFIG_CPU_SW_DOMAIN_PAN
-		/*
-		 * Get the domain register for the parent context. In user
-		 * mode, we don't save the DACR, so lets use what it should
-		 * be. For other modes, we place it after the pt_regs struct.
-		 */
-		if (user_mode(regs))
-			domain = DACR_UACCESS_ENABLE;
-		else
-			domain = *(unsigned int *)(regs + 1);
-#endif
 
 		if ((domain & domain_mask(DOMAIN_USER)) ==
 		    domain_val(DOMAIN_USER, DOMAIN_NOACCESS))
 			segment = "none";
-		else if (get_fs() == get_ds())
+		else if (fs == get_ds())
 			segment = "kernel";
 		else
 			segment = "user";
@@ -255,11 +241,11 @@ void __show_regs(struct pt_regs *regs)
 		buf[0] = '\0';
 #ifdef CONFIG_CPU_CP15_MMU
 		{
-			unsigned int transbase, dac = get_domain();
+			unsigned int transbase;
 			asm("mrc p15, 0, %0, c2, c0\n\t"
 			    : "=r" (transbase));
 			snprintf(buf, sizeof(buf), "  Table: %08x  DAC: %08x",
-			  	transbase, dac);
+				transbase, domain);
 		}
 #endif
 		asm("mrc p15, 0, %0, c1, c0\n" : "=r" (ctrl));
@@ -284,9 +270,9 @@ EXPORT_SYMBOL_GPL(thread_notify_head);
 /*
  * Free current thread data structures etc..
  */
-void exit_thread(void)
+void exit_thread(struct task_struct *tsk)
 {
-	thread_notify(THREAD_NOTIFY_EXIT, current_thread_info());
+	thread_notify(THREAD_NOTIFY_EXIT, task_thread_info(tsk));
 }
 
 void flush_thread(void)
@@ -405,8 +391,7 @@ unsigned long get_wchan(struct task_struct *p)
 
 unsigned long arch_randomize_brk(struct mm_struct *mm)
 {
-	unsigned long range_end = mm->brk + 0x02000000;
-	return randomize_range(mm->brk, range_end, 0) ? : mm->brk;
+	return randomize_page(mm->brk, 0x02000000);
 }
 
 #ifdef CONFIG_MMU
@@ -511,7 +496,8 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	npages = 1; /* for sigpage */
 	npages += vdso_total_pages;
 
-	down_write(&mm->mmap_sem);
+	if (down_write_killable(&mm->mmap_sem))
+		return -EINTR;
 	hint = sigpage_addr(mm, npages);
 	addr = get_unmapped_area(NULL, hint, npages << PAGE_SHIFT, 0, 0);
 	if (IS_ERR_VALUE(addr)) {
