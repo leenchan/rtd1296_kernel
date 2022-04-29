@@ -31,22 +31,17 @@
 #include <linux/compiler.h>
 #include <linux/moduleparam.h>
 #include <linux/wakeup_reason.h>
-#include <linux/syscalls.h>
 
 #include "power.h"
-#include <soc/realtek/rtd129x_cpu.h>
 
-
-#ifdef CONFIG_AHCI_RTK
-extern struct task_struct *rtk_sata_dev_task;
-extern int RTK_SATA_DEV_FLAG;
-#endif /* CONFIG_AHCI_RTK */
-
-int RTK_PM_STATE;	//For RTD129x idle mode support.
+int RTK_PM_STATE;       //For RTD129x idle mode support.
 EXPORT_SYMBOL(RTK_PM_STATE);
 
 const char *pm_labels[] = { "mem", "standby", "freeze", NULL };
 const char *pm_states[PM_SUSPEND_MAX];
+
+unsigned int pm_suspend_global_flags;
+EXPORT_SYMBOL_GPL(pm_suspend_global_flags);
 
 static const struct platform_suspend_ops *suspend_ops;
 static const struct platform_freeze_ops *freeze_ops;
@@ -439,7 +434,7 @@ int suspend_devices_and_enter(suspend_state_t state)
 	suspend_console();
 	suspend_test_start();
 
-	RTK_PM_STATE = state;	//For RTD129x idle mode support.
+	RTK_PM_STATE = state;   //For RTD129x idle mode support.
 
 	error = dpm_suspend_start(PMSG_SUSPEND);
 	if (error) {
@@ -497,39 +492,23 @@ static int enter_state(suspend_state_t state)
 {
 	int error;
 
-#ifdef CONFIG_ARCH_RTD129x
+#if defined(CONFIG_ARCH_RTD119X) || defined(CONFIG_ARCH_RTD129X)
 	unsigned long timeout = 0;
-#endif /* CONFIG_ARCH_RTD129x */
+#endif /* CONFIG_ARCH_RTD129X */
 
 	trace_suspend_resume(TPS("suspend_enter"), state, true);
 
+#ifdef CONFIG_ARCH_RTD129X
 
-#ifdef CONFIG_ARCH_RTD129x
-
-	if (state == PM_SUSPEND_STANDBY) {
-#ifdef CONFIG_AHCI_RTK
-		RTK_SATA_DEV_FLAG = 3;
-#endif
-	}
 	if (state == PM_SUSPEND_MEM){
 		sys_sync();
-
-#ifdef CONFIG_AHCI_RTK
-		if(rtk_sata_dev_task != NULL){
-			RTK_SATA_DEV_FLAG = 2;
-			wake_up_process(rtk_sata_dev_task);
-			timeout = jiffies + msecs_to_jiffies(1000);
-			while(time_before(jiffies, timeout));
-		}
-#endif /*CONFIG_AHCI_RTK*/
-
 	}
-#endif /* CONFIG_ARCH_RTD129x */
+#endif /* CONFIG_ARCH_RTD129X */
 
 	if (state == PM_SUSPEND_FREEZE) {
 #ifdef CONFIG_PM_DEBUG
 		if (pm_test_level != TEST_NONE && pm_test_level <= TEST_CPUS) {
-			pr_warning("PM: Unsupported test mode for freeze state,"
+			pr_warning("PM: Unsupported test mode for suspend to idle,"
 				   "please choose none/freezer/devices/platform.\n");
 			return -EAGAIN;
 		}
@@ -543,13 +522,16 @@ static int enter_state(suspend_state_t state)
 	if (state == PM_SUSPEND_FREEZE)
 		freeze_begin();
 
+#ifndef CONFIG_SUSPEND_SKIP_SYNC
 	trace_suspend_resume(TPS("sync_filesystems"), 0, true);
 	printk(KERN_INFO "PM: Syncing filesystems ... ");
 	sys_sync();
 	printk("done.\n");
 	trace_suspend_resume(TPS("sync_filesystems"), 0, false);
+#endif
 
-	pr_debug("PM: Preparing system for %s sleep\n", pm_states[state]);
+	pr_debug("PM: Preparing system for sleep (%s)\n", pm_states[state]);
+	pm_suspend_clear_flags();
 	error = suspend_prepare(state);
 	if (error)
 		goto Unlock;
@@ -558,7 +540,7 @@ static int enter_state(suspend_state_t state)
 		goto Finish;
 
 	trace_suspend_resume(TPS("suspend_enter"), state, false);
-	pr_debug("PM: Entering %s sleep\n", pm_states[state]);
+	pr_debug("PM: Suspending system (%s)\n", pm_states[state]);
 	pm_restrict_gfp_mask();
 	error = suspend_devices_and_enter(state);
 	pm_restore_gfp_mask();

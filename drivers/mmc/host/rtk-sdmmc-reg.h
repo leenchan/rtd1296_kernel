@@ -1,14 +1,3 @@
-/*
- * Realtek SD card header file
- *
- * Authors:
- * Copyright (C) 2015 Realtek Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-
 #ifndef DRIVERS_MMC_HOST_RTK_SDMMC_REG_H_
 #define DRIVERS_MMC_HOST_RTK_SDMMC_REG_H_
 

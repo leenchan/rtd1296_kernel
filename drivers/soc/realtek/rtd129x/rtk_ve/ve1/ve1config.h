@@ -31,7 +31,11 @@
 
 
 #define MAX_INST_HANDLE_SIZE	        (32*1024)
-#define MAX_NUM_INSTANCE 4
+#ifdef CONFIG_FB_RTK //__LINUX_MEDIA_NAS__
+#define MAX_NUM_INSTANCE 32
+#else
+#define MAX_NUM_INSTANCE 8
+#endif
 #define MAX_NUM_VPU_CORE 2
 #define MAX_NUM_VCORE                   1
 

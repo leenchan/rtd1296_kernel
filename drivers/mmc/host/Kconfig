@@ -6,28 +6,32 @@ comment "MMC/SD/SDIO Host Controller Drivers"
 
 menuconfig MMC_RTK_EMMC
 	tristate "Realtek EMMC host driver"
+	depends on ARCH_RTD129X
         help
           Support RealTek EMMC for Kylin.
 
 config MMC_RTKEMMC_JIFFY_NOT_WORK_ON_1_LAYER_FPGA
-	bool "Workaround for 129x RTK emmc driver especial for 1 layer FPGA that timer not work"
+	bool "Workaround for 1295 RTK emmc driver especial for 1 layer FPGA that timer not work"
 	depends on MMC_RTK_EMMC
         help
-          Work around for rtkemmc driver especially on 129x 1 layer
+          Work around for rtkemmc driver especially on 1295 1 layer
           FPGA b/d that jiffies doesn't count.
 
 menuconfig MMC_RTK_SDMMC
     tristate "Realtek SD/MMC host driver"
+    depends on ARCH_RTD129X
+    select GPIOLIB
+    select GPIO_RTD129X
     help
       Realtek SD/MMC host support.
-      
+
 config MMC_RTK_SDMMC_DEBUG
     bool  "Enable Realtek SD/MMC host driver debug message."
     depends on MMC_RTK_SDMMC
     default n
         help
           Enable Realtek SD/MMC host driver debug message.
-          
+
 config MMC_ARMMMCI
 	tristate "ARM AMBA Multimedia Card Interface support"
 	depends on ARM_AMBA
@@ -91,7 +95,7 @@ config MMC_SDHCI_BIG_ENDIAN_32BIT_BYTE_SWAPPER
 	  has the effect of scrambling the addresses and formats of data
 	  accessed in sizes other than the datum size.
 
-	  This is the case for the Freescale eSDHC and Nintendo Wii SDHCI.
+	  This is the case for the Nintendo Wii SDHCI.
 
 config MMC_SDHCI_PCI
 	tristate "SDHCI support on PCI bus"
@@ -153,11 +157,19 @@ config MMC_SDHCI_OF_ARASAN
 
 	  If unsure, say N.
 
+config MMC_SDHCI_OF_AT91
+	tristate "SDHCI OF support for the Atmel SDMMC controller"
+	depends on MMC_SDHCI_PLTFM
+	depends on OF
+	select MMC_SDHCI_IO_ACCESSORS
+	help
+	  This selects the Atmel SDMMC driver
+
 config MMC_SDHCI_OF_ESDHC
 	tristate "SDHCI OF support for the Freescale eSDHC controller"
 	depends on MMC_SDHCI_PLTFM
-	depends on PPC
-	select MMC_SDHCI_BIG_ENDIAN_32BIT_BYTE_SWAPPER
+	depends on PPC || ARCH_MXC || ARCH_LAYERSCAPE
+	select MMC_SDHCI_IO_ACCESSORS
 	help
 	  This selects the Freescale eSDHC controller support.
 
@@ -243,6 +255,7 @@ config MMC_SDHCI_SIRF
 	tristate "SDHCI support on CSR SiRFprimaII and SiRFmarco SoCs"
 	depends on ARCH_SIRF
 	depends on MMC_SDHCI_PLTFM
+	select MMC_SDHCI_IO_ACCESSORS
 	help
 	  This selects the SDHCI support for SiRF System-on-Chip devices.
 
@@ -369,7 +382,7 @@ config MMC_SDHCI_ST
 
 menuconfig MMC_SDHCI_RTK
     tristate "SDHCI support for Realtek SoC"
-    depends on ARCH_RTD129x
+    depends on ARCH_RTD129X
     depends on MMC_SDHCI_PLTFM
     select MMC_SDHCI_IO_ACCESSORS
     help
@@ -378,12 +391,14 @@ menuconfig MMC_SDHCI_RTK
 
       If you have a controller with this interface, say Y or M here.
       If unsure, say N.
-      
-config RTK_SDIO_CLK_ADJUST
-    bool "Dynamic SDIO clock adjust support"
-    depends on MMC_SDHCI_RTK
+
+config MMC_SDHCI_RTK_PATCH
+	bool
+	depends on MMC_SDHCI_RTK
+	default y
         help
-          SDIO clock adjusting API for WIFI driver
+	  This is silent Kconfig option that is selected by RTK SDHCI driver that
+	  need to hack the kernel.
 
 config MMC_OMAP
 	tristate "TI OMAP Multimedia Card Interface support"
@@ -399,7 +414,7 @@ config MMC_OMAP
 config MMC_OMAP_HS
 	tristate "TI OMAP High Speed Multimedia Card Interface support"
 	depends on HAS_DMA
-	depends on ARCH_OMAP2PLUS || COMPILE_TEST
+	depends on ARCH_OMAP2PLUS || ARCH_KEYSTONE || COMPILE_TEST
 	help
 	  This selects the TI OMAP High Speed Multimedia card Interface.
 	  If you have an omap2plus board with a Multimedia Card slot,
@@ -506,7 +521,8 @@ config MMC_DAVINCI
 
 config MMC_GOLDFISH
 	tristate "goldfish qemu Multimedia Card Interface support"
-	depends on GOLDFISH
+	depends on HAS_DMA
+	depends on GOLDFISH || COMPILE_TEST
 	help
 	  This selects the Goldfish Multimedia card Interface emulation
 	  found on the Goldfish Android virtual device emulation.
@@ -648,15 +664,7 @@ config MMC_DW
 	help
 	  This selects support for the Synopsys DesignWare Mobile Storage IP
 	  block, this provides host support for SD and MMC interfaces, in both
-	  PIO and external DMA modes.
-
-config MMC_DW_IDMAC
-	bool "Internal DMAC interface"
-	depends on MMC_DW
-	help
-	  This selects support for the internal DMAC block within the Synopsys
-	  Designware Mobile Storage IP block. This disables the external DMA
-	  interface.
+	  PIO, internal DMA mode and external DMA mode.
 
 config MMC_DW_PLTFM
 	tristate "Synopsys Designware MCI Support as platform device"
@@ -685,7 +693,6 @@ config MMC_DW_K3
 	tristate "K3 specific extensions for Synopsys DW Memory Card Interface"
 	depends on MMC_DW
 	select MMC_DW_PLTFM
-	select MMC_DW_IDMAC
 	help
 	  This selects support for Hisilicon K3 SoC specific extensions to the
 	  Synopsys DesignWare Memory Card Interface driver. Select this option
@@ -818,3 +825,11 @@ config MMC_TOSHIBA_PCI
 	depends on PCI
 	help
 
+config MMC_MTK
+	tristate "MediaTek SD/MMC Card Interface support"
+	depends on HAS_DMA
+	help
+	  This selects the MediaTek(R) Secure digital and Multimedia card Interface.
+	  If you have a machine with a integrated SD/MMC card reader, say Y or M here.
+	  This is needed if support for any SD/SDIO/MMC devices is required.
+	  If unsure, say N.

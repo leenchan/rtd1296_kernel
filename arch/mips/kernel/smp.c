@@ -42,6 +42,7 @@
 #include <asm/mmu_context.h>
 #include <asm/time.h>
 #include <asm/setup.h>
+#include <asm/maar.h>
 
 cpumask_t cpu_callin_map;		/* Bitmask of started secondaries */
 
@@ -158,6 +159,7 @@ asmlinkage void start_secondary(void)
 	mips_clockevent_init();
 	mp_ops->init_secondary();
 	cpu_report();
+	maar_init();
 
 	/*
 	 * XXX parity protection should be folded in here when it's converted
@@ -172,15 +174,16 @@ asmlinkage void start_secondary(void)
 	cpumask_set_cpu(cpu, &cpu_coherent_mask);
 	notify_cpu_starting(cpu);
 
-	cpumask_set_cpu(cpu, &cpu_callin_map);
-	synchronise_count_slave(cpu);
-
 	set_cpu_online(cpu, true);
 
 	set_cpu_sibling_map(cpu);
 	set_cpu_core_map(cpu);
 
 	calculate_cpu_foreign_map();
+
+	cpumask_set_cpu(cpu, &cpu_callin_map);
+
+	synchronise_count_slave(cpu);
 
 	/*
 	 * irq will be enabled in ->smp_finish(), enabling it too early
@@ -190,16 +193,6 @@ asmlinkage void start_secondary(void)
 	mp_ops->smp_finish();
 
 	cpu_startup_entry(CPUHP_ONLINE);
-}
-
-/*
- * Call into both interrupt handlers, as we share the IPI for them
- */
-void __irq_entry smp_call_function_interrupt(void)
-{
-	irq_enter();
-	generic_smp_call_function_interrupt();
-	irq_exit();
 }
 
 static void stop_this_cpu(void *dummy)

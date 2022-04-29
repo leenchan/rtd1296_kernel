@@ -28,8 +28,6 @@
  *	TLB Management
  *	==============
  *
- *	The arch/arm64/mm/tlb.S files implement these methods.
- *
  *	The TLB specific code is expected to perform whatever tests it needs
  *	to determine if it should invalidate the TLB for each call.  Start
  *	addresses are inclusive and end addresses are exclusive; it is safe to
@@ -83,7 +81,7 @@ static inline void flush_tlb_all(void)
 
 static inline void flush_tlb_mm(struct mm_struct *mm)
 {
-	unsigned long asid = (unsigned long)ASID(mm) << 48;
+	unsigned long asid = ASID(mm) << 48;
 
 	dsb(ishst);
 	asm("tlbi	aside1is, %0" : : "r" (asid));
@@ -93,11 +91,10 @@ static inline void flush_tlb_mm(struct mm_struct *mm)
 static inline void flush_tlb_page(struct vm_area_struct *vma,
 				  unsigned long uaddr)
 {
-	unsigned long addr = uaddr >> 12 |
-		((unsigned long)ASID(vma->vm_mm) << 48);
+	unsigned long addr = uaddr >> 12 | (ASID(vma->vm_mm) << 48);
 
 	dsb(ishst);
-	asm("tlbi	vae1is, %0" : : "r" (addr));
+	asm("tlbi	vale1is, %0" : : "r" (addr));
 	dsb(ish);
 }
 
@@ -107,10 +104,11 @@ static inline void flush_tlb_page(struct vm_area_struct *vma,
  */
 #define MAX_TLB_RANGE	(1024UL << PAGE_SHIFT)
 
-static inline void flush_tlb_range(struct vm_area_struct *vma,
-				   unsigned long start, unsigned long end)
+static inline void __flush_tlb_range(struct vm_area_struct *vma,
+				     unsigned long start, unsigned long end,
+				     bool last_level)
 {
-	unsigned long asid = (unsigned long)ASID(vma->vm_mm) << 48;
+	unsigned long asid = ASID(vma->vm_mm) << 48;
 	unsigned long addr;
 
 	if ((end - start) > MAX_TLB_RANGE) {
@@ -122,9 +120,19 @@ static inline void flush_tlb_range(struct vm_area_struct *vma,
 	end = asid | (end >> 12);
 
 	dsb(ishst);
-	for (addr = start; addr < end; addr += 1 << (PAGE_SHIFT - 12))
-		asm("tlbi vae1is, %0" : : "r"(addr));
+	for (addr = start; addr < end; addr += 1 << (PAGE_SHIFT - 12)) {
+		if (last_level)
+			asm("tlbi vale1is, %0" : : "r"(addr));
+		else
+			asm("tlbi vae1is, %0" : : "r"(addr));
+	}
 	dsb(ish);
+}
+
+static inline void flush_tlb_range(struct vm_area_struct *vma,
+				   unsigned long start, unsigned long end)
+{
+	__flush_tlb_range(vma, start, end, false);
 }
 
 static inline void flush_tlb_kernel_range(unsigned long start, unsigned long end)
@@ -153,26 +161,11 @@ static inline void flush_tlb_kernel_range(unsigned long start, unsigned long end
 static inline void __flush_tlb_pgtable(struct mm_struct *mm,
 				       unsigned long uaddr)
 {
-	unsigned long addr = uaddr >> 12 | ((unsigned long)ASID(mm) << 48);
+	unsigned long addr = uaddr >> 12 | (ASID(mm) << 48);
 
-	dsb(ishst);
 	asm("tlbi	vae1is, %0" : : "r" (addr));
 	dsb(ish);
 }
-/*
- * On AArch64, the cache coherency is handled via the set_pte_at() function.
- */
-static inline void update_mmu_cache(struct vm_area_struct *vma,
-				    unsigned long addr, pte_t *ptep)
-{
-	/*
-	 * set_pte() does not have a DSB for user mappings, so make sure that
-	 * the page table write is visible.
-	 */
-	dsb(ishst);
-}
-
-#define update_mmu_cache_pmd(vma, address, pmd) do { } while (0)
 
 #endif
 

@@ -10,7 +10,6 @@
 #include <asm-generic/uaccess-unaligned.h>
 
 #include <linux/bug.h>
-#include <linux/string.h>
 
 #define VERIFY_READ 0
 #define VERIFY_WRITE 1
@@ -61,14 +60,15 @@ static inline long access_ok(int type, const void __user * addr,
  * use a 32bit (unsigned int) address here.
  */
 
+#define ARCH_HAS_RELATIVE_EXTABLE
 struct exception_table_entry {
-	unsigned long insn;	/* address of insn that is allowed to fault. */
-	unsigned long fixup;	/* fixup routine */
+	int insn;	/* relative address of insn that is allowed to fault. */
+	int fixup;	/* relative address of fixup routine */
 };
 
 #define ASM_EXCEPTIONTABLE_ENTRY( fault_addr, except_addr )\
 	".section __ex_table,\"aw\"\n"			   \
-	ASM_WORD_INSN #fault_addr ", " #except_addr "\n\t" \
+	".word (" #fault_addr " - .), (" #except_addr " - .)\n\t" \
 	".previous\n"
 
 /*
@@ -246,14 +246,13 @@ static inline unsigned long __must_check copy_from_user(void *to,
                                           unsigned long n)
 {
         int sz = __compiletime_object_size(to);
-        unsigned long ret = n;
+        int ret = -EFAULT;
 
         if (likely(sz == -1 || !__builtin_constant_p(n) || sz >= n))
                 ret = __copy_from_user(to, from, n);
         else
                 copy_from_user_overflow();
-	if (unlikely(ret))
-		memset(to + (n - ret), 0, ret);
+
         return ret;
 }
 

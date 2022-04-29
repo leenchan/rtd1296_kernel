@@ -1,15 +1,4 @@
 /*
- * Realtek RPC driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- */
-
-/*
  * $Id: RPCkern.c,v 1.10 2004/8/4 09:25 Jacky Exp $
  */
 #include <generated/autoconf.h>
@@ -289,7 +278,7 @@ ssize_t rpc_kern_write(int opt, const char *buf, size_t count)
 #else
         writel((RPC_INT_SA | RPC_INT_WRITE_1), rpc_int_base+RPC_SB2_INT);        // audio
 #endif
-        //rtd_outl(REG_SB2_CPU_INT, (RPC_INT_SA | RPC_INT_WRITE_1));
+    //rtd_outl(REG_SB2_CPU_INT, (RPC_INT_SA | RPC_INT_WRITE_1));
     else
         pr_err("error device number...\n");
 
@@ -435,33 +424,6 @@ static int rpc_kernel_thread(void *p)
     return 0;
 }
 
-int dump_kern_rpc(void)
-{
-    int i, j;
-    RPC_DEV *dev;
-    for(j = 0; j < RPC_NR_KERN_DEVS/RPC_NR_PAIR; j++){
-        dev = (RPC_DEV *)&rpc_kern_devices[j];
-        pr_info("\nname: KernAudio%s\n", (j % RPC_NR_PAIR == 0) ? "Write" : "Read");
-        pr_info("RingBuf: %x\n", dev->ringBuf);
-        pr_info("RingStart: %x\n", dev->ringStart);
-        pr_info("RingIn: %x\n", dev->ringIn);
-        pr_info("RingOut: %x\n", dev->ringOut);
-        pr_info("RingEnd: %x\n", dev->ringEnd);
-
-        pr_info("RingBuffer:\n");
-        for (i = 0; i < RPC_RING_SIZE; i += 16) {
-            uint32_t *addr = (uint32_t *)(AVCPU2SCPU(dev->ringStart) + i);
-            pr_info("%x: %08x %08x %08x %08x\n",
-                    dev->ringStart + i,
-                    ntohl(*(addr + 0)),
-                    ntohl(*(addr + 1)),
-                    ntohl(*(addr + 2)),
-                    ntohl(*(addr + 3)));
-        }
-    }
-    return 0;
-}
-
 int send_rpc_command(int opt, uint32_t command, uint32_t param1, uint32_t param2, uint32_t *retvalue)
 {
     char sendbuf[sizeof(RPC_STRUCT) + 3*sizeof(uint32_t)];
@@ -485,7 +447,7 @@ int send_rpc_command(int opt, uint32_t command, uint32_t param1, uint32_t param2
         mutex_unlock(&rpc_kern_lock[opt]);
         return RPC_FAIL;
     }
- 
+
     //pr_info(" #@# sendbuf: %d cmd %x param1 %x param2 %x\n", sizeof(sendbuf), command, param1, param2);
     // fill the RPC_STRUCT...
     rpc->programID = htonl(KERNELID);
@@ -527,8 +489,7 @@ int send_rpc_command(int opt, uint32_t command, uint32_t param1, uint32_t param2
     //if (!sleep_on_timeout(&rpc_wq[opt], TIMEOUT)) {
     if (!wait_event_timeout(rpc_wq[opt], complete_condition[opt], TIMEOUT)) {
         pr_err("kernel rpc timeout -> disable %s...\n", rpc_kthread[opt]->comm);
-        WARN(1, " #@# sendbuf: size%lu cmd:%x param1:%x param2:%x\n", sizeof(sendbuf), command, param1, param2);
-        dump_kern_rpc();
+        //WARN(1, " #@# sendbuf: size%lu cmd:%x param1:%x param2:%x\n", sizeof(sendbuf), command, param1, param2);
 
         kthread_stop(rpc_kthread[opt]);
         rpc_kthread[opt] = 0;

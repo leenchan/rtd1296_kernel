@@ -107,10 +107,6 @@ enum ip_conntrack_events {
 	IPCT_NATSEQADJ = IPCT_SEQADJ,
 	IPCT_SECMARK,		/* new security mark has been set */
 	IPCT_LABEL,		/* new connlabel has been set */
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-	IPCT_REFRESH_BIT,
-	IPCT_REFRESH = (1 << IPCT_REFRESH_BIT),
-#endif
 };
 
 enum ip_conntrack_expect_events {

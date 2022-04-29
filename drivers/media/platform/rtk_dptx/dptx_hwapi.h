@@ -21,10 +21,6 @@ typedef enum
 	DP_FORMAT_1080P_60,
 	DP_FORMAT_2160P_30,
 	DP_FORMAT_2160P_60,
-	DP_FORMAT_1440_768,
-	DP_FORMAT_1280_800,
-	DP_FORMAT_1440_900,
-	DP_FORMAT_960_544,
 } EnumDPTxOuputType;
 
 typedef enum
@@ -141,7 +137,6 @@ typedef struct
 	unsigned char b3TP1Lane1SameVolCnt : 3;
 	unsigned char b3TP1Lane2SameVolCnt : 3;
 	unsigned char b3TP1Lane3SameVolCnt : 3;
-	unsigned char b3TP1count : 3;
 	unsigned char b3TP2count : 3;
 	unsigned char ucLinkPBNPerTimeSlot;
 	unsigned char ucLane0Adjust;
@@ -181,12 +176,8 @@ void Set_1080p_2lane(struct rtk_dptx_hwinfo *hwinfo);
 void Set_2160p30_4lane(struct rtk_dptx_hwinfo *hwinfo);
 void Set_2160p60_4lane(struct rtk_dptx_hwinfo *hwinfo);
 void Set_720p_1lane(struct rtk_dptx_hwinfo *hwinfo);
-void Set_1280_800_2lane(struct rtk_dptx_hwinfo *hwinfo);
-void Set_1440_768_2lane(struct rtk_dptx_hwinfo *hwinfo);
-void Set_1440_900_2lane(struct rtk_dptx_hwinfo *hwinfo);
 int dptx_config_tv_system(struct rtk_dptx_hwinfo *hwinfo);
 
-void dptx_lvdsint_en(struct rtk_dptx_hwinfo *hwinfo, int en);
 void dptx_close_phy(struct rtk_dptx_hwinfo *hwinfo);
 void dptx_close_pll(struct rtk_dptx_hwinfo *hwinfo);
 int ReadEDID(struct rtk_dptx_hwinfo *hwinfo, unsigned char *ptr, int lentgh);

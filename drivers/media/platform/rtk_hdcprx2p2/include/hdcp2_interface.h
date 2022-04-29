@@ -14,7 +14,6 @@ typedef enum
 extern unsigned char global_certRx[CERT_RX_SIZE];
 extern unsigned char global_kprivRx[KPRIVRX_SIZE];
 
-#define REAPETER_2p2  1 // TEST 
 /*
 /////////////////////////////////////////////////////
 // layout of secure flush (1KB : 0x3FF)
@@ -225,12 +224,10 @@ H2status hdcp2_Rx_GetEKhKm(H2uint8 *pOut, H2uint32 ulSize);
 H2status hdcp2_Rx_GethPrime(H2uint8 *pOut, H2uint32 ulSize);
 H2status hdcp2_Rx_GetlPrime(H2uint8 *pOut, H2uint32 ulSize);
 H2status hdcp2_Rx_GetvPrime(H2uint8 *pOut, H2uint32 ulSize);
-H2status hdcp2_Rx_CalvPrime(unsigned char *receiver_id, unsigned char *temp_rxinfor, unsigned char *temp_seq_num, unsigned char *Vprime);
-H2status hdcp2_Rx_CalMPrime(unsigned char *bstream_id_type, unsigned char *bseq_num_M, unsigned char *Mprime);
 H2status hdcp2_Rx_SetKsvs(unsigned char *pMsg, unsigned int len);
 H2status hdcp2_Rx_GetKsvInfo(H2uint8 *Devices, H2uint8 *Depth,
 			      H2uint8 *DevicesExceeded,
-			      H2uint8 *DepthExceeded, H2uint8 *pKSVs,H2uint8 *repeater_down_stream,H2uint8 *repeater_hdcp1_down_stream);
+			      H2uint8 *DepthExceeded, H2uint8 *pKSVs);
 H2status hdcp2_Rx_decrypt(H2uint8 InputCtr[12], H2uint8 *pData,
 			    H2uint32 Len);
 H2status hdcp2_Rx_SetKsXorLc128(const H2uint8 *AESKey);

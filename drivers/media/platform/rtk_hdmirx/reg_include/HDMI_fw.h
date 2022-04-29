@@ -1,13 +1,4 @@
-/*
- * HDMI_fw.h - RTK hdmi rx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+/*===========*@date:2015/3/6===========*/
 
 #ifndef _HDMI_RX_REG_H_INCLUDED_
 #define _HDMI_RX_REG_H_INCLUDED_

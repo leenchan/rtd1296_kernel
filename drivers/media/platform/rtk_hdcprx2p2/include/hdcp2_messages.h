@@ -46,13 +46,6 @@ typedef enum {
 #define DCP_LLC_KEY_SIZE 385
 #define KEYSET_SIZE 864
 
-//cloud add
-#define seq_num_M_SIZE 3
-#define Manage_k_SIZE 2
-#define Stream_Type_SIZE  2
-
-#define Mprime_SIZE  32
-
 #define MAX_PACKED_MSG_SIZE (CERT_RX_SIZE + 2)
 #define AKE_MSG_SEND_RRX_SIZE (RRX_SIZE + 1)
 #define AKE_MSG_SEND_HPRIME_SIZE (H_SIZE + 1)
@@ -109,9 +102,6 @@ typedef enum {
 #define STREAM_CTR_SIZE (32 / 8)
 #define AES_BLK_SIZE    (256 / 8)
 
-#define RXinfo_SIZE    (2)
-
-#define Seq_num_V_SIZE    (3)
 #ifdef TEST_HDCP2_2_TX_DRIVER
 typedef struct {
 	unsigned short Transmitter_cap_mask;
@@ -197,43 +187,12 @@ typedef struct {
 
 #define H2_MAX_DEVICECOUNT 31
 typedef struct {
-/*
-	unsigned char maxDevsExceeded;	// true if devcount > 31
-	unsigned char maxCascadeExceeded;	// true if depth > 4
+	unsigned char maxDevsExceeded;	/* true if devcount > 31*/
+	unsigned char maxCascadeExceeded;	/* true if depth > 4*/
 	unsigned char deviceCount;
 	unsigned char depth;
 	unsigned char VPrime[V_SIZE];
-	*/
-		unsigned char Rxinfo[2];
-	unsigned char Seq_num[3];
-	unsigned char VPrime[32]; //V_SIZE/2
-	unsigned char Receiver_ID_LIST[RECEIVERID_SIZE*MAX_DEVICECOUNT]; //V_SIZE/2
-	unsigned char maxDevsExceeded; /* true if devcount > 31*/
-	unsigned char maxCascadeExceeded;   /* true if depth > 4*/
-	unsigned char deviceCount;
-	unsigned char depth;
-	unsigned char HDCP2_0_repeater_downstream;
-	unsigned char HDCP1_device_downstream;
 } H2_RepeaterAuthSendRxIdList_PayLoad;
-
-typedef struct {
-unsigned char V[16];
-
-} H2_RepeaterSendAck_PayLoad;
-
-
-
-typedef struct {
-unsigned char seq_num_M[seq_num_M_SIZE];
-unsigned char Manage_k[Manage_k_SIZE];
-unsigned char Stream_Type[Stream_Type_SIZE];
-
-} H2_RepeaterAuthStreamManage_PayLoad;
-
-
-typedef struct {
-unsigned char MPrime[Mprime_SIZE];
-} H2_RepeaterAuthStreamReady_PayLoad;
 
 /**
  * Pack and unpack functions. These functions convert the incoming packed
@@ -268,11 +227,6 @@ int h2MsgRepeaterAuthSendReceiverIdListPack(unsigned char *pMsg,
 					      H2_RepeaterAuthSendRxIdList_PayLoad
 					      *payload,
 					      const unsigned char *rcvrIds);
-
-int h2MsgRepeaterAuthStraeamManageUnpack(const unsigned char *pMsg, unsigned int length, H2_RepeaterAuthStreamManage_PayLoad *payload);
-
-int h2MsgRepeaterAuthStreamReadyPack(unsigned char *pMsg, unsigned int *pLength,
-					      const H2_RepeaterAuthStreamReady_PayLoad *payload);
 
 #endif	/*  */
 #endif

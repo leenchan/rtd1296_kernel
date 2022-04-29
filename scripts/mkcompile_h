@@ -59,8 +59,6 @@ if [ -n "$SMP" ] ; then CONFIG_FLAGS="SMP"; fi
 if [ -n "$PREEMPT" ] ; then CONFIG_FLAGS="$CONFIG_FLAGS PREEMPT"; fi
 UTS_VERSION="$UTS_VERSION $CONFIG_FLAGS $TIMESTAMP"
 
-COMMIT_ID_VERSION="(branch: $(git rev-parse --abbrev-ref --symbolic-full-name @{u}) commit_id:$(git rev-parse HEAD))"
-
 # Truncate to maximum length
 
 UTS_LEN=64
@@ -79,8 +77,6 @@ UTS_TRUNCATE="cut -b -$UTS_LEN"
   echo \#define LINUX_COMPILE_HOST \"`echo $LINUX_COMPILE_HOST | $UTS_TRUNCATE`\"
 
   echo \#define LINUX_COMPILER \"`$CC -v 2>&1 | grep ' version '`\"
-
-  echo \#define COMMIT_ID_VERSION \"`echo $COMMIT_ID_VERSION`\"
 ) > .tmpcompile
 
 # Only replace the real compile.h if the new one is different,

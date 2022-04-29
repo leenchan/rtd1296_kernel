@@ -39,39 +39,22 @@ int cpufreq_frequency_table_cpuinfo(struct cpufreq_policy *policy,
 	struct cpufreq_frequency_table *pos;
 	unsigned int min_freq = ~0;
 	unsigned int max_freq = 0;
-#ifdef CONFIG_ARM_REALTEK_RVURDK
-	unsigned int mintough_freq = ~0;
-	unsigned int maxtough_freq = 0;
-#endif
 	unsigned int freq;
 
 	cpufreq_for_each_valid_entry(pos, table) {
 		freq = pos->frequency;
-		pr_debug("table entry flags: %u ", pos->flags);
+
 		if (!cpufreq_boost_enabled()
 		    && (pos->flags & CPUFREQ_BOOST_FREQ))
 			continue;
-#ifdef CONFIG_ARM_REALTEK_RVURDK
-		if (pos->flags & CPUFREQ_TOUGH_FREQ) {
-			if (freq < mintough_freq)
-				mintough_freq = freq;
-			if (freq > maxtough_freq)
-				maxtough_freq = freq;
-			continue;
-			
-		}
 
-#endif
 		pr_debug("table entry %u: %u kHz\n", (int)(pos - table), freq);
 		if (freq < min_freq)
 			min_freq = freq;
 		if (freq > max_freq)
 			max_freq = freq;
 	}
-#ifdef CONFIG_ARM_REALTEK_RVURDK
-	policy->mintough = mintough_freq;
-        policy->maxtough = maxtough_freq;
-#endif
+
 	policy->min = policy->cpuinfo.min_freq = min_freq;
 	policy->max = policy->cpuinfo.max_freq = max_freq;
 
@@ -328,15 +311,6 @@ int cpufreq_table_validate_and_show(struct cpufreq_policy *policy,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(cpufreq_table_validate_and_show);
-
-struct cpufreq_policy *cpufreq_cpu_get_raw(unsigned int cpu);
-
-struct cpufreq_frequency_table *cpufreq_frequency_get_table(unsigned int cpu)
-{
-	struct cpufreq_policy *policy = cpufreq_cpu_get_raw(cpu);
-	return policy ? policy->freq_table : NULL;
-}
-EXPORT_SYMBOL_GPL(cpufreq_frequency_get_table);
 
 MODULE_AUTHOR("Dominik Brodowski <linux@brodo.de>");
 MODULE_DESCRIPTION("CPUfreq frequency table helpers");

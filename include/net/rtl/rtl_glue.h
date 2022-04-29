@@ -168,11 +168,6 @@
 * Revision 1.1  2003/05/23 04:55:25  jzchen
 * Add rtl glue to solve porting issue
 *
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
-*
 */
 
 #ifndef RTL_GLUE_H

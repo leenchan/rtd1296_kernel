@@ -16,18 +16,13 @@
 #include <linux/percpu-defs.h>
 #include <linux/slab.h>
 #include <linux/tick.h>
-#include <linux/debugfs.h>
 #include "cpufreq_governor.h"
 
 /* On-demand governor macros */
 #define DEF_FREQUENCY_UP_THRESHOLD		(80)
 #define DEF_SAMPLING_DOWN_FACTOR		(1)
 #define MAX_SAMPLING_DOWN_FACTOR		(100000)
-#ifdef CONFIG_ARM_REALTEK_RVURDK
-#define MICRO_FREQUENCY_UP_THRESHOLD		(100)
-#else
-#define MICRO_FREQUENCY_UP_THRESHOLD		(100)
-#endif
+#define MICRO_FREQUENCY_UP_THRESHOLD		(95)
 #define MICRO_FREQUENCY_MIN_SAMPLE_RATE		(10000)
 #define MIN_FREQUENCY_UP_THRESHOLD		(11)
 #define MAX_FREQUENCY_UP_THRESHOLD		(100)
@@ -69,10 +64,6 @@ static int should_io_be_busy(void)
 			boot_cpu_data.x86 == 6 &&
 			boot_cpu_data.x86_model >= 15)
 		return 1;
-#endif
-
-#ifdef CONFIG_ARM64
-    return 1;
 #endif
 	return 0;
 }
@@ -156,172 +147,6 @@ static void dbs_freq_increase(struct cpufreq_policy *policy, unsigned int freq)
 			CPUFREQ_RELATION_L : CPUFREQ_RELATION_H);
 }
 
-#define PA_SP_STATIC  80
-#define PA_SP_DYNAMIC 20
-#define PA_SP_FREEZE_RANGE 10
-
-/**
- * power_aware_load2freq - find next frequency to use based on load
- * @policy: cpufreq policy
- * @load: current load 
- *
- * The equaltion is based on a split point, depended on the current
- * frequncy, splits the original linear equation into 3 parts. If 
- * load is higher than the point, use steep linear equation, which 
- * scaling from the current frequncy to max frequency, and vice versa.
- * If the load in the freeze range, returns the current frequncy.
- *
- * The original equation is equivalent to 
- *   PA_SP_DYNAMIC = 0, 
- *   PA_SP_STATIC = 50, and
- *   PA_SP_FREEZE_RANGE = 0.
- *
- * Returns next frequncy.
- */
-static int inline power_aware_load2freq(struct cpufreq_policy *policy, int load)
-{
-    unsigned int freq_next, min_f, max_f, cur_f;
-    unsigned int sp;
-    
-    min_f = policy->cpuinfo.min_freq;
-    max_f = policy->cpuinfo.max_freq;
-    cur_f = policy->cur;
-
-    sp = PA_SP_DYNAMIC * (cur_f - min_f) / (max_f - min_f) + PA_SP_STATIC;
-    
-    if ((sp - PA_SP_FREEZE_RANGE) <= load && load <= (sp + PA_SP_FREEZE_RANGE))
-        freq_next = cur_f;
-    else if (load > sp)
-        freq_next = (max_f - cur_f) * (load - sp) / (100 - sp) + cur_f;
-    else
-        freq_next = (cur_f - min_f) * load / sp + min_f;
-
-    /* floor frequency */
-    freq_next = freq_next / 100000 * 100000;
-
-    return freq_next;
-}
-
-#define ENABLE_TUNABLE_CONSERVATION_L2F 1
-#if ENABLE_TUNABLE_CONSERVATION_L2F
-#define __maybe_const
-#else 
-#define __maybe_const const 
-#endif
-
-/*
- * global data of conservative_load2freq
- *  lf_* : low freq 
- *  mf_* : medium freq
- *  hf_* : high freq
- *
- *  *_xl : extra high load
- *  *_hl : high load
- *  *_ll : low load
- */
-static __maybe_const unsigned int lf_xl = 98;
-static __maybe_const unsigned int lf_hl = 50;
-static __maybe_const unsigned int lf_ll = 30;
-static __maybe_const unsigned int mf_xl = 98;
-static __maybe_const unsigned int mf_hl = 75;
-static __maybe_const unsigned int mf_ll = 55;
-static __maybe_const unsigned int hf_xl = 100;
-static __maybe_const unsigned int hf_hl = 95;
-static __maybe_const unsigned int hf_ll = 75;
-static __maybe_const unsigned int enable_print_info = 0;
-static __maybe_const unsigned int enable_limit_freq = 1;
-
-/* FIXME: should be added to pre policy data*/
-static unsigned int freq_limit = 0;
-static unsigned int fast_sampling = 0;
-
-static const unsigned int freq_step =  100000; // 100 MHz
-#define FREQ_SCOPE(_percent) ((_percent) * (max_f - min_f) / 100)
-
-/**
- * conservative_load2freq - find next frequency to use based on load
- * @policy: cpufreq policy
- * @load: current load
- *
- * Conservative-like frequency selector.
- *
- * Returns next frequency.
- */
-static int inline conservative_load2freq(struct cpufreq_policy *policy, int load)
-{
-    unsigned int min_f = policy->cpuinfo.min_freq;
-    unsigned int max_f = policy->cpuinfo.max_freq;
-    unsigned int cur_f = policy->cur;
-    unsigned int freq_ratio = (cur_f - min_f) * 100 / (max_f - min_f);
-    unsigned int freq_next = cur_f;
-    unsigned int freq_up_threshold = 33;
-
-    fast_sampling = 0;
-
-    if (freq_ratio < 33) {
-        if (load > lf_xl) { 
-            freq_next = max_f;
-            freq_up_threshold = 66;
-            fast_sampling = 1;
-        } else if (load > lf_hl) 
-            freq_next = cur_f + freq_step;
-        else if (load < lf_ll)
-            freq_next = cur_f - freq_step;
-    } else if (freq_ratio < 66) {
-        if (load > mf_xl) {
-             freq_next = max_f;
-             freq_up_threshold = 50;
-             fast_sampling = 1;
-        } else if (load > mf_hl)
-            freq_next = cur_f + freq_step;
-        else if (load < mf_ll)
-            freq_next = cur_f - freq_step;        
-    } else {
-        if (load > hf_xl) 
-            freq_next = max_f;
-        else if (load > hf_hl)
-            freq_next = cur_f + freq_step;
-        else if (load < hf_ll)
-            freq_next = cur_f - freq_step;
-    }
-
-    /*
-     * enable_freq_limit: saving power by reducing peek frequency
-     */
-    if (likely(enable_limit_freq)) {
-        int limit_max_f, limit_min_f;
-
-        freq_limit = (freq_limit * 90 + cur_f * 10) / 100;
-        limit_max_f = freq_limit + FREQ_SCOPE(freq_up_threshold);
-        limit_min_f = freq_limit - FREQ_SCOPE(25);
-
-        /* apply with system limitation */
-        if (limit_max_f > max_f)
-            limit_max_f = max_f;
-        if (limit_min_f < (int)min_f)
-            limit_min_f = min_f;
-
-        /* apply with current limitation */
-        if (freq_next > limit_max_f) 
-            freq_next = limit_max_f;
-        if (freq_next < limit_min_f) 
-            freq_next = limit_min_f;
-
-        /* special case for fast rising frequency */
-        if (freq_up_threshold > 33 && limit_max_f == freq_next)
-            freq_limit = limit_max_f;
-    }
-
-    if (unlikely(enable_print_info))
-        pr_err("load = %u, freq_next = %u\n", load, freq_next);
-
-    return freq_next;
-}
-
-#ifdef CONFIG_ARM_REALTEK_RVURDK
-static int tough_consecutive = 0;
-#endif
-
 /*
  * Every sampling_rate, we check, if current idle time is less than 20%
  * (default), then we try to increase frequency. Else, we adjust the frequency
@@ -330,11 +155,12 @@ static int tough_consecutive = 0;
 static void od_check_cpu(int cpu, unsigned int load)
 {
 	struct od_cpu_dbs_info_s *dbs_info = &per_cpu(od_cpu_dbs_info, cpu);
-	struct cpufreq_policy *policy = dbs_info->cdbs.cur_policy;
+	struct cpufreq_policy *policy = dbs_info->cdbs.shared->policy;
 	struct dbs_data *dbs_data = policy->governor_data;
 	struct od_dbs_tuners *od_tuners = dbs_data->tuners;
 
 	dbs_info->freq_lo = 0;
+
 	/* Check for frequency increase */
 	if (load > od_tuners->up_threshold) {
 		/* If switching to max speed, apply sampling_down_factor */
@@ -344,63 +170,14 @@ static void od_check_cpu(int cpu, unsigned int load)
 		dbs_freq_increase(policy, policy->max);
 	} else {
 		/* Calculate the next frequency proportional to load */
-		unsigned int __maybe_unused freq_next, min_f, max_f;
-#ifdef CONFIG_ARM_REALTEK_RVURDK 
-		unsigned int tough_count = 20 ;
-		unsigned int max_tough_count = 40 ;
+		unsigned int freq_next, min_f, max_f;
 
 		min_f = policy->cpuinfo.min_freq;
-
-		if (load == 100) {
-			if (tough_consecutive <  max_tough_count ) tough_consecutive++; 
-			
-			if (tough_consecutive >= tough_count) {
-				unsigned int tmp_max;
-
-				min_f = policy->mintough;
-				max_f = policy->maxtough;
-				freq_next = min_f + (tough_consecutive - tough_count) * 100 / (max_tough_count - tough_count) * (max_f - min_f) / 100;
-				tmp_max = policy->max;
-				policy->max = policy->maxtough;
-                 		/* No longer fully busy, reset rate_mult */
-                 		dbs_info->rate_mult = 1;
- 
-                 		if (!od_tuners->powersave_bias) {
-	                     		 __cpufreq_driver_target(policy, freq_next,
-	                             		CPUFREQ_RELATION_C);
-					policy->max = tmp_max; 
-                         		return;
-                 		}
- 
-                		freq_next = od_ops.powersave_bias_target(policy, freq_next,
-	                     			CPUFREQ_RELATION_L);
-                 		__cpufreq_driver_target(policy, freq_next, CPUFREQ_RELATION_C);	
-				policy->max = tmp_max; 
-				return;
-			}
-			
-		}
-		else 
-			tough_consecutive = 0;
-#endif
-
-#if 0
-        min_f = policy->cpuinfo.min_freq;
-        max_f = policy->cpuinfo.max_freq;
-
-        freq_next = min_f + load * (max_f - min_f) / 100;
+		max_f = policy->cpuinfo.max_freq;
+		freq_next = min_f + load * (max_f - min_f) / 100;
 
 		/* No longer fully busy, reset rate_mult */
 		dbs_info->rate_mult = 1;
-#else
-        //freq_next = power_aware_load2freq(policy, load);
-        freq_next = conservative_load2freq(policy, load);
-
-        if (fast_sampling)
-            dbs_info->rate_mult = 1;
-        else 
-            dbs_info->rate_mult = 2;
-#endif
 
 		if (!od_tuners->powersave_bias) {
 			__cpufreq_driver_target(policy, freq_next,
@@ -414,46 +191,40 @@ static void od_check_cpu(int cpu, unsigned int load)
 	}
 }
 
-static void od_dbs_timer(struct work_struct *work)
+static unsigned int od_dbs_timer(struct cpu_dbs_info *cdbs,
+				 struct dbs_data *dbs_data, bool modify_all)
 {
-	struct od_cpu_dbs_info_s *dbs_info =
-		container_of(work, struct od_cpu_dbs_info_s, cdbs.work.work);
-	unsigned int cpu = dbs_info->cdbs.cur_policy->cpu;
-	struct od_cpu_dbs_info_s *core_dbs_info = &per_cpu(od_cpu_dbs_info,
+	struct cpufreq_policy *policy = cdbs->shared->policy;
+	unsigned int cpu = policy->cpu;
+	struct od_cpu_dbs_info_s *dbs_info = &per_cpu(od_cpu_dbs_info,
 			cpu);
-	struct dbs_data *dbs_data = dbs_info->cdbs.cur_policy->governor_data;
 	struct od_dbs_tuners *od_tuners = dbs_data->tuners;
-	int delay = 0, sample_type = core_dbs_info->sample_type;
-	bool modify_all = true;
+	int delay = 0, sample_type = dbs_info->sample_type;
 
-	mutex_lock(&core_dbs_info->cdbs.timer_mutex);
-	if (!need_load_eval(&core_dbs_info->cdbs, od_tuners->sampling_rate)) {
-		modify_all = false;
+	if (!modify_all)
 		goto max_delay;
-	}
 
 	/* Common NORMAL_SAMPLE setup */
-	core_dbs_info->sample_type = OD_NORMAL_SAMPLE;
+	dbs_info->sample_type = OD_NORMAL_SAMPLE;
 	if (sample_type == OD_SUB_SAMPLE) {
-		delay = core_dbs_info->freq_lo_jiffies;
-		__cpufreq_driver_target(core_dbs_info->cdbs.cur_policy,
-				core_dbs_info->freq_lo, CPUFREQ_RELATION_H);
+		delay = dbs_info->freq_lo_jiffies;
+		__cpufreq_driver_target(policy, dbs_info->freq_lo,
+					CPUFREQ_RELATION_H);
 	} else {
 		dbs_check_cpu(dbs_data, cpu);
-		if (core_dbs_info->freq_lo) {
+		if (dbs_info->freq_lo) {
 			/* Setup timer for SUB_SAMPLE */
-			core_dbs_info->sample_type = OD_SUB_SAMPLE;
-			delay = core_dbs_info->freq_hi_jiffies;
+			dbs_info->sample_type = OD_SUB_SAMPLE;
+			delay = dbs_info->freq_hi_jiffies;
 		}
 	}
 
 max_delay:
 	if (!delay)
 		delay = delay_for_sampling_rate(od_tuners->sampling_rate
-				* core_dbs_info->rate_mult);
+				* dbs_info->rate_mult);
 
-	gov_queue_work(dbs_data, dbs_info->cdbs.cur_policy, delay, modify_all);
-	mutex_unlock(&core_dbs_info->cdbs.timer_mutex);
+	return delay;
 }
 
 /************************** sysfs interface ************************/
@@ -496,27 +267,19 @@ static void update_sampling_rate(struct dbs_data *dbs_data,
 		dbs_info = &per_cpu(od_cpu_dbs_info, cpu);
 		cpufreq_cpu_put(policy);
 
-		mutex_lock(&dbs_info->cdbs.timer_mutex);
-
-		if (!delayed_work_pending(&dbs_info->cdbs.work)) {
-			mutex_unlock(&dbs_info->cdbs.timer_mutex);
+		if (!delayed_work_pending(&dbs_info->cdbs.dwork))
 			continue;
-		}
 
 		next_sampling = jiffies + usecs_to_jiffies(new_rate);
-		appointed_at = dbs_info->cdbs.work.timer.expires;
+		appointed_at = dbs_info->cdbs.dwork.timer.expires;
 
 		if (time_before(next_sampling, appointed_at)) {
+			cancel_delayed_work_sync(&dbs_info->cdbs.dwork);
 
-			mutex_unlock(&dbs_info->cdbs.timer_mutex);
-			cancel_delayed_work_sync(&dbs_info->cdbs.work);
-			mutex_lock(&dbs_info->cdbs.timer_mutex);
-
-			gov_queue_work(dbs_data, dbs_info->cdbs.cur_policy,
-					usecs_to_jiffies(new_rate), true);
+			gov_queue_work(dbs_data, policy,
+				       usecs_to_jiffies(new_rate), true);
 
 		}
-		mutex_unlock(&dbs_info->cdbs.timer_mutex);
 	}
 }
 
@@ -698,7 +461,7 @@ static struct attribute_group od_attr_group_gov_pol = {
 
 /************************** sysfs end ************************/
 
-static int od_init(struct dbs_data *dbs_data)
+static int od_init(struct dbs_data *dbs_data, bool notify)
 {
 	struct od_dbs_tuners *tuners;
 	u64 idle_time;
@@ -736,30 +499,10 @@ static int od_init(struct dbs_data *dbs_data)
 	tuners->io_is_busy = should_io_be_busy();
 
 	dbs_data->tuners = tuners;
-	mutex_init(&dbs_data->mutex);
-
-#if ENABLE_TUNABLE_CONSERVATION_L2F
-    do {
-        struct dentry *root = debugfs_create_dir("cpufreq_od_tunable", NULL);
-#define DEBUGFS_CREATE_U32(_name) \
-        debugfs_create_u32(#_name, 0644, root, &_name);
-        DEBUGFS_CREATE_U32(lf_xl);
-        DEBUGFS_CREATE_U32(lf_hl);
-        DEBUGFS_CREATE_U32(lf_ll);
-        DEBUGFS_CREATE_U32(mf_xl);
-        DEBUGFS_CREATE_U32(mf_hl);
-        DEBUGFS_CREATE_U32(mf_ll);
-        DEBUGFS_CREATE_U32(hf_xl);
-        DEBUGFS_CREATE_U32(hf_hl);
-        DEBUGFS_CREATE_U32(hf_ll);
-        DEBUGFS_CREATE_U32(enable_print_info);
-        DEBUGFS_CREATE_U32(enable_limit_freq);
-    } while (0);
-#endif
 	return 0;
 }
 
-static void od_exit(struct dbs_data *dbs_data)
+static void od_exit(struct dbs_data *dbs_data, bool notify)
 {
 	kfree(dbs_data->tuners);
 }
@@ -783,6 +526,7 @@ static struct common_dbs_data od_dbs_cdata = {
 	.gov_ops = &od_ops,
 	.init = od_init,
 	.exit = od_exit,
+	.mutex = __MUTEX_INITIALIZER(od_dbs_cdata.mutex),
 };
 
 static void od_set_powersave_bias(unsigned int powersave_bias)
@@ -798,13 +542,16 @@ static void od_set_powersave_bias(unsigned int powersave_bias)
 
 	get_online_cpus();
 	for_each_online_cpu(cpu) {
+		struct cpu_common_dbs_info *shared;
+
 		if (cpumask_test_cpu(cpu, &done))
 			continue;
 
-		policy = per_cpu(od_cpu_dbs_info, cpu).cdbs.cur_policy;
-		if (!policy)
+		shared = per_cpu(od_cpu_dbs_info, cpu).cdbs.shared;
+		if (!shared)
 			continue;
 
+		policy = shared->policy;
 		cpumask_or(&done, &done, policy->cpus);
 
 		if (policy->governor != &cpufreq_gov_ondemand)

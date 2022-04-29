@@ -25,7 +25,6 @@
 #include <linux/init.h>
 #include <linux/kmod.h>
 #include <linux/slab.h>
-#include <linux/debugfs.h>
 #include <asm/uaccess.h>
 
 #include <media/v4l2-common.h>
@@ -34,14 +33,6 @@
 
 #define VIDEO_NUM_DEVICES	256
 #define VIDEO_NAME              "video4linux"
-
-struct dentry *v4l2_debug_root;
-EXPORT_SYMBOL_GPL(v4l2_debug_root);
-
-#if CONFIG_VIDEOBUF2_CORE
-int vb2_debugfs_init(struct dentry *parent);
-#endif
-
 
 /*
  *	sysfs stuff
@@ -646,8 +637,8 @@ static void determine_valid_ioctls(struct video_device *vdev)
 			       ops->vidioc_try_fmt_sliced_vbi_out)))
 			set_bit(_IOC_NR(VIDIOC_TRY_FMT), valid_ioctls);
 		SET_VALID_IOCTL(ops, VIDIOC_G_SLICED_VBI_CAP, vidioc_g_sliced_vbi_cap);
-	} else if (is_sdr) {
-		/* SDR specific ioctls */
+	} else if (is_sdr && is_rx) {
+		/* SDR receiver specific ioctls */
 		if (ops->vidioc_enum_fmt_sdr_cap)
 			set_bit(_IOC_NR(VIDIOC_ENUM_FMT), valid_ioctls);
 		if (ops->vidioc_g_fmt_sdr_cap)
@@ -655,6 +646,16 @@ static void determine_valid_ioctls(struct video_device *vdev)
 		if (ops->vidioc_s_fmt_sdr_cap)
 			set_bit(_IOC_NR(VIDIOC_S_FMT), valid_ioctls);
 		if (ops->vidioc_try_fmt_sdr_cap)
+			set_bit(_IOC_NR(VIDIOC_TRY_FMT), valid_ioctls);
+	} else if (is_sdr && is_tx) {
+		/* SDR transmitter specific ioctls */
+		if (ops->vidioc_enum_fmt_sdr_out)
+			set_bit(_IOC_NR(VIDIOC_ENUM_FMT), valid_ioctls);
+		if (ops->vidioc_g_fmt_sdr_out)
+			set_bit(_IOC_NR(VIDIOC_G_FMT), valid_ioctls);
+		if (ops->vidioc_s_fmt_sdr_out)
+			set_bit(_IOC_NR(VIDIOC_S_FMT), valid_ioctls);
+		if (ops->vidioc_try_fmt_sdr_out)
 			set_bit(_IOC_NR(VIDIOC_TRY_FMT), valid_ioctls);
 	}
 
@@ -996,16 +997,6 @@ static int __init videodev_init(void)
 		printk(KERN_WARNING "video_dev: class_register failed\n");
 		return -EIO;
 	}
-#if 1
-	v4l2_debug_root = debugfs_create_dir(VIDEO_NAME, NULL);
-	if(!v4l2_debug_root)
-		return -ENOENT;
-#if CONFIG_VIDEOBUF2_CORE
-	ret = vb2_debugfs_init(v4l2_debug_root);
-	if(ret < 0)
-	 return ret;
-#endif
-#endif
 
 	return 0;
 }

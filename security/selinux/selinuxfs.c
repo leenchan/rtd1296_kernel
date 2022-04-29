@@ -472,7 +472,7 @@ static int sel_mmap_policy_fault(struct vm_area_struct *vma,
 	return 0;
 }
 
-static struct vm_operations_struct sel_mmap_policy_ops = {
+static const struct vm_operations_struct sel_mmap_policy_ops = {
 	.fault = sel_mmap_policy_fault,
 	.page_mkwrite = sel_mmap_policy_fault,
 };
@@ -684,13 +684,11 @@ static ssize_t selinux_transaction_write(struct file *file, const char __user *b
 	if (IS_ERR(data))
 		return PTR_ERR(data);
 
-	mutex_lock(&sel_mutex);
 	rv = write_op[ino](file, data, size);
 	if (rv > 0) {
 		simple_transaction_set(file, rv);
 		rv = size;
 	}
-	mutex_unlock(&sel_mutex);
 	return rv;
 }
 
@@ -733,13 +731,11 @@ static ssize_t sel_write_access(struct file *file, char *buf, size_t size)
 	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
 		goto out;
 
-	length = security_context_to_sid(scon, strlen(scon) + 1, &ssid,
-					 GFP_KERNEL);
+	length = security_context_str_to_sid(scon, &ssid, GFP_KERNEL);
 	if (length)
 		goto out;
 
-	length = security_context_to_sid(tcon, strlen(tcon) + 1, &tsid,
-					 GFP_KERNEL);
+	length = security_context_str_to_sid(tcon, &tsid, GFP_KERNEL);
 	if (length)
 		goto out;
 
@@ -821,13 +817,11 @@ static ssize_t sel_write_create(struct file *file, char *buf, size_t size)
 		objname = namebuf;
 	}
 
-	length = security_context_to_sid(scon, strlen(scon) + 1, &ssid,
-					 GFP_KERNEL);
+	length = security_context_str_to_sid(scon, &ssid, GFP_KERNEL);
 	if (length)
 		goto out;
 
-	length = security_context_to_sid(tcon, strlen(tcon) + 1, &tsid,
-					 GFP_KERNEL);
+	length = security_context_str_to_sid(tcon, &tsid, GFP_KERNEL);
 	if (length)
 		goto out;
 
@@ -884,13 +878,11 @@ static ssize_t sel_write_relabel(struct file *file, char *buf, size_t size)
 	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
 		goto out;
 
-	length = security_context_to_sid(scon, strlen(scon) + 1, &ssid,
-					 GFP_KERNEL);
+	length = security_context_str_to_sid(scon, &ssid, GFP_KERNEL);
 	if (length)
 		goto out;
 
-	length = security_context_to_sid(tcon, strlen(tcon) + 1, &tsid,
-					 GFP_KERNEL);
+	length = security_context_str_to_sid(tcon, &tsid, GFP_KERNEL);
 	if (length)
 		goto out;
 
@@ -942,7 +934,7 @@ static ssize_t sel_write_user(struct file *file, char *buf, size_t size)
 	if (sscanf(buf, "%s %s", con, user) != 2)
 		goto out;
 
-	length = security_context_to_sid(con, strlen(con) + 1, &sid, GFP_KERNEL);
+	length = security_context_str_to_sid(con, &sid, GFP_KERNEL);
 	if (length)
 		goto out;
 
@@ -1002,13 +994,11 @@ static ssize_t sel_write_member(struct file *file, char *buf, size_t size)
 	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
 		goto out;
 
-	length = security_context_to_sid(scon, strlen(scon) + 1, &ssid,
-					 GFP_KERNEL);
+	length = security_context_str_to_sid(scon, &ssid, GFP_KERNEL);
 	if (length)
 		goto out;
 
-	length = security_context_to_sid(tcon, strlen(tcon) + 1, &tsid,
-					 GFP_KERNEL);
+	length = security_context_str_to_sid(tcon, &tsid, GFP_KERNEL);
 	if (length)
 		goto out;
 

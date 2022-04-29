@@ -232,6 +232,8 @@ int rtk_gem_ion_dumb_map_offset(struct drm_file *file_priv,
 
     *offset = drm_vma_node_offset_addr(&gem_obj->vma_node);
 
+     DRM_DEBUG_PRIME("DRM %s offset %llx \n", __func__,*offset);
+
     drm_gem_object_unreference(gem_obj);
 
     mutex_unlock(&drm->struct_mutex);
@@ -269,8 +271,11 @@ int rtk_gem_ion_mmap(struct file *filp, struct vm_area_struct *vma)
 
     gem_obj = vma->vm_private_data;
     ion_obj = to_rtk_gem_ion_obj(gem_obj);
+    ret = rtk_gem_ion_mmap_obj(ion_obj, vma);
+    DRM_DEBUG_PRIME("DRM %s on [ vma->vm_start %lx, vma->vm_end %lx, vma->vm_pgoff %lx]\n", __func__,
+            vma->vm_start, vma->vm_end, vma->vm_pgoff);
 
-    return rtk_gem_ion_mmap_obj(ion_obj, vma);
+    return ret;
 }
 
 struct sg_table *rtk_gem_ion_prime_get_sg_table(struct drm_gem_object *obj)

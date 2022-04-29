@@ -47,14 +47,6 @@
 /* device generates spurious wakeup, ignore remote wakeup capability */
 #define USB_QUIRK_IGNORE_REMOTE_WAKEUP		BIT(9)
 
-#define USB_QUIRK_SNPS_XHCI_WA		BIT(11) //0x00000800
-
-/* hcy added */
-#define USB_QUIRK_U3_RESET 			BIT(12)//0x00000100
-
-/* hcy added */
-#define USB_QUIRK_DEVICE_PROBE 		BIT(13) //0x00000200
-
 /* device can't handle Link Power Management */
 #define USB_QUIRK_NO_LPM			BIT(10)
 

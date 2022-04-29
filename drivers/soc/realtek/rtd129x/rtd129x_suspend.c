@@ -1,14 +1,3 @@
-/*
- * rtd129x_suspend.c - power management driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- */
-
 #include <linux/pm.h>
 #include <linux/suspend.h>
 #include <linux/module.h>
@@ -20,7 +9,6 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
-#include <linux/of_address.h>
 #include <linux/reboot.h>
 #include <linux/clocksource.h>
 #include <linux/clockchips.h>
@@ -28,28 +16,27 @@
 #include <linux/vmalloc.h>
 #include <linux/tick.h>
 #include <linux/slab.h>
-#include <linux/irqchip/arm-gic.h>
-#include <linux/pwm.h>
 #include <asm/io.h>
 #include <asm/system_misc.h>
 #include <asm/cacheflush.h>
 #include <asm/suspend.h>
 
+#include <linux/irqchip/arm-gic.h>
+#include <linux/of.h>
+#include <linux/of_irq.h>
+#include <linux/of_address.h>
+#include <linux/of_device.h>
+
 #include <soc/realtek/memory.h>
 #include "rtd129x_suspend.h"
-#include <soc/realtek/rtd129x_cpu.h>
 
-#define SYS_GROUP1_CK_SEL    0x98000018
-#define SYS_PLL_SCPU1        0x98000104
-#define SUSPEND_VERSION_MASK(v)    ((v&0xffff) << 16)
-#define BT_WAKEUP_IGPIO(n)    (0x1 << n)//n:0 to 20
-
-struct pwm_device *pwm;
-struct platform_device *pdev_locad;
 static int suspend_version = 2;
 static unsigned int suspend_context = 0;
 static enum _suspend_mode suspend_mode = SUSPEND_TO_COOLBOOT;
 typedef struct RTK119X_ipc_shm RTD1295_ipc_shm;
+
+#define SUSPEND_VERSION_MASK(v)    ((v&0xffff) << 16)
+#define BT_WAKEUP_IGPIO(n)    (0x1 << n)//n:0 to 20
 
 void __iomem *RTK_CRT_BASE;
 void __iomem *RTK_AIO_BASE;
@@ -60,8 +47,6 @@ void __iomem *RTK_MISC_BASE;
 void __iomem *RTK_GIC_DIST_BASE;
 void __iomem *RTK_CPU_WRAPPER_BASE;
 
-int RTK_CHIP_VERSION = 0;
-int pwm_used = 0;
 
 #define rtk_suspend_shm_func(_name, _offset, _def)                                  \
 void rtk_suspend_##_name##_set(unsigned int val)                                    \
@@ -95,64 +80,56 @@ rtk_suspend_shm_func(timer_sec, audio_reciprocal_timer_sec, AUDIO_RECIPROCAL_TIM
 
 static int suspend_mode_stored = 0;
 
-/* rtk_set_suspend_mode - redirect 'sys/power/state' with suspend mode
- *   This is a hack function which will hijack the input buf form sysfs
- *   '/sys/power/state'.
- *
- *   input buf     state     suepend_mode
- *   standby    => standby   wfi
- *   sleep      => mem       ram
- *   off        => mem       coolboot
- *   mem*       => mem       ram
- *
- *   NOTE: if '/sys/kernel/suspend/mode' is set before '/sys/power/state' and
- *   '/sys/power/state' is mem, then suepend_mode will be the set value.
- *   After the suspend, the set value will be clear.
- *  
- *   Return value for '/sys/power/state' store function:
- *     Returns 0 to hint the function to set the buf to 'mem'.
- *     Returns -EINVAL to hint the function to do nothing.
- *     Returns -EPERM to hint the function that there is an internal error.
- */
 int rtk_set_suspend_mode(const char *buf, int n)
 {
     const char *p;
     int len;
-    int ret = 0;
+    bool to_mem;
 
     p = memchr(buf, '\n', n);
     len = p ? p - buf : n;
 
     if (strncmp(buf, "standby", len) == 0) {
-        pr_info("[RTD129x_PM] GET state = standby\n");
-        pr_info("[RTD129x_PM] SET state = standby, suepend_mode = wfi\n");
+        pr_debug("[RTD129x_PM] GET state = standby\n");
+        pr_debug("[RTD129x_PM] SET state = mem, suepend_mode = wfi\n");
         suspend_mode = SUSPEND_TO_WFI;
-        ret = -EINVAL;
+        to_mem = true;
     } else if (strncmp(buf, "sleep", len) == 0) {
-        pr_info("[RTD129x_PM] GET state = sleep\n");
-        pr_info("[RTD129x_PM] SET state = mem, suepend_mode = ram\n");
+        pr_debug("[RTD129x_PM] GET state = sleep\n");
+        pr_debug("[RTD129x_PM] SET state = mem, suepend_mode = ram\n");
         suspend_mode = SUSPEND_TO_RAM;
+        to_mem = true;
     } else if (strncmp(buf, "off", len) == 0) {
-         pr_info("[RTD129x_PM] GET state = off\n");
-         pr_info("[RTD129x_PM] SET state = mem, suepend_mode = coolboot\n");
+         pr_debug("[RTD129x_PM] GET state = off\n");
+         pr_debug("[RTD129x_PM] SET state = mem, suepend_mode = coolboot\n");
         suspend_mode = SUSPEND_TO_COOLBOOT;
+        to_mem = true;
     } else if (strncmp(buf, "mem", len) == 0) {
         if (suspend_mode_stored) {
             pr_info("[RTD129x_PM] GET state = mem, suepend_mode = %s\n", rtk_suspend_states[suspend_mode]);
             pr_info("[RTD129x_PM] compatible mode: suepend_mode will be reset AFTER THIS SUSPEND\n");
-            suspend_mode_stored = 0;
-            return 0;
+        } else {
+            pr_debug("[RTD129x_PM] GET state = mem\n");
+            pr_debug("[RTD129x_PM] SET state = mem, suepend_mode = ram\n");
+            suspend_mode = SUSPEND_TO_RAM;
         }
-
-        pr_info("[RTD129x_PM] GET state = mem\n");
-        pr_info("[RTD129x_PM] SET state = mem, suepend_mode = ram\n");
-        suspend_mode = SUSPEND_TO_RAM;
-    } else 
-        return -EINVAL;
+        to_mem = true;
+    } else
+        to_mem = false;
 
     suspend_mode_stored = 0;
-    return ret;
+
+    if (to_mem)
+        strcpy((char *)buf, "mem\n");
+
+    return strlen(buf);
 }
+EXPORT_SYMBOL(rtk_set_suspend_mode);
+
+int rtk_get_coolboot_mode(void) {
+	return (suspend_mode == SUSPEND_TO_COOLBOOT) ? 1 : 0;
+}
+EXPORT_SYMBOL(rtk_get_coolboot_mode);
 
 static void hexdump(char *note, unsigned char *buf, unsigned int len)
 {
@@ -375,36 +352,13 @@ static void rtk_suspend_irq_report(enum irq_report_state state)
 
 static int rtk_suspend_to_wfi(void)
 {
-    void __iomem *reg_sel = ioremap(SYS_GROUP1_CK_SEL, 0x4);
-    void __iomem *reg_pll = ioremap(SYS_PLL_SCPU1, 0x4);
-
     notify_acpu(NOTIFY_SUSPEND_TO_WFI);
 
     rtk_suspend_irq_report(IRQ_REPORT_PREPARE);
 
-    /* switch clk_scpu to osc (27 MHz) */
-    printk(KERN_INFO "[RTD129x_PM] switch scpu_clk to osc\n");
-    writel(readl(reg_sel) | 0x4, reg_sel);
-
-    /* disable pll_scpu*/
-    printk(KERN_INFO "[RTD129x_PM] disable scpu_pll\n");
-    writel(0x4, reg_pll);
-
     printk(KERN_INFO "[RTD129x_PM] wait for interrupt.\n");
 
     asm("WFI");
-
-    /* enable pll_scpu, delay to wait it stable */
-    printk(KERN_INFO "[RTD129x_PM] enable scpu_pll\n");
-    writel(0x3, reg_pll);
-    __delay(100);
-
-    /* NOTE: ACPU also set SYS_GROUP1_CK_SEL later */
-    printk(KERN_INFO "[RTD129x_PM] switch scpu_clk to scpu_pll\n");
-    writel(readl(reg_sel) & ~0x4, reg_sel);
-
-    iounmap(reg_pll);
-    iounmap(reg_sel);
 
     rtk_suspend_irq_report(IRQ_REPORT_PRINT);
 
@@ -424,19 +378,24 @@ static int rtk_suspend_to_ram(void)
 
     hexdump("[RTD129x_PM] CPU Resume Entry Dump:", (unsigned char *) cpu_resume, 0x100);
 
-	if(RTK_CHIP_VERSION >= RTD129x_CHIP_REVISION_B00) {
-	    //From B00, start to support TEE suspend/resume 
-	    //B00 romcode: core0 resume jump address is fixed to FSBL
-	    asm volatile("isb" : : : "cc"); 
-	    asm volatile("mov x1, %0" : : "r" (__pa(cpu_resume)) : "cc");
-	    asm volatile("ldr x0, =0x8400ff04" : : : "cc"); //RTK_SET_KERNEL_REUMSE_ENTRY
-	    asm volatile("isb" : : : "cc"); 
-	    asm volatile("smc #0" : : : "cc"); 
-	    asm volatile("isb" : : : "cc"); 
-	}
-	else{
-    	writel(__pa(cpu_resume), resumeAddr);
-	}
+#ifdef CONFIG_TEE_SUSPEND  
+    writel(0x10120000, resumeAddr); //When resuming, core0 jumps to BL31 entry first
+    //Save kernel resume entry to BL31
+    asm volatile("isb" : : : "cc"); 
+    asm volatile("mov x1, %0" : : "r" (__pa(cpu_resume)) : "cc");
+    asm volatile("ldr x0, =0x8400ff04" : : : "cc"); //RTK_SET_KERNEL_REUMSE_ENTRY
+    asm volatile("isb" : : : "cc"); 
+    asm volatile("smc #0" : : : "cc"); 
+    asm volatile("isb" : : : "cc"); 
+    //Info TEE OS to suspend
+    asm volatile("isb" : : : "cc"); 
+    asm volatile("ldr x0, =0xBf00ff04" : : : "cc"); //TEESMC_KERNEL_SUSPEND
+    asm volatile("isb" : : : "cc"); 
+    asm volatile("smc #0" : : : "cc"); 
+    asm volatile("isb" : : : "cc");     
+#else
+    writel(__pa(cpu_resume), resumeAddr);
+#endif
 
     BUG_ON(!irqs_disabled());
 
@@ -459,8 +418,6 @@ static int rtk_suspend_to_ram(void)
     rtk_suspend_wakeup_acpu();
 
     flush_cache_all();
-
-    mdelay(5);
 
     printk(KERN_INFO "[RTD129x_PM] Resume Memory Verifying ... State 0\n");
     for (i=0; i<MEM_VERIFIED_CNT; i++)
@@ -489,7 +446,7 @@ static int rtk_suspend_to_coolboot(void)
     return ret;
 }
 
-void rtk_suspend_gpio_output_change_suspend(void)
+void rtk_suspend_gpip_output_change_suspend(void)
 {
     int i = 0;
     unsigned int val;
@@ -530,7 +487,7 @@ void rtk_suspend_gpio_output_change_suspend(void)
     }
 }
 
-void rtk_suspend_gpio_output_change_resume(void)
+void rtk_suspend_gpip_output_change_resume(void)
 {
     int i = 0;
     unsigned int val;
@@ -587,19 +544,11 @@ static int rtk_suspend_enter(suspend_state_t suspend_state)
         case PM_SUSPEND_STANDBY:
             if (suspend_mode == SUSPEND_TO_WFI)
                  ret = rtk_suspend_to_wfi();
-
-            suspend_context++;
-
             printk(KERN_INFO "[RTD129x_PM] Platform Resume ...\n");
             notify_acpu(NOTIFY_RESUME_PLATFORM);
             break;
         case PM_SUSPEND_MEM:
-			if(pwm_used)
-				pwm_enable(pwm);
-
-			rtk_suspend_gpio_output_change_suspend();
-
-			printk(KERN_INFO "[RTD129x_PM] rtk suspend_mode = %d\n", suspend_mode);
+			rtk_suspend_gpip_output_change_suspend();
 
             if (suspend_mode == SUSPEND_TO_WFI)
                 ret = rtk_suspend_to_wfi();
@@ -621,11 +570,7 @@ static int rtk_suspend_enter(suspend_state_t suspend_state)
             printk(KERN_INFO "[RTD129x_PM] Platform Resume ...\n");
             notify_acpu(NOTIFY_RESUME_PLATFORM);
 
-			rtk_suspend_gpio_output_change_resume();
-
-			if(pwm_used)
-				pwm_disable(pwm);
-
+			rtk_suspend_gpip_output_change_resume();
             break;
         default:
             ret = -EINVAL;
@@ -644,16 +589,6 @@ static int rtk_suspend_begin(suspend_state_t suspend_state)
         return  -EINVAL;
     }
 
-	pwm = devm_of_pwm_get(&pdev_locad->dev, pdev_locad->dev.of_node, NULL);
-	if (IS_ERR(pwm)) {
-		printk(KERN_ERR "[RTD129x_PM] Can't get pwm pin (21)\n");
-		pwm_used = 0;
-	}
-	else {
-		printk(KERN_ERR "[RTD129x_PM] get pwm pin (21)\n");
-		pwm_used = 1;
-	}
-
     switch(suspend_state) {
         case PM_SUSPEND_STANDBY:
             cpu_idle_poll_ctrl(true);
@@ -671,9 +606,6 @@ static void rtk_suspend_end(void)
 {
     printk(KERN_INFO "[RTD129x_PM] Suspend End\n");
 
-	if(pwm_used)
-		devm_pwm_put(&pdev_locad->dev, pwm);
-
     notify_acpu(NOTIFY_RESUME_END);
     cpu_idle_poll_ctrl(false);
 }
@@ -685,28 +617,26 @@ struct platform_suspend_ops rtk_suspend_ops = {
     .valid = rtk_suspend_valid,
 };
 
-void (*rtk_do_poweroff)(void);
-
-static void rtk_poweroff(void)
+static void rtk_poweroff_to_suspend_prepare(void)
 {
-    printk(KERN_INFO "[RTD129x_PM] Power off\n");
+    printk(KERN_INFO "[RTD129x_PM] Power off to Suspend Prepare.\n");
 
-    if (rtk_do_poweroff) {
-        rtk_do_poweroff();
-    }
-
-    rtk_suspend_to_coolboot();
-
+    suspend_mode = SUSPEND_TO_COOLBOOT;
+    pm_suspend(PM_SUSPEND_MEM);
     return;
 };
 
-static int rtk_pm_probe(struct platform_device *pdev)
+static void rtk_poweroff_to_suspend(void)
+ {
+     printk(KERN_INFO "[RTD129x_PM] Power off to Suspend.\n");
+     return;
+ };
+
+int __init rtk_suspend_init(void)
 {
-    struct device_node *p_suspend_nd = pdev->dev.of_node;
+    struct device_node *p_suspend_nd = NULL;
     struct device_node *p_gic_nd = NULL;
     struct device_node *p_cpu_wrapper_nd = NULL;
-
-    pdev_locad = pdev;
 
     acpu_set_flag(0x00000000);
     rtk_suspend_wakeup_flags_set(0);
@@ -724,6 +654,7 @@ static int rtk_pm_probe(struct platform_device *pdev)
 
     printk(KERN_INFO "[RTD129x_PM] Initial RTD129x Power Management Driver.\n");
 
+    p_suspend_nd = of_find_compatible_node(NULL, NULL, "Realtek,power-management");
     p_gic_nd = of_find_compatible_node(NULL, NULL, "arm,cortex-a15-gic");
     p_cpu_wrapper_nd = of_find_compatible_node(NULL, NULL, "Realtek,rtk-scpu_wrapper");
 
@@ -735,8 +666,6 @@ static int rtk_pm_probe(struct platform_device *pdev)
     RTK_TVE_BASE = of_iomap(p_suspend_nd, 3);
     RTK_SB2_BASE = of_iomap(p_suspend_nd, 4);
     RTK_MISC_BASE = of_iomap(p_suspend_nd, 5);
-
-    RTK_CHIP_VERSION = get_rtd129x_cpu_revision();
 
     if(p_suspend_nd && of_device_is_available(p_suspend_nd)){
         const u32 *prop;
@@ -957,36 +886,10 @@ static int rtk_pm_probe(struct platform_device *pdev)
 
     suspend_set_ops(&rtk_suspend_ops);
 
-    if (of_device_is_system_power_controller(pdev->dev.of_node)) {
-        dev_info(&pdev->dev, "is system-power-controller\n");
-        pm_power_off = rtk_poweroff;
-    }
+    pm_power_off_prepare = rtk_poweroff_to_suspend_prepare;
+    pm_power_off = rtk_poweroff_to_suspend;
 
     return 0;
-}
-
-__maybe_unused static struct of_device_id rtk_pm_ids[] = {
-	{.compatible = "Realtek,power-management" },
-	{/* Sentinel */ },
-};
-
-static struct platform_driver rtk_pm_driver = {
-	.probe = rtk_pm_probe,
-	.driver = {
-		.name = "RTD129x_PM",
-		.of_match_table = rtk_pm_ids,
-	},
-};
-
-int rtk_suspend_init(void)
-{
-	int result = 0;
-
-	if ((result = platform_driver_register(&rtk_pm_driver)) != 0) {
-		printk(KERN_ERR "[RTD129x_PM] Can't register power management driver\n");
-	}
-
-	return result;
 }
 
 subsys_initcall(rtk_suspend_init);
@@ -1399,9 +1302,6 @@ static ssize_t rtk_suspend_context_store(struct kobject *kobj, struct kobj_attri
 {
     long val;
     int ret = kstrtol(buf, 10, &val);
-    if (ret < 0)
-        return -ENOMEM;
-
     suspend_context = val;
     return count;
 }

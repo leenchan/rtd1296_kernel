@@ -1,14 +1,3 @@
-/*
- *  ir_input.c create input device for RTK irda driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include "ir_input.h"
 #include "venus_ir.h"
 #include <linux/pinctrl/consumer.h>
@@ -39,7 +28,7 @@ long int Input_Keybit_Length = sizeof(data->input_dev->keybit);
 int venus_ir_input_init(void)
 {
 	struct input_dev *input_dev;
-
+	
 	int result;
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data) {
@@ -93,17 +82,10 @@ exit:
 	return -1;
 }
 
-int venus_ir_input_exit(void)
-{
-	input_unregister_device(data->input_dev);
-	kfree(data);
-}
-
 void venus_ir_input_report_key(uint32_t keycode)
 {
 	atomic_inc(&data->reportCount);
 	data->keycode = keycode;
-
 	input_report_key(data->input_dev, data->keycode, 1);
 	input_sync(data->input_dev);	
 }

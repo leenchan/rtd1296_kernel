@@ -1,13 +1,4 @@
-/**
- * snd-realtek-compress.h - Realtek alsa driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+//Copyright (C) 2007-2014 Realtek Semiconductor Corporation.
 
 #ifndef SND_COMPRESS_RTK
 #define SND_COMPRESS_RTK
@@ -160,7 +151,7 @@ typedef struct
     ENUM_AUDIO_INBAND_PRIVATE_INFO infoType;
     unsigned int infoSize;
 } AUDIO_INBAND_PRIVATE_INFO ;
-
+//Add by PC
 typedef struct
 {
     unsigned int latency;
@@ -186,5 +177,4 @@ typedef struct
 
 int snd_card_create_compress_instance(RTK_snd_card_t *pSnd, int instance_idx);
 int snd_monitor_raw_data_queue(void);
-//int snd_monitor_raw_data_queue_new(rtk_runtime_stream_t *stream);
 #endif

@@ -42,8 +42,8 @@ MODULE_LICENSE("GPL");
 #ifdef CONFIG_NF_CONNTRACK_PROCFS
 void
 print_tuple(struct seq_file *s, const struct nf_conntrack_tuple *tuple,
-			const struct nf_conntrack_l3proto *l3proto,
-			const struct nf_conntrack_l4proto *l4proto)
+            const struct nf_conntrack_l3proto *l3proto,
+            const struct nf_conntrack_l4proto *l4proto)
 {
 	l3proto->print_tuple(s, tuple);
 	l4proto->print_tuple(s, tuple);
@@ -144,6 +144,35 @@ static inline void ct_show_secctx(struct seq_file *s, const struct nf_conn *ct)
 }
 #endif
 
+#ifdef CONFIG_NF_CONNTRACK_ZONES
+static void ct_show_zone(struct seq_file *s, const struct nf_conn *ct,
+			 int dir)
+{
+	const struct nf_conntrack_zone *zone = nf_ct_zone(ct);
+
+	if (zone->dir != dir)
+		return;
+	switch (zone->dir) {
+	case NF_CT_DEFAULT_ZONE_DIR:
+		seq_printf(s, "zone=%u ", zone->id);
+		break;
+	case NF_CT_ZONE_DIR_ORIG:
+		seq_printf(s, "zone-orig=%u ", zone->id);
+		break;
+	case NF_CT_ZONE_DIR_REPL:
+		seq_printf(s, "zone-reply=%u ", zone->id);
+		break;
+	default:
+		break;
+	}
+}
+#else
+static inline void ct_show_zone(struct seq_file *s, const struct nf_conn *ct,
+				int dir)
+{
+}
+#endif
+
 #ifdef CONFIG_NF_CONNTRACK_TIMESTAMP
 static void ct_show_delta_time(struct seq_file *s, const struct nf_conn *ct)
 {
@@ -212,6 +241,8 @@ static int ct_seq_show(struct seq_file *s, void *v)
 	print_tuple(s, &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple,
 		    l3proto, l4proto);
 
+	ct_show_zone(s, ct, NF_CT_ZONE_DIR_ORIG);
+
 	if (seq_has_overflowed(s))
 		goto release;
 
@@ -223,6 +254,8 @@ static int ct_seq_show(struct seq_file *s, void *v)
 
 	print_tuple(s, &ct->tuplehash[IP_CT_DIR_REPLY].tuple,
 		    l3proto, l4proto);
+
+	ct_show_zone(s, ct, NF_CT_ZONE_DIR_REPL);
 
 	if (seq_print_acct(s, ct, IP_CT_DIR_REPLY))
 		goto release;
@@ -238,11 +271,7 @@ static int ct_seq_show(struct seq_file *s, void *v)
 #endif
 
 	ct_show_secctx(s, ct);
-
-#ifdef CONFIG_NF_CONNTRACK_ZONES
-	seq_printf(s, "zone=%u ", nf_ct_zone(ct));
-#endif
-
+	ct_show_zone(s, ct, NF_CT_DEFAULT_ZONE_DIR);
 	ct_show_delta_time(s, ct);
 
 	seq_printf(s, "use=%u\n", atomic_read(&ct->ct_general.use));
@@ -415,18 +444,7 @@ static int log_invalid_proto_max = 255;
 
 static struct ctl_table_header *nf_ct_netfilter_header;
 
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-extern unsigned int conntrack_min;
-extern unsigned int conntrack_max;
-extern unsigned int prot_limit[];
-
-extern int conntrack_dointvec(ctl_table *table, int write, struct file *filp,
-		     void *buffer, size_t *lenp, loff_t *ppos);
-extern int conntrack_dointvec_minmax(ctl_table *table, int write, struct file *filp,
-		     void *buffer, size_t *lenp, loff_t *ppos);
-#endif
-
-#if defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+#if defined(CONFIG_RTL_819X)
 static unsigned int nf_conntrack_reserved_num = 1024;
 static int conntrack_dointvec_819x(struct ctl_table *table, int write,
 				   void *buffer, size_t *lenp, loff_t *ppos)
@@ -443,18 +461,10 @@ static int conntrack_dointvec_819x(struct ctl_table *table, int write,
 
 	return 0;
 }
-#endif /* CONFIG_RTL_819X && !CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW */
+#endif /* CONFIG_RTL_819X */
 
 static struct ctl_table nf_ct_sysctl_table[] = {
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-	{
-		.procname	= "nf_conntrack_max",
-		.data		= &nf_conntrack_max,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= &conntrack_dointvec,
-	},
-#elif defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+#if defined(CONFIG_RTL_819X)
 	{
 		.procname	= "nf_conntrack_max",
 		.data		= &nf_conntrack_max,
@@ -470,7 +480,7 @@ static struct ctl_table nf_ct_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
-#endif
+#endif /* CONFIG_RTL_819X */
 	{
 		.procname	= "nf_conntrack_count",
 		.data		= &init_net.ct.count,
@@ -508,27 +518,7 @@ static struct ctl_table nf_ct_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-	{
-		.procname	= "nf_conntrack_tcp",
-		.data		= &prot_limit[PROT_TCP],
-		.maxlen		= sizeof(prot_limit[PROT_TCP]),
-		.mode		= 0644,
-		.proc_handler	= &conntrack_dointvec_minmax,
-		.extra1		= &conntrack_min,
-		.extra2		= &conntrack_max,
-	},
-	{
-		.procname	= "nf_conntrack_udp",
-		.data		= &prot_limit[PROT_UDP],
-		.maxlen		= sizeof(prot_limit[PROT_UDP]),
-		.mode		= 0644,
-		.proc_handler	= &conntrack_dointvec_minmax,
-		.extra1		= &conntrack_min,
-		.extra2		= &conntrack_max,
-	},
-#endif
-#if defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+#if defined(CONFIG_RTL_819X)
 	{
 		.procname	= "nf_conntrack_reserved_num",
 		.data		= &nf_conntrack_reserved_num,
@@ -536,8 +526,7 @@ static struct ctl_table nf_ct_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &proc_dointvec,
 	   },
-#endif /* CONFIG_RTL_819X && !CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW */
-
+#endif /* CONFIG_RTL_819X */
 	{ }
 };
 
@@ -549,13 +538,11 @@ static struct ctl_table nf_ct_netfilter_table[] = {
 		.data		= &nf_conntrack_max,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-		.proc_handler	= &conntrack_dointvec,
-#elif defined(CONFIG_RTL_819X) && !defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
+#if defined(CONFIG_RTL_819X)
 		.proc_handler	= &conntrack_dointvec_819x,
 #else
 		.proc_handler	= proc_dointvec,
-#endif
+#endif /* CONFIG_RTL_819X */
 	},
 	{ }
 };

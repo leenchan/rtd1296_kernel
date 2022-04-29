@@ -42,7 +42,10 @@
 #include <linux/of_gpio.h>
 
 #include <linux/clk.h>
+#include <linux/reset-helper.h> /* rstc_get */
 #include <linux/reset.h>
+#include <linux/clkdev.h>
+#include <linux/clk-provider.h>
 
 
 //#include <asm/system_info.h>
@@ -133,13 +136,17 @@ static struct mtd_partition rtk_partitions[] =
     }
 };
 
+static u64 rtknand_dmamask = DMA_BIT_MASK(32);
+
+char g_rtk_nandinfo_line[64];
 
 int g_sw_WP_level = -1;
 
 int g_isCheckEccStatus = 0;
 
 void __iomem    *map_base = 0;
-void __iomem    *muxpad0_base = 0;
+void __iomem    *swc_base = 0;
+//void __iomem    *muxpad0_base = 0;
 
 static void rtk_xfer_GetParameter(void);
 static void rtk_xfer_SetParameter(unsigned char val1,unsigned char val2,unsigned char val3,unsigned char val4);
@@ -215,10 +222,10 @@ const char *ptypes[] = {"cmdlinepart", NULL};
 /* nand driver low-level functions */
 static int rtk_read_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, u_char *buf);
 static int rtk_read_ecc_page(struct mtd_info *mtd, u16 chipnr, unsigned int page,
-			u_char *data, u_char *oob_buf, u16 cp_mode, u_char *data_phy);
+			u_char *data, struct mtd_oob_ops *ops, u16 cp_mode);
 static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, const u_char *buf);
 static int rtk_write_ecc_page(struct mtd_info *mtd, u16 chipnr, unsigned int page,
-			const u_char *data, const u_char *oob_buf, int isBBT,const u_char *data_phy);
+			const u_char *data, struct mtd_oob_ops *ops, int isBBT);
 static int rtk_erase_block(struct mtd_info *mtd, u16 chipnr, int page);
 
 /* Global Variables */
@@ -314,7 +321,7 @@ void rtk_nand_hexdump( const char * str, unsigned char * pcBuf, unsigned int len
 {
 	unsigned int i, j, rows, count;
 	printk(KERN_ERR "======================================================\n");
-	printk(KERN_ERR "%s(base=0x%08x)\n", str, (unsigned int)(pcBuf));
+	printk(KERN_ERR "%s(base=0x%p)\n", str, pcBuf);
 	count = 0;
 	rows = (length+((1<<4)-1)) >> 4;
 	for( i = 0; ( i < rows ) && (count < length); i++ ) {
@@ -366,7 +373,7 @@ void setGPIOBit(unsigned int nGPIOBase, unsigned int nGPIOnum, unsigned int uBit
 //----------------------------------------------------------------------------
 unsigned int getGPIOBit(unsigned int nGPIOBase, unsigned int nGPIOnum)
 {
-        unsigned int whichReg = 0;
+        phys_addr_t whichReg = 0;
         unsigned int whichBit = 0;
         unsigned int ret=0;
         whichReg = nGPIOBase+4*(nGPIOnum/32);
@@ -380,7 +387,7 @@ unsigned int getGPIOBit(unsigned int nGPIOBase, unsigned int nGPIOnum)
 
 unsigned int getGPIORegVal(unsigned int nGPIOBase, unsigned int nGPIOnum)
 {
-        unsigned int whichReg = 0;
+        phys_addr_t whichReg = 0;
 //        unsigned int whichBit = 0;
         whichReg = nGPIOBase+4*(nGPIOnum/32);
 		//printk("\tgetRegister 0x%x\n",whichReg);
@@ -710,7 +717,7 @@ unsigned int rtkNF_getSW_WP_level(void)
 //----------------------------------------------------------------------------
 
 
-void WAIT_DONE(u64 addr, u64 mask, unsigned int value)
+void WAIT_DONE(void *addr, phys_addr_t mask, unsigned int value)
 {
 	while ( (REG_READ_U32(addr) & mask) != value )
 	{
@@ -795,23 +802,23 @@ static void rtk_nand_resumeReg(void)
  */
 static void rtk_nand_suspend (struct mtd_info *mtd)
 {
-	printk(KERN_INFO "suspend - NF_LOW_PWR:0x%08x, NF_SWC_LOW_PWR:0x%08x\n",REG_READ_U32(REG_NF_LOW_PWR),REG_READ_U32(REG_NF_LOW_PWR));
+	printk(KERN_INFO "suspend - NF_LOW_PWR:0x%08x, NF_SWC_LOW_PWR:0x%08x\n",REG_READ_U32(REG_NF_LOW_PWR+map_base),REG_READ_U32(REG_NF_SWC_LOW_PWR+swc_base));
 	rtk_nand_reset();
 }
 //----------------------------------------------------------------------------
 static void rtk_nand_resume (struct mtd_info *mtd)
 {
-	printk(KERN_INFO "resume 0 - NF_LOW_PWR:0x%08x, NF_SWC_LOW_PWR:0x%08x\n",REG_READ_U32(REG_NF_LOW_PWR),REG_READ_U32(REG_NF_LOW_PWR));
+	printk(KERN_INFO "resume 0 - NF_LOW_PWR:0x%08x, NF_SWC_LOW_PWR:0x%08x\n",REG_READ_U32(REG_NF_LOW_PWR+map_base),REG_READ_U32(REG_NF_SWC_LOW_PWR+swc_base));
 	REG_WRITE_U32(REG_NF_LOW_PWR+map_base, REG_READ_U32(REG_NF_LOW_PWR+map_base)&~0x10);
-	REG_WRITE_U32(REG_NF_SWC_LOW_PWR+map_base, REG_READ_U32(REG_NF_SWC_LOW_PWR+map_base)&~0x10);
-	printk(KERN_INFO "resume 1 - NF_LOW_PWR:0x%08x, NF_SWC_LOW_PWR:0x%08x\n",REG_READ_U32(REG_NF_LOW_PWR),REG_READ_U32(REG_NF_LOW_PWR));
+	REG_WRITE_U32(REG_NF_SWC_LOW_PWR+swc_base, REG_READ_U32(REG_NF_SWC_LOW_PWR+swc_base)&~0x10);
+	printk(KERN_INFO "resume 1 - NF_LOW_PWR:0x%08x, NF_SWC_LOW_PWR:0x%08x\n",REG_READ_U32(REG_NF_LOW_PWR+map_base),REG_READ_U32(REG_NF_SWC_LOW_PWR+swc_base));
 }
 //----------------------------------------------------------------------------
 static void rtk_read_oob_from_SRAM(struct mtd_info *mtd, __u8 *r_oobbuf)
 {
-	unsigned int reg_oob, reg_num;
+	unsigned int reg_oob;
 	int i;
-	unsigned int sram_base_addr; 
+	void *reg_num, *sram_base_addr;
 
 	sram_base_addr = REG_NF_BASE_ADDR+map_base;
 	
@@ -1060,7 +1067,7 @@ static void reverse_to_Tags(char *r_oobbuf, int eccBits)
 	else
 	{
 
-		if(eccBits==0)
+		if(eccBits==0 || eccBits==0x06)
 		{
 	    for ( k=0; k<4; k++ )
 			r_oobbuf[5+k] = r_oobbuf[8+k];
@@ -1080,7 +1087,8 @@ static void reverse_to_Tags(char *r_oobbuf, int eccBits)
 static int rtk_Process_Buf(unsigned char* oob_buf)
 {
 	int j=0,k=0;
-	unsigned int reg_oob, reg_num;
+	unsigned int reg_oob;
+	void *reg_num;
 
 	REG_WRITE_U32(REG_READ_BY_PP+map_base,0x00);
 	REG_WRITE_U32(REG_SRAM_CTL+map_base, 0x30 | 0x04);
@@ -1230,13 +1238,13 @@ static int rtk_read_ecc_page_withLargeECC (struct mtd_info *mtd, u16 chipnr, uns
 	dma_len = page_size >> 9;
 	REG_WRITE_U32(REG_DMA_CTL2+map_base,NF_DMA_CTL2_dma_len(dma_len));
 
-	dram_sa = ( (uint32_t)data_buf >> 3);
+	dram_sa = ( (phys_addr_t)data_buf >> 3);
 	REG_WRITE_U32(REG_DMA_CTL1+map_base,NF_DMA_CTL1_dram_sa(dram_sa));
 
 	if (ptr_oob)
-		spare_dram_sa = ( (uint32_t)ptr_oob >> 3);
+		spare_dram_sa = ( (phys_addr_t)ptr_oob >> 3);
 	else
-		spare_dram_sa = ( (uint32_t)this->g_oobbuf >> 3);
+		spare_dram_sa = ( (phys_addr_t)this->ops.oobbuf >> 3);
 
 	if(is_jupiter_cpu()||is_macarthur_cpu()||is_nike_cpu()||is_macarthur2_cpu())
 		REG_WRITE_U32( REG_SPR_DDR_CTL+map_base,(0x7<<26) | (spare_dram_sa&0x3ffffff));
@@ -1249,12 +1257,12 @@ static int rtk_read_ecc_page_withLargeECC (struct mtd_info *mtd, u16 chipnr, uns
 	{
 		data_buf+=2048;
 		oob_buf+=92;
-		dram_sa = ( (uint32_t)data_buf >> 3);
+		dram_sa = ( (phys_addr_t)data_buf >> 3);
 
 		if (ptr_oob)
-				spare_dram_sa = ( (uint32_t)ptr_oob >> 3);
+				spare_dram_sa = ( (phys_addr_t)ptr_oob >> 3);
 			else
-				spare_dram_sa = ( (uint32_t)this->g_oobbuf >> 3);
+				spare_dram_sa = ( (phys_addr_t)this->ops.oobbuf >> 3);
 
 			if(is_jupiter_cpu()||is_macarthur_cpu()||is_nike_cpu()||is_macarthur2_cpu())
 				REG_WRITE_U32( REG_SPR_DDR_CTL+map_base,(0x7<<26) | (spare_dram_sa&0x3ffffff));
@@ -1395,7 +1403,7 @@ void rtk_set_feature_toshiba(int P1){
 
 	printk("[%s] set slow timer, cnt=0x%x\n", __FUNCTION__, P1);
 
-	REG_WRITE_U32(0x18000038, 0xf);		//432/(N+1)	
+	REG_WRITE_U32(0x18000038+RBUS_OFFSET, 0xf); //432/(N+1)
 	REG_WRITE_U32(REG_TIME_PARA3+map_base,  NF_TIME_PARA3_T3(0x1));			//Set flash timming T3	
 	REG_WRITE_U32(REG_TIME_PARA2+map_base,  NF_TIME_PARA2_T2(0x1));			//Set flash timming T2	
 	REG_WRITE_U32(REG_TIME_PARA1+map_base,  NF_TIME_PARA1_T1(0x1));			//Set flash timming T1
@@ -1440,7 +1448,7 @@ void rtk_set_feature_toshiba(int P1){
 
         printk("[%s] close slow timer, cnt=0x%x\n", __FUNCTION__, P1);
 
-	REG_WRITE_U32(0x18000038, 0x4);		//432/(N+1)	
+	REG_WRITE_U32(0x18000038+RBUS_OFFSET, 0x4); //432/(N+1)
 	REG_WRITE_U32(REG_TIME_PARA3+map_base,  NF_TIME_PARA3_T3(0x0));			//Set flash timming T3	
 	REG_WRITE_U32(REG_TIME_PARA2+map_base,  NF_TIME_PARA2_T2(0x0));			//Set flash timming T2	
 	REG_WRITE_U32(REG_TIME_PARA1+map_base,  NF_TIME_PARA1_T1(0x0));			//Set flash timming T1
@@ -1456,7 +1464,7 @@ void rtk_set_feature_toshiba_new(int P1){
 
 	printk("[%s] set slow timer, cnt=0x%x\n", __FUNCTION__, P1);
 
-	REG_WRITE_U32(0x18000038, 0xf);		//432/(N+1)	
+	REG_WRITE_U32(0x18000038+RBUS_OFFSET, 0xf); //432/(N+1)
 	REG_WRITE_U32(REG_TIME_PARA3+map_base,  NF_TIME_PARA3_T3(0x1));			//Set flash timming T3	
 	REG_WRITE_U32(REG_TIME_PARA2+map_base,  NF_TIME_PARA2_T2(0x1));			//Set flash timming T2	
 	REG_WRITE_U32(REG_TIME_PARA1+map_base,  NF_TIME_PARA1_T1(0x1));			//Set flash timming T1
@@ -1505,7 +1513,7 @@ void rtk_set_feature_toshiba_new(int P1){
 
         printk("[%s] close slow timer, cnt=0x%x\n", __FUNCTION__, P1);
 
-	REG_WRITE_U32(0x18000038, 0x4);		//432/(N+1)	
+	REG_WRITE_U32(0x18000038+RBUS_OFFSET, 0x4); //432/(N+1)
 	REG_WRITE_U32(REG_TIME_PARA3+map_base,  NF_TIME_PARA3_T3(0x0));			//Set flash timming T3	
 	REG_WRITE_U32(REG_TIME_PARA2+map_base,  NF_TIME_PARA2_T2(0x0));			//Set flash timming T2	
 	REG_WRITE_U32(REG_TIME_PARA1+map_base,  NF_TIME_PARA1_T1(0x0));			//Set flash timming T1
@@ -1873,7 +1881,7 @@ static int rtk_read_ecc_page_reTrial (struct mtd_info *mtd, u16 chipnr, unsigned
 		{
 			if(!oob_buf)
 			{
-				rc = rtk_read_ecc_page_withLargeECC(mtd,chipnr,page,data_buf,this->g_oobbuf);
+				rc = rtk_read_ecc_page_withLargeECC(mtd,chipnr,page,data_buf,this->ops.oobbuf);
 			}
 			else
 				rc = rtk_read_ecc_page_withLargeECC(mtd,chipnr,page,data_buf,oob_buf);
@@ -1934,14 +1942,14 @@ static int rtk_read_ecc_page_reTrial (struct mtd_info *mtd, u16 chipnr, unsigned
 		dma_len = page_size >> 9;
 		REG_WRITE_U32(REG_DMA_CTL2+map_base,NF_DMA_CTL2_dma_len(dma_len));
 
-		dram_sa = ( (uint32_t)data_buf >> 3);
+		dram_sa = ( (phys_addr_t)data_buf >> 3);
 
 		REG_WRITE_U32(REG_DMA_CTL1+map_base,NF_DMA_CTL1_dram_sa(dram_sa));
 
 		if (oob_buf)
-			spare_dram_sa = ( (uint32_t)oob_buf >> 3);
+			spare_dram_sa = ( (phys_addr_t)oob_buf >> 3);
 		else
-			spare_dram_sa = ( (uint32_t)this->g_oobbuf >> 3);
+			spare_dram_sa = ( (phys_addr_t)this->ops.oobbuf >> 3);
 
 		if(is_jupiter_cpu()||is_macarthur_cpu()||is_nike_cpu()||is_macarthur2_cpu())
 			REG_WRITE_U32( REG_SPR_DDR_CTL+map_base,(0x7<<26) | (spare_dram_sa&0x3ffffff));
@@ -1977,18 +1985,18 @@ static int rtk_read_ecc_page_reTrial (struct mtd_info *mtd, u16 chipnr, unsigned
 			REG_WRITE_U32(REG_CP_NF_SET+map_base,u32CP_mode|cpSel);
 			REG_WRITE_U32(REG_CP_LEN+map_base,NF_CP_LEN_cp_length(page_size));
 			#if 1
-			dma_map_single(NULL, data_buf, page_size,  DMA_FROM_DEVICE);
+			dma_map_single(&mtd->dev, data_buf, page_size,  DMA_FROM_DEVICE);
 			
 			if ( oob_buf )
-				dma_map_single(NULL, oob_buf, oob_size,  DMA_FROM_DEVICE);
+				dma_map_single(&mtd->dev, oob_buf, oob_size,  DMA_FROM_DEVICE);
 			else
-				dma_map_single(NULL, this->g_oobbuf, oob_size,  DMA_FROM_DEVICE);
+				dma_map_single(&mtd->dev, this->ops.oobbuf, oob_size,  DMA_FROM_DEVICE);
 			#else
 			RTK_FLUSH_CACHE((unsigned long) data_buf, page_size);
 			if ( oob_buf )
 				RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 			else
-				RTK_FLUSH_CACHE((unsigned long) this->g_oobbuf, oob_size);
+				RTK_FLUSH_CACHE((unsigned long) this->ops.oobbuf, oob_size);
 			#endif	
 			REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_cp_enable(0x1)|NF_DMA_CTL3_cp_first(0x1)|NF_DMA_CTL3_ddr_wr(0x1)|NF_DMA_CTL3_dma_xfer(0x1));
 		}
@@ -2008,18 +2016,18 @@ static int rtk_read_ecc_page_reTrial (struct mtd_info *mtd, u16 chipnr, unsigned
 				REG_WRITE_U32(REG_CP_LEN,NF_CP_LEN_cp_length(page_size));
 				
 				#if 1
-				dma_map_single(NULL, data_buf, page_size,  DMA_FROM_DEVICE);
+				dma_map_single(&mtd->dev, data_buf, page_size,  DMA_FROM_DEVICE);
 				
 				if ( oob_buf )
-					dma_map_single(NULL, oob_buf, oob_size,  DMA_FROM_DEVICE);
+					dma_map_single(&mtd->dev, oob_buf, oob_size,  DMA_FROM_DEVICE);
 				else
-					dma_map_single(NULL, oob_buf, this->g_oobbuf, DMA_FROM_DEVICE);
+					dma_map_single(&mtd->dev, this->ops.oobbuf, oob_size, DMA_FROM_DEVICE);
 				#else
 				RTK_FLUSH_CACHE((unsigned long) data_buf, page_size);
 				if ( oob_buf )
 					RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 				else
-					RTK_FLUSH_CACHE((unsigned long) this->g_oobbuf, oob_size);
+					RTK_FLUSH_CACHE((unsigned long) this->ops.oobbuf, oob_size);
 				#endif
 				REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_cp_enable(0x1)|NF_DMA_CTL3_cp_first(0x1)|NF_DMA_CTL3_ddr_wr(0x1)|NF_DMA_CTL3_dma_xfer(0x1));
 			}
@@ -2027,18 +2035,18 @@ static int rtk_read_ecc_page_reTrial (struct mtd_info *mtd, u16 chipnr, unsigned
 			{//printk("/");
 				
 				#if 1
-				dma_map_single(NULL, data_buf, page_size,  DMA_FROM_DEVICE);
+				dma_map_single(&mtd->dev, data_buf, page_size,  DMA_FROM_DEVICE);
 				
 				if ( oob_buf )
-					dma_map_single(NULL, oob_buf, oob_size,  DMA_FROM_DEVICE);
+					dma_map_single(&mtd->dev, oob_buf, oob_size,  DMA_FROM_DEVICE);
 				else
-					dma_map_single(NULL, this->g_oobbuf, oob_size,  DMA_FROM_DEVICE);
+					dma_map_single(&mtd->dev, this->ops.oobbuf, oob_size,  DMA_FROM_DEVICE);
 				#else
 				RTK_FLUSH_CACHE((unsigned long) data_buf, page_size);
 				if ( oob_buf )
 					RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 				else
-					RTK_FLUSH_CACHE((unsigned long) this->g_oobbuf, oob_size);
+					RTK_FLUSH_CACHE((unsigned long) this->ops.oobbuf, oob_size);
 				#endif
 				REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_cp_enable(0)|NF_DMA_CTL3_cp_first(0)|NF_DMA_CTL3_ddr_wr(0x1)|NF_DMA_CTL3_dma_xfer(0x1));
 			}
@@ -2052,11 +2060,11 @@ static int rtk_read_ecc_page_reTrial (struct mtd_info *mtd, u16 chipnr, unsigned
 		WAIT_DONE(REG_AUTO_TRIG+map_base,0x80,0);
 		WAIT_DONE(REG_DMA_CTL3+map_base,0x01,0);
 #endif
-	dma_unmap_single(NULL, virt_to_phys(data_buf), page_size, DMA_FROM_DEVICE);
+	dma_unmap_single(&mtd->dev, virt_to_phys(data_buf), page_size, DMA_FROM_DEVICE);
 	if ( oob_buf )
-			dma_unmap_single(NULL, virt_to_phys(oob_buf), oob_size, DMA_FROM_DEVICE);
+			dma_unmap_single(&mtd->dev, virt_to_phys(oob_buf), oob_size, DMA_FROM_DEVICE);
 	else
-			dma_unmap_single(NULL, virt_to_phys( this->g_oobbuf), oob_size,  DMA_FROM_DEVICE);
+			dma_unmap_single(&mtd->dev, virt_to_phys( this->ops.oobbuf), oob_size,  DMA_FROM_DEVICE);
 		//remove by Aaron==>if((is_NF_CP_Enable_read&&(!mtd->isCPdisable_R))||g_isRandomize)//Clear register
 		//remove by Aaron==>{
 			//remove by Aaron==>REG_WRITE_U32(REG_CP_NF_SET,0);
@@ -2305,11 +2313,11 @@ static int rtk_erase_block(struct mtd_info *mtd, u16 chipnr, int page)
 	return 0;
 }
 //----------------------------------------------------------------------------
-unsigned char *malloc_aligned(size_t size,int alignment)
+unsigned char *malloc_aligned(size_t size,phys_addr_t alignment)
 {
    unsigned char *ptr = kmalloc(size + alignment-1,GFP_KERNEL);
    if (!ptr) return NULL;
-   ptr = (unsigned char *)(((unsigned int)(ptr) + alignment-1) & ~alignment);
+   ptr = (unsigned char *)(((phys_addr_t)(ptr) + alignment-1) & ~alignment);
    return ptr;
 }
 //----------------------------------------------------------------------------
@@ -2328,12 +2336,13 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 	uint8_t auto_trigger_mode = 2;
 	uint8_t addr_mode = 1;
 	uint8_t	bChkAllOne = 0;
+	dma_addr_t data_handle, oob_handle;
 	
 	page_size = mtd->writesize;
 	oob_size = mtd->oobsize;
 	ppb = mtd->erasesize/mtd->writesize;
 	//padlock(PAD_NAND);   // lock nand・s pad
-	printk("[%s]line: %d\n",__FUNCTION__,__LINE__);
+	//printk("[%s]line: %d\n",__FUNCTION__,__LINE__);
 
 	down_write(&rw_sem);
 	//while (down_interruptible (&sem_NF_CARDREADER)) {
@@ -2351,10 +2360,10 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 	//{
 	//	if(!oob_buf)
 	//	{
-	//		rc = rtk_read_ecc_page_reTrial(mtd,chipnr,page,this->g_databuf,this->g_oobbuf);
+	//		rc = rtk_read_ecc_page_reTrial(mtd,chipnr,page,this->ops.datbuf,this->ops.oobbuf);
 	//	}
 	//	else
-	//		rc = rtk_read_ecc_page_reTrial(mtd,chipnr,page,this->g_databuf,oob_buf);
+	//		rc = rtk_read_ecc_page_reTrial(mtd,chipnr,page,this->ops.datbuf,oob_buf);
 	//	up(&sem_NF_CARDREADER);
 	//	//padunlock(PAD_NAND);   // unlock nand・s pad
 	//	return rc;
@@ -2370,18 +2379,18 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 	//if ( chipnr == 0 && page >= 0 && page < g_BootcodeSize/page_size )
 		//mtd->isCPdisable_R = 1;
 	#if 1
-	//dma_map_single(NULL,this->g_databuf, page_size,  DMA_FROM_DEVICE);
-	//if ( oob_buf )
-		//dma_map_single(NULL,oob_buf, oob_size,  DMA_FROM_DEVICE);
+	data_handle = dma_map_single(&mtd->dev,this->ops.datbuf, page_size,  DMA_FROM_DEVICE);
+	if ( oob_buf )
+		oob_handle = dma_map_single(&mtd->dev,oob_buf, oob_size,  DMA_FROM_DEVICE);
 	#else
-	RTK_FLUSH_CACHE((unsigned long) this->g_databuf, page_size);
+	RTK_FLUSH_CACHE((unsigned long) this->ops.datbuf, page_size);
 	if ( oob_buf )
 		RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 	#endif
 	//if((mtd->ecctype==MTD_ECC_RTK_HW)&&(this->ecc_select==0x18||this->ecc_select==0x0c))
 	//if(this->ecc_select==0x18||this->ecc_select==0x0c)
 	//{
-	//	rc = rtk_read_ecc_page_withLargeECC(mtd,chipnr,page,this->g_databuf,oob_buf);
+	//	rc = rtk_read_ecc_page_withLargeECC(mtd,chipnr,page,this->ops.datbuf,oob_buf);
 	//	up(&sem_NF_CARDREADER);
 	//	//padunlock(PAD_NAND);   // unlock nand・s pad
 	//	return rc;
@@ -2476,14 +2485,14 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 				break;
 		}
 
-		dram_sa = ( (uint32_t)this->g_databuf >> 3);
+		dram_sa = ( (uint32_t)(data_handle) >> 3);
 		REG_WRITE_U32(REG_DMA_CTL1+map_base,NF_DMA_CTL1_dram_sa(dram_sa));
 		dma_len = page_size >> 9;
 		REG_WRITE_U32(REG_DMA_CTL2+map_base,NF_DMA_CTL2_dma_len(dma_len));
-		REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_ddr_wr(1)|NF_DMA_CTL3_dma_xfer(1));
 
-		spare_dram_sa = ( (uint32_t)oob_buf >> 3);
+		spare_dram_sa = ( (uint32_t)(oob_handle) >> 3);
 		REG_WRITE_U32( REG_SPR_DDR_CTL+map_base,NF_SPR_DDR_CTL_spare_ddr_ena(1)|NF_SPR_DDR_CTL_per_2k_spr_ena(0)|NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
+		REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_ddr_wr(1)|NF_DMA_CTL3_dma_xfer(1));
 
 		#if RTK_NAND_INTERRUPT
 			NF_RESET_IRQ;
@@ -2501,16 +2510,16 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 			WAIT_DONE(REG_DMA_CTL3+map_base,0x01,0);
 		#endif
 		
-		//dma_unmap_single(NULL, virt_to_phys(this->g_databuf), page_size, DMA_FROM_DEVICE);
-		//if ( oob_buf )
-			//dma_unmap_single(NULL, virt_to_phys(oob_buf), oob_size, DMA_FROM_DEVICE);
+		dma_unmap_single(&mtd->dev, data_handle, page_size, DMA_FROM_DEVICE);
+		if ( oob_buf )
+			dma_unmap_single(&mtd->dev, oob_handle, oob_size, DMA_FROM_DEVICE);
 
 		if(oob_buf)	{
-			//REG_WRITE_U32(REG_READ_BY_PP+map_base,0x00);
-			//REG_WRITE_U32(REG_SRAM_CTL+map_base, 0x30 | 0x04);
-			//rtk_read_oob_from_SRAM(mtd, oob_buf);
-			//REG_WRITE_U32(REG_SRAM_CTL+map_base, 0x00);
-			//REG_WRITE_U32(REG_READ_BY_PP+map_base,0x80);
+			REG_WRITE_U32(REG_READ_BY_PP+map_base,0x00);
+			REG_WRITE_U32(REG_SRAM_CTL+map_base, 0x30 | 0x04);
+			rtk_read_oob_from_SRAM(mtd, oob_buf);
+			REG_WRITE_U32(REG_SRAM_CTL+map_base, 0x00);
+			REG_WRITE_U32(REG_READ_BY_PP+map_base,0x80);
 		}
 		
 		// return OK if all data bit is 1 (page is not written yet)
@@ -2558,11 +2567,11 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 		REG_WRITE_U32(REG_CP_LEN,NF_CP_LEN_cp_length(page_size));
 		
 		#if 1
-		dma_map_single(NULL, this->g_databuf, page_size,  DMA_FROM_DEVICE);
+		dma_map_single(NULL, this->ops.datbuf, page_size,  DMA_FROM_DEVICE);
 		if ( oob_buf )
 			dma_map_single(NULL, oob_buf, oob_size,  DMA_FROM_DEVICE);
 		#else
-		RTK_FLUSH_CACHE((unsigned long) this->g_databuf, page_size);
+		RTK_FLUSH_CACHE((unsigned long) this->ops.datbuf, page_size);
 		if ( oob_buf )
 			RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 		#endif
@@ -2582,11 +2591,11 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 			REG_WRITE_U32(REG_CP_LEN,NF_CP_LEN_cp_length(page_size));
 			
 			#if 1
-			dma_map_single(NULL, this->g_databuf, page_size,  DMA_FROM_DEVICE);
+			dma_map_single(NULL, this->ops.datbuf, page_size,  DMA_FROM_DEVICE);
 			if ( oob_buf )
 				dma_map_single(NULL,oob_buf, oob_size,  DMA_FROM_DEVICE);
 			#else
-			RTK_FLUSH_CACHE((unsigned long) this->g_databuf, page_size);
+			RTK_FLUSH_CACHE((unsigned long) this->ops.datbuf, page_size);
 			if ( oob_buf )
 				RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 			#endif
@@ -2595,11 +2604,11 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 		else
 		{
 			#if 1
-			dma_map_single(NULL,this->g_databuf, page_size,  DMA_FROM_DEVICE);
+			dma_map_single(NULL,this->ops.datbuf, page_size,  DMA_FROM_DEVICE);
 			if ( oob_buf )
 				dma_map_single(NULL,oob_buf, oob_size,  DMA_FROM_DEVICE);
 			#else
-			RTK_FLUSH_CACHE((unsigned long) this->g_databuf, page_size);
+			RTK_FLUSH_CACHE((unsigned long) this->ops.datbuf, page_size);
 			if ( oob_buf )
 				RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 			#endif
@@ -2615,7 +2624,7 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 	WAIT_DONE(REG_AUTO_TRIG,0x80,0);
 	WAIT_DONE(REG_DMA_CTL3,0x01,0);
 #endif
-	dma_unmap_single(NULL, virt_to_phys(this->g_databuf), page_size, DMA_FROM_DEVICE);
+	dma_unmap_single(NULL, virt_to_phys(this->ops.datbuf), page_size, DMA_FROM_DEVICE);
 	if ( oob_buf )
 		dma_unmap_single(NULL, virt_to_phys(oob_buf), oob_size, DMA_FROM_DEVICE);
 
@@ -2709,13 +2718,14 @@ static int rtk_read_oob (struct mtd_info *mtd, u16 chipnr, int page, int len, u_
 	return rc;
 }
 //----------------------------------------------------------------------------
-static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int page, u_char *data_buf, u_char *oob_buf, u16 cp_mode, u_char *data_phy)
+static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int page, u_char *data_buf, struct mtd_oob_ops *ops, u16 cp_mode)
 {
 
-    printk("rtk_read_ecc_page chipnr:[%d] page:[%d]", chipnr, page);
+    //printk("rtk_read_ecc_page chipnr:[%d] page:[%d]", chipnr, page);
 //static unsigned int eccReadCnt = 0;
 	struct nand_chip *this = NULL;
 	int rc = 0;
+	int blank_check = 0;
 	int dram_sa, dma_len, spare_dram_sa;
 	int blank_all_one = 0;
 	int page_len;
@@ -2732,35 +2742,41 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 	uint8_t max_read_retry_cnt = 0;
         int j=0;
         volatile unsigned int data;
-        extern dma_addr_t nrPhys_addr;
-        extern dma_addr_t oobPhys_addr;
+	u_char *oob_buf = NULL;
+	dma_addr_t data_handle, oob_handle;
 	this = (struct nand_chip *) mtd->priv;
 	page_size = mtd->writesize;
-	oob_size = mtd->oobsize;
 	ppb = mtd->erasesize/mtd->writesize;
+
+	if(ops){
+		oob_buf = &ops->oobbuf[ops->oobretlen];
+		oob_size = ops->ooblen;
+	}
+	else
+	oob_size = mtd->oobsize;
 
         syncPageRead();
 
 	down_write(&rw_sem);
 
-    if(((uint32_t)data_buf&0x7)!=0)
+    if(((phys_addr_t)data_buf&0x7)!=0)
     {
         printk("[%s]data_buf must 8 byte alignmemt!!\n",__FUNCTION__);
         BUG();
     }
 
 #if 1
-	//dma_map_single(&mtd->dev, data_buf, page_size,  DMA_FROM_DEVICE);
-	//if ( oob_buf )
-			//dma_map_single(NULL, oob_buf, oob_size,  DMA_FROM_DEVICE);
-		//else
-			//dma_map_single(&mtd->dev, this->g_oobbuf, oob_size,  DMA_FROM_DEVICE);
+	data_handle = dma_map_single(&mtd->dev, data_buf, page_size,  DMA_FROM_DEVICE);
+	if ( oob_buf )
+			oob_handle = dma_map_single(&mtd->dev, oob_buf, oob_size,  DMA_FROM_DEVICE);
+		else
+			oob_handle = dma_map_single(&mtd->dev, this->ops.oobbuf, oob_size,  DMA_FROM_DEVICE);
 #else
 	RTK_FLUSH_CACHE((unsigned long) data_buf, page_size);
 	if ( oob_buf )
 		RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 	else
-		RTK_FLUSH_CACHE((unsigned long) this->g_oobbuf, oob_size);
+		RTK_FLUSH_CACHE((unsigned long) this->ops.oobbuf, oob_size);
 #endif
 
 	if (g_enReadRetrial) {
@@ -2855,6 +2871,7 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 
 		// enable blank check
 		REG_WRITE_U32(REG_BLANK_CHK+map_base,NF_BLANK_CHK_blank_ena(1) );
+		REG_WRITE_U32(REG_BLANK_ZERO_NUM+map_base,0x3);
 
                 if(cp_mode == CP_NF_AES_ECB_128||cp_mode==CP_NF_AES_CBC_128){
 			//REG_WRITE_U32(CP_NF_INI_KEY_0,0x8746bca3);
@@ -2933,20 +2950,12 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 				break;
 		}
 
-		//if (oob_buf) {
-			//spare_dram_sa = ( (uint32_t)oob_buf >> 3);
-		//}
-		//else {
-			//spare_dram_sa = ( (uint32_t)this->g_oobbuf >> 3);
-                        spare_dram_sa = ( (uint32_t)oobPhys_addr >> 3);
-		//}
+		spare_dram_sa = ( (uint32_t)(oob_handle) >> 3);
 
 		//REG_WRITE_U32( REG_SPR_DDR_CTL+map_base,NF_SPR_DDR_CTL_cr_nf_hw_pinmux_ena(1)|NF_SPR_DDR_CTL_spare_ddr_ena(1)|NF_SPR_DDR_CTL_per_2k_spr_ena(0)|NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
 		REG_WRITE_U32( REG_SPR_DDR_CTL+map_base,0x60000000 |NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
 
-		//dram_sa = ( (uint32_t)data_buf >> 3);
-               // dram_sa = ( (uint32_t)nrPhys_addr >> 3);
-               dram_sa = ( (uint32_t)data_phy >> 3);
+		dram_sa = ( (uint32_t)(data_handle)>> 3);
 		REG_WRITE_U32(REG_DMA_CTL1+map_base,NF_DMA_CTL1_dram_sa(dram_sa));
 		dma_len = page_size >> 9;
 		REG_WRITE_U32(REG_DMA_CTL2+map_base,NF_DMA_CTL2_dma_len(dma_len));
@@ -2957,13 +2966,6 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
                 }else{
                         REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_ddr_wr(1)|NF_DMA_CTL3_dma_xfer(1));
                 }
-
-		//if (oob_buf) {
-			//spare_dram_sa = ( (uint32_t)oob_buf >> 3);
-		//}
-		//else {
-			//spare_dram_sa = ( (uint32_t)this->g_oobbuf >> 3);
-		//}
 
 		//REG_WRITE_U32( REG_SPR_DDR_CTL,NF_SPR_DDR_CTL_spare_ddr_ena(1)|NF_SPR_DDR_CTL_per_2k_spr_ena(0)|NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
 		smp_wmb();
@@ -2986,20 +2988,11 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 			WAIT_DONE(REG_DMA_CTL3+map_base,0x01,0);
 		#endif
 
-               // for(j=0;j<100;j++){
-                    //printk("[%s]line: %d, data_buf[%d]: 0x%x\n",__FUNCTION__,__LINE__,j,data_buf[j]);
-                   // }
-
-               // for(j=0;j<64;j++){
-                    //printk("[%s]line: %d, this->g_oobbuf[%d]: 0x%x\n",__FUNCTION__,__LINE__,j,(uint32_t)this->g_oobbuf[j]);
-                    //}
-
-//memset(data_buf, 0x5a,page_size);
-		//dma_unmap_single(&mtd->dev, virt_to_phys(data_buf), page_size,  DMA_FROM_DEVICE);
-		//if ( oob_buf )
-			//dma_unmap_single(NULL, virt_to_phys(oob_buf), oob_size,  DMA_FROM_DEVICE);
-		//else
-			//dma_unmap_single(&mtd->dev, virt_to_phys(this->g_oobbuf), oob_size,  DMA_FROM_DEVICE);
+		dma_unmap_single(&mtd->dev, data_handle, page_size,  DMA_FROM_DEVICE);
+		if ( oob_buf )
+			dma_unmap_single(&mtd->dev, oob_handle, oob_size,  DMA_FROM_DEVICE);
+		else
+			dma_unmap_single(&mtd->dev, oob_handle, oob_size,  DMA_FROM_DEVICE);
 
 		//if(oob_buf)	{
 		if(1)	{
@@ -3012,14 +3005,16 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 #endif
 
     		        data = (REG_READ_U32(REG_SPR_DDR_CTL+map_base) & 0x1fffffff) << 3;	// physical address
-    		         printk("data==> 0x%x\n",data);
+                        //printk("data==> 0x%x\n",data);
                         //printk("data<<3==> 0x%x, page=0x%x\n",(*(volatile unsigned int*)(data)) &0xff,page);     
                         //printk("oob_buf[0]==> 0x%x, page=0x%x\n",oob_buf[0],page);      
-                        printk("oob_buf[0]==> 0x%x, page=0x%x\n",this->g_oobbuf[0],page);    
+                        //printk("oob_buf[0]==> 0x%x, page=0x%x\n",this->ops.oobbuf[0],page);
 		}
 		// return OK if all data bit is 1 (page is not written yet)
-		if ((REG_READ_U32(REG_BLANK_CHK+map_base) & 0x8)==0){
-			printk("data all one \n");
+		// hanlde bitflip on empty page: blank_zero_over=0
+		blank_check = REG_READ_U32(REG_BLANK_CHK+map_base);
+		if ((blank_check & 0xa) != 0x8) {
+			//printk("data all one \n");
 			//up (&sem_NF_CARDREADER);
 			if (g_enReadRetrial) {
 				if (read_retry_cnt !=0) {
@@ -3056,7 +3051,16 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 			}
 			REG_WRITE_U32(REG_BLANK_CHK+map_base,NF_BLANK_CHK_blank_ena(1)|NF_BLANK_CHK_read_ecc_xnor_ena(0));
 			up_write(&rw_sem);
-			return 0;
+			this->ops.retlen = 0;
+			if (blank_check & 0x2) {
+				return 0;
+			}
+			/* Ensure data is 0xff in empty page against bitflip */
+			else {
+				memset(data_buf, 0xff, page_size);
+				printk("%s: read empty page with bitflip\n", __func__);
+				return 1;
+			}
 		}
 		else if (REG_READ_U32(REG_ND_ECC+map_base) & 0x8) {
 			if (!bChkAllOne && this->ecc_select>=0x18) {
@@ -3152,10 +3156,24 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 				}
 			}          
 			REG_WRITE_U32(REG_BLANK_CHK+map_base,NF_BLANK_CHK_blank_ena(1)|NF_BLANK_CHK_read_ecc_xnor_ena(0));
+			mtd->ecc_stats.failed++;
 			up_write(&rw_sem);
 			return -1;	// ECC not correctable
 		}
 		else {
+			// return # of corrected bits if ECC occurs
+			if (REG_READ_U32(REG_ND_ECC+map_base) & 0x04){
+				rc = REG_READ_U32(REG_MAX_ECC_NUM+map_base) & 0xff;
+				//rc = REG_READ_U32(REG_RSECC_NUM) & 0xff;
+
+				mtd->ecc_stats.corrected += rc;
+
+				printk(KERN_INFO "[DBG][%s] page(0x%x) corrected ECC error,  REG_BLANK_CHK reg: 0x%x\n",
+					__FUNCTION__, page, REG_READ_U32(REG_BLANK_CHK+map_base));
+				printk(KERN_INFO "[DBG][%s]REG_RSECC_NUM: 0x%x, REG_MAX_ECC_NUM: 0x%x, REG_ECC_PAGE: 0x%x\n",
+					__FUNCTION__, REG_READ_U32(REG_RSECC_NUM+map_base), REG_READ_U32(REG_MAX_ECC_NUM+map_base), REG_READ_U32(REG_ECC_PAGE+map_base));
+			}
+
 			//up (&sem_NF_CARDREADER);
 			if (g_enReadRetrial) {
 				if (read_retry_cnt !=0) {
@@ -3192,7 +3210,8 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 			}            
 			REG_WRITE_U32(REG_BLANK_CHK+map_base,NF_BLANK_CHK_blank_ena(1)|NF_BLANK_CHK_read_ecc_xnor_ena(0));
 			up_write(&rw_sem);
-			return 0;
+			this->ops.retlen = page_size;
+			return rc;
 		}
 	}
 	printk("[%s]line: %d\n",__FUNCTION__,__LINE__);
@@ -3211,15 +3230,16 @@ static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, co
 	unsigned int section =0;
 	unsigned int index =0;
 	unsigned int retryCnt = RETRY_COUNT;
+	dma_addr_t data_handle, oob_handle;
 	if (this->erase_page_flag)
 		this->erase_page_flag[chip_section+section] &= ~(1 << index);
-	memset(this->g_databuf, 0xff, page_size);
+	memset(this->ops.datbuf, 0xff, page_size);
 
 	page_size = mtd->writesize;
 	oob_size = mtd->oobsize;
 	ppb = mtd->erasesize/mtd->writesize;
 	//padlock(PAD_NAND);   // lock nand・s pad
-	printk("[%s]line: %d\n",__FUNCTION__,__LINE__);
+	//printk("[%s]line: %d\n",__FUNCTION__,__LINE__);
 
 	down_write(&rw_sem);
 	//while (down_interruptible (&sem_NF_CARDREADER)) {
@@ -3271,11 +3291,10 @@ static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, co
 	}
 #endif	
 	#if 1
-		dma_map_single(&mtd->dev,this->g_databuf, page_size, DMA_TO_DEVICE);
-		if ( oob_buf ) 
-		    dma_map_single(&mtd->dev,oob_buf, oob_size, DMA_TO_DEVICE);
+		data_handle = dma_map_single(&mtd->dev,this->ops.datbuf, page_size, DMA_TO_DEVICE);
+		oob_handle = dma_map_single(&mtd->dev,oob_buf, oob_size, DMA_TO_DEVICE);
 #else
-	RTK_FLUSH_CACHE((unsigned long) this->g_databuf, page_size);
+	RTK_FLUSH_CACHE((unsigned long) this->ops.datbuf, page_size);
 	if ( oob_buf ) 
 		RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 #endif
@@ -3346,14 +3365,14 @@ static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, co
 			break;
 	}
 
-	dram_sa = ( (uint32_t)this->g_databuf >> 3);
+	dram_sa = ( (uint32_t)(data_handle) >> 3);
 	REG_WRITE_U32(REG_DMA_CTL1+map_base,NF_DMA_CTL1_dram_sa(dram_sa));
 	dma_len = page_size >> 9;
 	REG_WRITE_U32(REG_DMA_CTL2+map_base,NF_DMA_CTL2_dma_len(dma_len));	
-	REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_ddr_wr(1)|NF_DMA_CTL3_dma_xfer(1));
 
-	spare_dram_sa = ( (uint32_t)oob_buf >> 3);
+	spare_dram_sa = ( (uint32_t)(oob_handle) >> 3);
 	REG_WRITE_U32( REG_SPR_DDR_CTL+map_base,NF_SPR_DDR_CTL_spare_ddr_ena(1)|NF_SPR_DDR_CTL_per_2k_spr_ena(1)|NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
+	REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_ddr_wr(1)|NF_DMA_CTL3_dma_xfer(1));
 
 #if RTK_NAND_INTERRUPT
 	NF_RESET_IRQ;
@@ -3381,11 +3400,11 @@ static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, co
 			//add by alexchang 0208-2010
 			
 			#if 1
-			dma_map_single(NULL,this->g_databuf, page_size, DMA_TO_DEVICE);
+			dma_map_single(NULL,this->ops.datbuf, page_size, DMA_TO_DEVICE);
 			if ( oob_buf )
 			dma_map_single(NULL, oob_buf, oob_size, DMA_TO_DEVICE);
 			#else
-			RTK_FLUSH_CACHE((unsigned long) this->g_databuf, page_size);
+			RTK_FLUSH_CACHE((unsigned long) this->ops.datbuf, page_size);
 			if ( oob_buf )
 				RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 			#endif
@@ -3395,11 +3414,11 @@ static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, co
 		{
 			//printk("%");
 			#if 1
-			dma_map_single(NULL,this->g_databuf, page_size, DMA_TO_DEVICE);
+			dma_map_single(NULL,this->ops.datbuf, page_size, DMA_TO_DEVICE);
 			if ( oob_buf )
 			dma_map_single(NULL,oob_buf, oob_size, DMA_TO_DEVICE);
 			#else
-			RTK_FLUSH_CACHE((unsigned long) this->g_databuf, page_size);
+			RTK_FLUSH_CACHE((unsigned long) this->ops.datbuf, page_size);
 			if ( oob_buf )
 				RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 			#endif
@@ -3420,11 +3439,11 @@ static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, co
 			REG_WRITE_U32(REG_CP_LEN,NF_CP_LEN_cp_length(page_size));
 			//add by alexchang 0208-2010
 			#if 1
-			dma_map_single(NULL,this->g_databuf, page_size, DMA_TO_DEVICE);
+			dma_map_single(NULL,this->ops.datbuf, page_size, DMA_TO_DEVICE);
 			if ( oob_buf )
 			dma_map_single(NULL,oob_buf, oob_size, DMA_TO_DEVICE);
 			#else
-			RTK_FLUSH_CACHE((unsigned long) this->g_databuf, page_size);
+			RTK_FLUSH_CACHE((unsigned long) this->ops.datbuf, page_size);
 			if ( oob_buf )
 				RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 			#endif
@@ -3434,11 +3453,11 @@ static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, co
 		{//printk("@");
 			//add by alexchang 0208-2010
 			#if 1
-			dma_map_single(NULL,this->g_databuf, page_size, DMA_TO_DEVICE);
+			dma_map_single(NULL,this->ops.datbuf, page_size, DMA_TO_DEVICE);
 			if ( oob_buf )
 			dma_map_single(NULL,oob_buf, oob_size, DMA_TO_DEVICE);
 			#else
-			RTK_FLUSH_CACHE((unsigned long) this->g_databuf, page_size);
+			RTK_FLUSH_CACHE((unsigned long) this->ops.datbuf, page_size);
 			if ( oob_buf )
 				RTK_FLUSH_CACHE((unsigned long) oob_buf, oob_size);
 			#endif
@@ -3463,9 +3482,9 @@ static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, co
 	WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);//add by alexchang 0416-2010
 #endif
 
-			dma_unmap_single(NULL, virt_to_phys(this->g_databuf), page_size, DMA_TO_DEVICE);
+			dma_unmap_single(&mtd->dev, data_handle, page_size, DMA_TO_DEVICE);
 			if ( oob_buf )
-			dma_unmap_single(NULL, virt_to_phys(oob_buf), oob_size, DMA_TO_DEVICE);
+			dma_unmap_single(&mtd->dev, oob_handle, oob_size, DMA_TO_DEVICE);
 #if 0
 	if(is_darwin_cpu()||is_macarthur_cpu()||is_nike_cpu()||is_macarthur2_cpu())//Enable NF_WP pin (Write Protect Pin)
 	{
@@ -3520,7 +3539,7 @@ static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, co
 //char bbbbb[4096];
 
 static int rtk_write_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int page,
-			const u_char *data_buf, const  u_char *oob_buf, int isBBT,const u_char *data_phy)
+			const u_char *data_buf, struct mtd_oob_ops *ops, int isBBT)
 {	
 	unsigned int ppb = mtd->erasesize/mtd->writesize;
 	struct nand_chip *this = (struct nand_chip *) mtd->priv;
@@ -3529,37 +3548,40 @@ static int rtk_write_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pa
 	uint8_t	addr_mode = 1;
 
 	unsigned int page_len, dram_sa, dma_len, spare_dram_sa;
-	unsigned char oob_1stB,oob_2ndB=0;
+	unsigned char oob_1stB,oob_2ndB=0xff;
 
-	unsigned char nf_oob_buf[oob_size];
 	unsigned int chip_section = 0;
 	unsigned int section = 0;
 	unsigned int index = 0;
 	unsigned int retryCnt = RETRY_COUNT;
+	unsigned int i, count, increment;
+	uint8_t spare_enable = 1;
+	const  u_char *oob_buf = NULL;
+	int j=0;
+	dma_addr_t data_handle, oob_handle=0, goob_handle;
+	if(ops)
+		oob_buf = &ops->oobbuf[ops->oobretlen];
 	//padlock(PAD_NAND);   // lock nand・s pad
-        extern dma_addr_t nwPhys_addr;
-        extern dma_addr_t oobPhys_addr;
 	//printk("00[%s]Ran 0x%x, scr 0x%x, flag 0x%x\n",__FUNCTION__,g_isRandomize,mtd->isScramble,mtd->isCPdisable_W);
-        int j=0;
         syncPageRead();
 
 	down_write(&rw_sem);
 
-        if(((uint32_t)data_buf&0x7)!=0)
+        if(((phys_addr_t)data_buf&0x7)!=0)
         {
                 printk("[%s]data_buf must 8 byte alignmemt!!\n",__FUNCTION__);
                 BUG();
         }
-        if(((uint32_t)oob_buf&0x7)!=0)
+        if(((phys_addr_t)oob_buf&0x7)!=0)
         {
                 printk("[%s]oob_buf must 8 byte alignmemt!!\n",__FUNCTION__);
                 BUG();
         }
 #if 1
-	//dma_map_single(NULL,data_buf, page_size, DMA_TO_DEVICE);
-	//if (oob_buf) {
-		//dma_map_single(NULL,oob_buf, oob_size, DMA_TO_DEVICE);
-	//}
+	data_handle = dma_map_single(&mtd->dev,data_buf, page_size, DMA_TO_DEVICE);
+	if (oob_buf) {
+		oob_handle = dma_map_single(&mtd->dev,oob_buf, oob_size, DMA_TO_DEVICE);
+	}
 #else
 RTK_FLUSH_CACHE((unsigned long) data_buf, page_size);
 #endif
@@ -3583,43 +3605,21 @@ RTK_FLUSH_CACHE((unsigned long) data_buf, page_size);
 		}
 	}
 
-	this->g_oobbuf[0x0] = oob_1stB;
-	this->g_oobbuf[0x10] = oob_1stB;
-	this->g_oobbuf[0x20] = oob_1stB;
-	this->g_oobbuf[0x30] = oob_1stB;
-
-    	this->g_oobbuf[0x8] = oob_1stB;
-	this->g_oobbuf[0x18] = oob_1stB;
-	this->g_oobbuf[0x28] = oob_1stB;
-	this->g_oobbuf[0x38] = oob_1stB;
-if(oob_size > 0x40){       //MLC oob size > 64 bytes
-    	this->g_oobbuf[0x40] = oob_1stB;
-	this->g_oobbuf[0x50] = oob_1stB;
-	this->g_oobbuf[0x60] = oob_1stB;
-	this->g_oobbuf[0x70] = oob_1stB;
-
-    	this->g_oobbuf[0x48] = oob_1stB;
-	this->g_oobbuf[0x58] = oob_1stB;
-	this->g_oobbuf[0x68] = oob_1stB;
-	this->g_oobbuf[0x78] = oob_1stB;
-    }
-
-	if (oob_buf)
-	{
-	  if ((*(unsigned char*)(((unsigned char*)oob_buf)+2) == 0xbe) && (*(unsigned char*)(((unsigned char*)oob_buf)+3) == 0xef))
-	  {  
-		pr_debug("[LY] write oob data 2 : 0x%02x 0x%02x\n", oob_1stB, oob_2ndB);
-		this->g_oobbuf[0x1] = oob_2ndB;
-		this->g_oobbuf[0x11] = oob_2ndB;
-		this->g_oobbuf[0x21] = oob_2ndB;
-		this->g_oobbuf[0x31] = oob_2ndB;
-	  }
+	increment = (this->ecc_select == 0x18)?4:8;
+	if(this->ecc_select == 0x6 || this->ecc_select == 0x0c){
+		count = page_size / 512;
 	}
-#if 1
-//dma_map_single(NULL,this->g_oobbuf, oob_size, DMA_TO_DEVICE);
-#else
-	RTK_FLUSH_CACHE((unsigned long) nf_oob_buf, oob_size);	
-#endif
+	else{
+		count = page_size / 1024;
+	}
+
+	for(i=0; i<count; i++){
+		if(i*increment+2 > oob_size)
+			break;
+		this->ops.oobbuf[i*increment] = oob_1stB;
+		this->ops.oobbuf[i*increment+1] = oob_2ndB;
+	}
+	goob_handle = dma_map_single(&mtd->dev,this->ops.oobbuf, oob_size, DMA_TO_DEVICE);
 	
 	//REG_WRITE_U32(REG_SRAM_CTL,0x00);//add by alexchang 0208-2010
 	REG_WRITE_U32(REG_DATA_TL0+map_base,NF_DATA_TL0_length0(0));
@@ -3673,6 +3673,13 @@ if(oob_size > 0x40){       //MLC oob size > 64 bytes
 	REG_WRITE_U32(REG_ND_CA1+map_base, 0);
 
 	//Set ECC
+	if (ops && ops->mode == MTD_OPS_RAW){
+		REG_WRITE_U32(REG_MULTI_CHNL_MODE+map_base,NF_MULTI_CHNL_MODE_edo(1)|NF_MULTI_CHNL_MODE_ecc_pass(1));
+		spare_enable = 0;
+		memset(this->ops.oobbuf, 0xff, mtd->oobsize);
+		printk("%s: Write with MTD_OPS_RAW. Without ECC.\n", __func__);
+	}
+	else
 	REG_WRITE_U32(REG_MULTI_CHNL_MODE+map_base,NF_MULTI_CHNL_MODE_edo(1));//add by alexchang0205-2010
 	REG_WRITE_U32( REG_ECC_STOP+map_base,NF_ECC_STOP_ecc_n_stop(0x01));
 
@@ -3706,20 +3713,15 @@ if(oob_size > 0x40){       //MLC oob size > 64 bytes
 			break;
 	}
 
-	//dram_sa = ( (uint32_t)nwPhys_addr >> 3);
-	dram_sa = ( (uint32_t)data_phy >> 3);
+	dram_sa = ( (uint32_t)(data_handle) >> 3);
 	REG_WRITE_U32(REG_DMA_CTL1+map_base,NF_DMA_CTL1_dram_sa(dram_sa));
 	dma_len = page_size >> 9;
 	REG_WRITE_U32(REG_DMA_CTL2+map_base,NF_DMA_CTL2_dma_len(dma_len));	
 	//REG_WRITE_U32(REG_DMA_CTL3,NF_DMA_CTL3_ddr_wr(0)|NF_DMA_CTL3_dma_xfer(1));
 	
-	//if (oob_buf)
-	//	spare_dram_sa = ( (uint32_t)nf_oob_buf >> 3);
-	//else
-		//spare_dram_sa = ( (uint32_t)this->g_oobbuf >> 3);
-		spare_dram_sa = ( (uint32_t)oobPhys_addr >> 3);
+	spare_dram_sa = ( (uint32_t)(goob_handle) >> 3);
 	//REG_WRITE_U32(REG_SPR_DDR_CTL+map_base,NF_SPR_DDR_CTL_spare_ddr_ena(1)|NF_SPR_DDR_CTL_per_2k_spr_ena(1)|NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
-	REG_WRITE_U32(REG_SPR_DDR_CTL+map_base,0x60000000|NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
+	REG_WRITE_U32(REG_SPR_DDR_CTL+map_base,0x40000000|NF_SPR_DDR_CTL_spare_ddr_ena(spare_enable)|NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
 	REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_ddr_wr(0)|NF_DMA_CTL3_dma_xfer(1));
     
 #if RTK_NAND_INTERRUPT
@@ -3752,13 +3754,13 @@ if(oob_size > 0x40){       //MLC oob size > 64 bytes
                    // printk("[%s]line: %d, data_buf[%d]: 0x%x\n",__FUNCTION__,__LINE__,j,data_buf[j]);
                    // }
                // for(j=0;j<64;j++){
-                    //printk("[%s]line: %d, this->g_oobbuf[%d]: 0x%x\n",__FUNCTION__,__LINE__,j,(uint32_t)this->g_oobbuf[j]);
+                    //printk("[%s]line: %d, this->ops.oobbuf[%d]: 0x%x\n",__FUNCTION__,__LINE__,j,(uint32_t)this->ops.oobbuf[j]);
                    // }
-//dma_unmap_single(NULL, virt_to_phys(data_buf), page_size, DMA_TO_DEVICE);
-//if (oob_buf) {
-	//dma_unmap_single(NULL, virt_to_phys(oob_buf), oob_size, DMA_TO_DEVICE);
-//}
-//dma_unmap_single(NULL, virt_to_phys(nf_oob_buf), oob_size, DMA_TO_DEVICE);
+dma_unmap_single(&mtd->dev, data_handle, page_size, DMA_TO_DEVICE);
+if (oob_buf) {
+	dma_unmap_single(&mtd->dev, oob_handle, oob_size, DMA_TO_DEVICE);
+}
+dma_unmap_single(&mtd->dev, goob_handle, oob_size, DMA_TO_DEVICE);
 
 	if ( REG_READ_U32(REG_ND_DAT+map_base) & 0x01 ){
 		//up (&sem_NF_CARDREADER);
@@ -3779,7 +3781,7 @@ if(oob_size > 0x40){       //MLC oob size > 64 bytes
 	//up (&sem_NF_CARDREADER);
 	up_write(&rw_sem);
 	//padunlock(PAD_NAND);   // unlock nand・s pad
-printk("[%s] write is completed at page %d\n", __FUNCTION__, page);
+//printk("[%s] write is completed at page %d\n", __FUNCTION__, page);
 	
 	return rc;
 }
@@ -3819,7 +3821,7 @@ static int rtk_nand_profile (void)
 	}
 #endif
     this->RBA_PERCENT = RBA_PERCENT;
-    printk(KERN_INFO "[**Default**]RBA percentage: %d%\n",this->RBA_PERCENT);
+    printk(KERN_INFO "[**Default**]RBA percentage: %d%%\n",this->RBA_PERCENT);
 #endif
 
 	g_sw_WP_level = rtkNF_getSW_WP_level();
@@ -4062,20 +4064,23 @@ static int __init rtkNF_probe(struct platform_device *pdev)
 #define CTL_ENABLE  1
 #define CTL_DISABLE 0
 
-static int rtk_nand_clk_reset_ctrl(struct device *dev, int enable)
+static int rtk_nand_clk_reset_ctrl(int enable)
 {
-    struct reset_control *reset = reset_control_get(dev, NULL);
-    struct clk *clk = clk_get(dev, NULL);
+    struct reset_control *reset = rstc_get("rstn_nf");
+    struct clk *clk = clk_get(NULL, "clk_en_nf");
+
+    if(!reset || IS_ERR(clk)) {
+        return -1;
+    }
 
     if(enable == CTL_ENABLE){
         reset_control_deassert(reset);
         clk_prepare_enable(clk);
     }else{
-        clk_disable_unprepare(clk);
+        clk_disable(clk);
     }
 
-    clk_put(clk);
-    reset_control_put(reset);
+    return 0;
 }
 
 static int rtk_nand_proc_open(struct inode *inode, struct  file *file) {
@@ -4101,6 +4106,7 @@ static int rtk_nand_probe(struct platform_device *pdev)
 	init_rwsem(&rw_sem);
 
     map_base = of_iomap(rtk129x_nand_node, 0);
+    swc_base = of_iomap(rtk129x_nand_node, 1);
 
     //set pinmux to nand.
     //muxpad0_base =  ioremap(0x98012600, 0x100);
@@ -4109,7 +4115,7 @@ static int rtk_nand_probe(struct platform_device *pdev)
 
     // board_nand_init
     /* enable clk & reset bit */
-    rtk_nand_clk_reset_ctrl(&pdev->dev, CTL_ENABLE);
+    rtk_nand_clk_reset_ctrl(CTL_ENABLE);
 
 	// controller init.
 	REG_WRITE_U32(REG_PD + map_base, 0x1E);
@@ -4149,11 +4155,11 @@ static int rtk_nand_probe(struct platform_device *pdev)
     //************************board_nand_init
     //printk(KERN_INFO "read_value32:0x%08x\n",read_value32);
     
-    printk(KERN_INFO "NF_LOW_PWR:0x%08x, map_base:0x%08x\n",REG_READ_U32(REG_NF_LOW_PWR+map_base),map_base);
+    printk(KERN_INFO "NF_LOW_PWR:0x%08x, map_base:0x%p\n",REG_READ_U32(REG_NF_LOW_PWR+map_base),map_base);
 #if 1
 	REG_WRITE_U32(REG_NF_LOW_PWR+map_base, REG_READ_U32(REG_NF_LOW_PWR+map_base)&~0x10);
-	//REG_WRITE_U32(REG_NF_SWC_LOW_PWR, REG_READ_U32(REG_NF_SWC_LOW_PWR)&~0x10);
-	printk(KERN_INFO "NF_LOW_PWR:0x%08x, NF_SWC_LOW_PWR:0x%08x\n",REG_READ_U32(REG_NF_LOW_PWR+map_base),REG_READ_U32(REG_NF_LOW_PWR+map_base));
+	REG_WRITE_U32(REG_NF_SWC_LOW_PWR+swc_base, REG_READ_U32(REG_NF_SWC_LOW_PWR+swc_base)&~0x10);
+	printk(KERN_INFO "NF_LOW_PWR:0x%08x, NF_SWC_LOW_PWR:0x%08x\n",REG_READ_U32(REG_NF_LOW_PWR+map_base),REG_READ_U32(REG_NF_SWC_LOW_PWR+swc_base));
 
 	//if ( REG_READ_U32(REG_CLOCK_ENABLE1) & 0x00800000 ){
 	if (1){
@@ -4223,6 +4229,9 @@ static int rtk_nand_probe(struct platform_device *pdev)
 	memset ( (char *)rtk_mtd, 0, MTDSIZE);
 	rtk_mtd->priv = this = (struct nand_chip *)(rtk_mtd+1);
 
+	rtk_mtd->dev.dma_mask = &rtknand_dmamask;
+	rtk_mtd->dev.coherent_dma_mask = DMA_BIT_MASK(32);
+
 #if 0
 	REG_WRITE_U32( REG_PD+map_base,~(0x1 << 0) );
 	REG_WRITE_U32( REG_ND_CMD+map_base,CMD_RESET );
@@ -4284,10 +4293,10 @@ EXIT:
 	if (rc < 0) {
 		if (rtk_mtd){
 			//del_mtd_partitions (rtk_mtd);
-			if (this->g_databuf)
-				kfree(this->g_databuf);
-			if(this->g_oobbuf)
-				kfree(this->g_oobbuf);
+			if (this->ops.datbuf)
+				kfree(this->ops.datbuf);
+			if(this->ops.oobbuf)
+				kfree(this->ops.oobbuf);
 			if (this->erase_page_flag){
 				unsigned int flag_size =  (this->numchips * this->page_num) >> 3;
 				unsigned int mempage_order = get_order(flag_size);
@@ -4312,10 +4321,10 @@ static int rtk_nand_remove(struct platform_device *dev)
 	if (rtk_mtd){
 		//del_mtd_partitions (rtk_mtd);
 		this = (struct nand_chip *)rtk_mtd->priv;
-		if (this->g_databuf)
-			kfree(this->g_databuf);
-		if(this->g_oobbuf)
-			kfree(this->g_oobbuf);
+		if (this->ops.datbuf)
+			kfree(this->ops.datbuf);
+		if(this->ops.oobbuf)
+			kfree(this->ops.oobbuf);
 		if (this->erase_page_flag){
 			unsigned int flag_size =  (this->numchips * this->page_num) >> 3;
 			unsigned int mempage_order = get_order(flag_size);
@@ -4330,6 +4339,7 @@ static int rtk_nand_remove(struct platform_device *dev)
 
 static struct of_device_id rtk129x_nand_ids[] = {
 	{ .compatible = "Realtek,rtk1295-nand" },
+	{ .compatible = "Realtek,rtk1195-nand" },
 	{ /* Sentinel */ },
 };
 
@@ -4346,6 +4356,14 @@ static struct platform_driver rtk_nand_driver = {
 };
 
 module_platform_driver(rtk_nand_driver);
+
+static int __init rtk_nand_info_setup(char *line)
+{
+	strlcpy(g_rtk_nandinfo_line, line, sizeof(g_rtk_nandinfo_line));
+
+	return 1;
+}
+__setup("nandinfo=", rtk_nand_info_setup);
 
 MODULE_AUTHOR("AlexChang <alexchang2131@realtek.com>");
 MODULE_DESCRIPTION("Realtek NAND Flash Controller Driver");

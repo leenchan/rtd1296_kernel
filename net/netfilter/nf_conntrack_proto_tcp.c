@@ -287,10 +287,9 @@ int tcp_get_timeouts_by_state(u_int8_t state,void *ct_or_cp, int is_ct)
 	}
 	else {
 		struct ip_vs_conn *cp = (struct ip_vs_conn *)ct_or_cp;
-		net = ip_vs_conn_net(cp);
+		net = cp->ipvs->net;
 	}
 	unsigned int *tcp_timeouts_run = tcp_get_timeouts(net);
-	//net_warn_ratelimited("--%s--%d-- state = %d,  tcp_timeouts_run[%s] = %d\n",__FUNCTION__,__LINE__,state,tcp_conntrack_names[state],tcp_timeouts_run[state]);
 	return tcp_timeouts_run[state];
 }
 #else
@@ -307,7 +306,7 @@ static inline struct nf_tcp_net *tcp_pernet(struct net *net)
 }
 
 static bool tcp_pkt_to_tuple(const struct sk_buff *skb, unsigned int dataoff,
-			     struct nf_conntrack_tuple *tuple)
+			     struct net *net, struct nf_conntrack_tuple *tuple)
 {
 	const struct tcphdr *hp;
 	struct tcphdr _hdr;
@@ -468,7 +467,7 @@ static void tcp_options(const struct sk_buff *skb,
 
 #if defined(FAST_PATH_SPI_ENABLED) || !(defined(CONFIG_RTL_IPTABLES_FAST_PATH) ||defined(CONFIG_RTL_HARDWARE_NAT))
 static void tcp_sack(const struct sk_buff *skb, unsigned int dataoff,
-					 const struct tcphdr *tcph, __u32 *sack)
+                     const struct tcphdr *tcph, __u32 *sack)
 {
 	unsigned char buff[(15 * 4) - sizeof(struct tcphdr)];
 	const unsigned char *ptr;
@@ -1150,13 +1149,7 @@ static int tcp_packet(struct nf_conn *ct,
 		set_bit(IPS_ASSURED_BIT, &ct->status);
 		nf_conntrack_event_cache(IPCT_ASSURED, ct);
 	}
-
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-	nf_ct_refresh_acct_tcp(ct, ctinfo, skb, timeout, old_state, new_state);
-#else
 	nf_ct_refresh_acct(ct, ctinfo, skb, timeout);
-#endif
-	//nf_ct_refresh_acct(ct, ctinfo, skb, timeout);
 
 	return NF_ACCEPT;
 }

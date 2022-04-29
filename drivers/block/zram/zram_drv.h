@@ -20,12 +20,6 @@
 
 #include "zcomp.h"
 
-/*
- * Some arbitrary value. This is just to catch
- * invalid value for num_devices module parameter.
- */
-static const unsigned max_num_devices = 32;
-
 /*-- Configurable parameters */
 
 /*
@@ -84,7 +78,6 @@ struct zram_stats {
 	atomic64_t compr_data_size;	/* compressed size of pages stored */
 	atomic64_t num_reads;	/* failed + successful */
 	atomic64_t num_writes;	/* --do-- */
-	atomic64_t num_migrated;	/* no. of migrated object */
 	atomic64_t failed_reads;	/* can happen when memory is too low */
 	atomic64_t failed_writes;	/* can happen when memory is too low */
 	atomic64_t invalid_io;	/* non-page-aligned I/O requests */
@@ -121,23 +114,9 @@ struct zram {
 	 */
 	u64 disksize;	/* bytes */
 	char compressor[10];
+	/*
+	 * zram is claimed so open request will be failed
+	 */
+	bool claim; /* Protected by bdev->bd_mutex */
 };
-
-struct zram_stats2 {
-	long long compr_data_size;	/* compressed size of pages stored */
-	long long num_reads;	/* failed + successful */
-	long long num_writes;	/* --do-- */
-	long long num_migrated;	/* no. of migrated object */
-	long long failed_reads;	/* can happen when memory is too low */
-	long long failed_writes;	/* can happen when memory is too low */
-	long long invalid_io;	/* non-page-aligned I/O requests */
-	long long notify_free;	/* no. of swap slot free notifications */
-	long long zero_pages;		/* no. of zero filled pages */
-	long long pages_stored;	/* no. of pages currently stored */
-	long long max_used_pages;	/* no. of maximum pages stored */
-	u64 mem_used; //  in page
-	u64 orig_size; // in page
-	long max_used; // in page
-};
-
 #endif

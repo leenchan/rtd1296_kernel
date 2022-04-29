@@ -25,8 +25,6 @@
 #include <asm/cachetype.h>
 #include <asm/tlbflush.h>
 
-#include "mm.h"
-
 void flush_cache_range(struct vm_area_struct *vma, unsigned long start,
 		       unsigned long end)
 {
@@ -101,10 +99,10 @@ EXPORT_SYMBOL(flush_dcache_page);
 /*
  * Additional functions defined in assembly.
  */
-#ifdef CONFIG_ARCH_RTD129x
 EXPORT_SYMBOL(flush_cache_all);
-#endif
 EXPORT_SYMBOL(flush_icache_range);
+//BPI
+EXPORT_SYMBOL(__flush_dcache_area);
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 #ifdef CONFIG_HAVE_RCU_TABLE_FREE

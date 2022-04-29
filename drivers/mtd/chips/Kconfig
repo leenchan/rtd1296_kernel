@@ -16,6 +16,7 @@ config MTD_CFI
 config MTD_JEDECPROBE
 	tristate "Detect non-CFI AMD/JEDEC-compatible flash chips"
 	select MTD_GEN_PROBE
+	select MTD_CFI_UTIL
 	help
 	  This option enables JEDEC-style probing of flash chips which are not
 	  compatible with the Common Flash Interface, but will use the common
@@ -233,6 +234,7 @@ config MTD_XIP
 
 config MTD_RTK_SFC
         tristate "Realtek Serial Flash Controller for SPI Flash"
+        depends on ARCH_RTD119X || ARCH_RTD129X
         default y
         help
           This is used by SST/SPANSION/MXIC SPI Serial Flash with
@@ -279,5 +281,12 @@ config NOR_ENTER_4BYTES_MODE
         default n
         help
          Setting this to 'y' will enable 4Bytes mode support for nor flash driver.
+
+config MTD_RTK_SFC_RTL8117
+        tristate "Realtek Serial Flash Controller for SPI Flash"
+        depends on SOC_RTL8117
+        help
+          This is used by SST/SPANSION/MXIC SPI Serial Flash with
+          Realtek Serial Flash Controller.
 
 endmenu

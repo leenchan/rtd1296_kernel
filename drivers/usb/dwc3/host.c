@@ -17,7 +17,6 @@
 
 #include <linux/platform_device.h>
 #include <linux/usb/xhci_pdriver.h>
-#include <linux/of_device.h>
 
 #include "core.h"
 
@@ -36,10 +35,6 @@ int dwc3_host_init(struct dwc3 *dwc)
 		dev_err(dwc->dev, "couldn't allocate xHCI device\n");
 		return -ENOMEM;
 	}
-
-#ifdef CONFIG_USB_PATCH_ON_RTK
-	of_dma_configure(&xhci->dev, NULL);
-#endif
 
 	dma_set_coherent_mask(&xhci->dev, dwc->dev->coherent_dma_mask);
 

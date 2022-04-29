@@ -47,6 +47,7 @@
 #define RTK_CMD_MASK                                0x1
 #define RTK_PHY_BUSY_OFFSET                         2
 
+
 typedef enum rtk_mode_ext_e
 {
     MODE_EXT_DISABLE = 0,

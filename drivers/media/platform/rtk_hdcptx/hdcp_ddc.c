@@ -1,19 +1,12 @@
-/*
- * hdcp_ddc.c - RTK hdcp tx driver
+/* Copyright (C) 2007-2014 Realtek Semiconductor Corporation. 
+ * hdcp_ddc.c
  *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include "hdcp.h"
 
-#define HDCP_I2C_SPEED I2C_M_LOW_SPEED_80
 
 int ddc_write(int len,unsigned char start,unsigned char *buf)
 {	
@@ -38,7 +31,7 @@ int ddc_write(int len,unsigned char start,unsigned char *buf)
 	struct i2c_msg msgs[] = {
 		{
 			.addr	= 0x3A,
-			.flags	= HDCP_I2C_SPEED,
+			.flags	= 0,
 			.len	= len+1,
 			.buf	= data,
 		}
@@ -64,12 +57,12 @@ int ddc_read(int len,unsigned char start,unsigned char *buf)
 	struct i2c_msg msgs[] = {
 		{
 			.addr	= 0x3A,
-			.flags	= HDCP_I2C_SPEED,
+			.flags	= 0,
 			.len	= 1,
 			.buf	= &start,
 		}, {
 			.addr	= 0x3A,
-			.flags	= HDCP_I2C_SPEED | I2C_M_RD,
+			.flags	= I2C_M_RD,
 			.len	= len,
 			.buf	= buf,
 		}

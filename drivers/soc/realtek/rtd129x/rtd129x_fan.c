@@ -1,12 +1,3 @@
-/*
- * rtd129x_fan.c - fan driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- */
 
 #include <linux/device.h>
 #include <linux/platform_device.h>
@@ -17,6 +8,7 @@
 #include <linux/of_irq.h>
 #include <linux/of_device.h>
 #include <linux/slab.h>
+#include <linux/reset-helper.h> // rstc_get
 #include <linux/reset.h>
 #include <linux/clk.h>
 #include <linux/pwm.h>
@@ -303,9 +295,9 @@ static int rtk_fan_init(struct rtk_fan_data *fan_data, struct platform_device *p
 	u32 value;
 
 	/* GET clock */
-	struct clk *clk_fan = clk_get(dev, NULL);
+	struct clk *clk_fan = clk_get(NULL, "clk_en_fan");
 	/* GET reset controller */
-	struct reset_control *reset_fan = reset_control_get(dev, NULL);
+	struct reset_control *reset_fan = rstc_get("rstn_fan");
 
 	reset_control_deassert(reset_fan);
 	clk_prepare_enable(clk_fan);

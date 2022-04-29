@@ -20,7 +20,7 @@
 #define RTK_NAND_TEST (0) 		//+alexchang add 0702-2010
 #define RTK_ARD_ALGORITHM (0)	//Enable Avoid Read Disturbance Algorithm or not
 #define RTK_CP_DISABLE	(0)		//Enable content protection for NAND driver or not
-static spinlock_t	 lock_NF_CARDREADER;
+//static spinlock_t	 lock_NF_CARDREADER;
 /* 
 define mars read/write NAND HW registers
 use them because standard readb/writeb have warning msgs in our gcc 2.96
@@ -31,12 +31,12 @@ ex: passing arg 2 of `writeb' makes pointer from integer without a cast
 #define REG_READ_U8(register)         		(*(volatile unsigned char *)GET_MAPPED_RBUS_ADDR(register))
 #define REG_READ_U16(register)         		(*(volatile unsigned short *)GET_MAPPED_RBUS_ADDR(register))
 //#define REG_READ_U32(register)         		(*(volatile unsigned long *)GET_MAPPED_RBUS_ADDR(register))
-#define REG_READ_U32(register)         		(readl(register))
+#define REG_READ_U32(register)         		(readl((volatile const unsigned int*)(register)))
 
 #define REG_WRITE_U8(register, value)    		(*(volatile unsigned char *)GET_MAPPED_RBUS_ADDR(register) = value)
 #define REG_WRITE_U16(register, value)    		(*(volatile unsigned short *)GET_MAPPED_RBUS_ADDR(register) = value)
 //#define REG_WRITE_U32(register, value)    		(*(volatile unsigned long *)GET_MAPPED_RBUS_ADDR(register) = value)
-#define REG_WRITE_U32(register, value)    		(writel(value,register))
+#define REG_WRITE_U32(register, value)    		(writel(value,(volatile unsigned int*)(register)))
 
 #define MTDSIZE	(sizeof (struct mtd_info) + sizeof (struct nand_chip))
 #define MAX_PARTITIONS	16
@@ -53,7 +53,7 @@ extern int rtk_nand_scan (struct mtd_info *mtd, int maxchips);
 /* Reserve Block Area usage */
 #define	BB_INIT	0xFFFE
 #define	RB_INIT	0xFFFD
-#define	BBT_TAG	0xBB
+#define	BBT_TAG	0xBBBB
 #define TAG_FACTORY_PARAM	(0x82)
 #define BB_DIE_INIT	0xEEEE
 #define RB_DIE_INIT	BB_DIE_INIT
@@ -270,10 +270,10 @@ struct nand_chip {
 	u_char oob_shift;
 	void (*read_id) (struct mtd_info *mtd, unsigned char id[5]);
 	int (*read_ecc_page) (struct mtd_info *mtd, u16 chipnr, unsigned int page, u_char *data, 
-									u_char *oob_buf, u16 cp_mode, u_char *data_phy);
+		struct mtd_oob_ops *ops, u16 cp_mode);
 	int (*read_oob) (struct mtd_info *mtd, u16 chipnr, int page, int len, u_char *buf);
 	int (*write_ecc_page) (struct mtd_info *mtd, u16 chipnr, unsigned int page, const u_char *data,
-										const u_char *oob_buf, int isBBT, const u_char *data_phy);										
+		struct mtd_oob_ops *ops, int isBBT);
 	int (*write_oob) (struct mtd_info *mtd, u16 chipnr, int page, int len, const u_char *buf);
 	int (*erase_block) (struct mtd_info *mtd, u16 chipnr, int page);
 	void (*sync) (struct mtd_info *mtd);
@@ -285,7 +285,7 @@ struct nand_chip {
 	void	(*read_buf)(struct mtd_info *mtd, u_char *buf, int len);
 	void 	(*cmdfunc)(struct mtd_info *mtd, unsigned command, int column, int page_addr);
 	int  (*dev_ready)(struct mtd_info *mtd);
-	int (*scan_bbt)(struct mtd_info *mtd, unsigned char *buf_phy);
+	int (*scan_bbt)(struct mtd_info *mtd);
 	int		eccmode;
 	int		eccsize;
 	int		eccbytes;
@@ -299,8 +299,7 @@ struct nand_chip {
 	int		phys_erase_shift;
 	int		bbt_erase_shift;
 	int		chip_shift;
-	u_char 		*g_databuf;
-	u_char		*g_oobbuf;
+	struct mtd_oob_ops	ops;
 	int		oobdirty;
 	u_char		*data_poi;
 	unsigned int	options;

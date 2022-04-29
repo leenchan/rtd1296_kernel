@@ -31,7 +31,6 @@
 #include "../../../../../drivers/staging/android/sw_sync.h"
 #include "../../../../../drivers/soc/realtek/rtd129x/rpc/RPCDriver.h"
 #include <soc/realtek/rtk_ipc_shm.h>
-
 #ifdef CONFIG_REALTEK_RPC
 #include <linux/RPCDriver.h>
 #endif
@@ -44,7 +43,7 @@
 #include "../rtk_fb.h"
 #include "dc2vo.h"
 
-static int debug    = 0;
+static int debug    = 1;
 static int warning  = 1;
 static int info     = 1;
 #define dprintk(msg...) if (debug)   { printk(KERN_DEBUG    "D/DC: " msg); }
@@ -70,7 +69,7 @@ static bool gbMemoryTrash = false;
 #endif /* End of DC2VO_SUPPORT_MEMORY_TRASH */
 
 //#define CREATE_THREAD_FOR_RELEASE_DEBUG
-//#define DC2VO_SUPPORT_DCSYS_DEBUG
+#define DC2VO_SUPPORT_DCSYS_DEBUG
 
 #ifdef DC2VO_SUPPORT_DCSYS_DEBUG
 #define DC2VO_DCSYS_CONTROL         0x98008300
@@ -108,7 +107,7 @@ typedef struct {
     unsigned int            vsync_timeout_ms;
     rwlock_t                vsync_lock;
 	ktime_t                 vsync_timestamp;
-
+    unsigned char * plock_addr;
     volatile void *         vo_vsync_flag;              /* VSync enable and notify. (VOut => SCPU) */
 
     unsigned int            uiRes32Width;
@@ -152,15 +151,14 @@ enum {
     VSYNC_FORCE_LOCK        = (1U << 7),
 };
 
+inline long     dc_wait_plock_timeout       (DC_INFO *pdc_info, unsigned int sharedFD);
 inline long     dc_wait_vsync_timeout       (DC_INFO *pdc_info);
 void            dc_update_vsync_timestamp   (DC_INFO *pdc_info);
 static int dc_do_simple_post_config(VENUSFB_MACH_INFO * video_info, void *arg);
 
 #ifdef CONFIG_RTK_RPC
+extern spinlock_t gASLock;
 DC_INFO *gpdc_info;
-DEFINE_SPINLOCK(gASLock);
-//EXPORT_SYSMBOL(gASLock);
-EXPORT_SYMBOL(gASLock);
 #else
 static DEFINE_SPINLOCK(gASLock);
 #endif
@@ -299,8 +297,24 @@ int DC_VsyncWait(unsigned long long *nsecs)
 }
 EXPORT_SYMBOL(DC_VsyncWait);
 
+int DC_Wait_PLock(DCRT_PARAM_PLOCK *param)
+{
+    unsigned int plock_addr, sharedFD;
+    plock_addr=param->pLockAddr;
+    sharedFD=param->shareFD;
+
+    if (gpdc_info)
+    {
+        gpdc_info->plock_addr=phys_to_virt((phys_addr_t )plock_addr);
+        dc_wait_plock_timeout(gpdc_info, sharedFD);
+    }
+
+    return 0;
+}
+
 int DC_Wait_Vsync(struct fb_info *fb, VENUSFB_MACH_INFO * video_info, unsigned long long *nsecs)
 {
+#if 0    
     DC_INFO * pdc_info = (DC_INFO*)video_info->dc_info;
     DC_UNREFERENCED_PARAMETER (pdc_info);
     DC_UNREFERENCED_PARAMETER (fb);
@@ -315,6 +329,9 @@ int DC_Wait_Vsync(struct fb_info *fb, VENUSFB_MACH_INFO * video_info, unsigned l
 
     // WRITE NSECS TO USER
     *nsecs = ktime_to_ns(ktime_get());
+#else
+    DC_VsyncWait(nsecs);
+#endif
     return 0;
 }
 
@@ -465,6 +482,7 @@ DC_Get_Surface_End:
 #endif
 }
 
+
 int DC_Set_ION_Share_Memory(struct fb_info *fb, VENUSFB_MACH_INFO * video_info, DC_ION_SHARE_MEMORY * param)
 {
     DC_INFO * pdc_info = (DC_INFO*)video_info->dc_info;
@@ -472,6 +490,29 @@ int DC_Set_ION_Share_Memory(struct fb_info *fb, VENUSFB_MACH_INFO * video_info, 
     DC_UNREFERENCED_PARAMETER (video_info);
     if (pdc_info->gpsIONClient == NULL)
         pdc_info->gpsIONClient = ion_client_create(rtk_phoenix_ion_device,"dc2vo");
+    //For supporting NVRDaemon 
+    if ((param->sfd_refclk != 0)&&(param->sfd_rbHeader== 0)&&(param->sfd_rbBase == 0)) {
+        /*  +---------------+
+            | RingBuffer 64k|
+            +---------------+
+            | RingBuffer 1k |
+            +---------------+
+            | RefClk    1k  |
+            +---------------+    */
+        struct ion_handle *handle;
+        handle = ion_import_dma_buf(pdc_info->gpsIONClient,param->sfd_refclk);
+        pdc_info->RING_HEADER_BASE = ion_map_kernel(pdc_info->gpsIONClient,handle);
+        pdc_info->RING_HEADER = (void*)((unsigned long)pdc_info->RING_HEADER_BASE + 64*1024);
+        pdc_info->REF_CLK = (void*)((unsigned long)pdc_info->RING_HEADER + 1024);        
+        dprintk("[%s] refclk sfd:%d handle:%p vAddr:%p\n",__func__,
+                param->sfd_refclk, handle, pdc_info->REF_CLK);
+        dprintk("[%s] rbHeader sfd:%d handle:%p vAddr:%p\n",__func__,
+                param->sfd_rbHeader, handle, pdc_info->RING_HEADER);        
+        dprintk("[%s] rbHeaderBase sfd:%d handle:%p vAddr:%p\n",__func__,
+                param->sfd_rbBase, handle, pdc_info->RING_HEADER_BASE);   
+        return 0;    
+    }
+
 
     if (param->sfd_refclk != 0) {
         struct ion_handle *refclk_handle;
@@ -573,7 +614,7 @@ int DC_Ioctl (struct fb_info *fb, VENUSFB_MACH_INFO * video_info,unsigned int cm
             {
                 unsigned long long nsecs;
                 if (DC_Wait_Vsync(fb, video_info, &nsecs) != 0)                goERROR(0);
-                /*if(copy_to_user((void *)arg,&nsecs,sizeof(u32)) != 0)         goERROR(0);*/
+                if(copy_to_user((void *)arg,&nsecs,sizeof(u32)) != 0)         goERROR(0);
                 break;
             }
         case DC2VO_WAIT_FOR_VSYNC        :
@@ -583,6 +624,14 @@ int DC_Ioctl (struct fb_info *fb, VENUSFB_MACH_INFO * video_info,unsigned int cm
                 if(copy_to_user((void *)arg,&nsecs,sizeof(nsecs)) != 0)         goERROR(0);
                 break;
             }
+        case DC2VO_WAIT_FOR_PLOCK        :
+            {
+                DCRT_PARAM_PLOCK param;
+                if(copy_from_user(&param,(void *)arg,sizeof(DCRT_PARAM_PLOCK)) != 0)     goERROR(0);
+                if (DC_Wait_PLock(&param) != 0)                goERROR(0);
+
+                break;
+            }            
         case DC2VO_GET_SURFACE           :
             {
                 DCRT_PARAM_SURFACE param;
@@ -775,6 +824,46 @@ int DeInit_vSync(VENUSFB_MACH_INFO * video_info)
     return 0;
 }
 
+static inline char _read_plock(char *plock_addr, unsigned int sharedFD)
+{
+    extern int rtk_ion_sync(int fd, enum dma_data_direction dir);
+    char ret;
+    
+    rtk_ion_sync(sharedFD, DMA_FROM_DEVICE);
+    ret=*(volatile char*)plock_addr;
+    return ret;
+}
+
+long dc_wait_plock_timeout(DC_INFO *pdc_info, unsigned int sharedFD)
+{
+    long            timeout;
+
+    if (!_read_plock((pdc_info)->plock_addr, sharedFD))
+    {
+//        iprintk("[%s %d] plock raised! plcok:0x%x @%p %d\n",
+//                __func__, __LINE__, _read_plock((pdc_info)->plock_addr, sharedFD), pdc_info->plock_addr, sharedFD);
+
+        return 1;
+    }
+
+
+    timeout = wait_event_interruptible_timeout(pdc_info->vsync_wait,
+            !_read_plock((pdc_info)->plock_addr, sharedFD),
+            msecs_to_jiffies(pdc_info->vsync_timeout_ms));
+
+    if (!timeout) {
+        iprintk("[%s %d] wait plock timeout! plcok:0x%x @%p %d\n",
+                __func__, __LINE__, _read_plock((pdc_info)->plock_addr, sharedFD), pdc_info->plock_addr, sharedFD);
+    }
+    else
+    {
+  //      iprintk("[%s %d] wait plock in time! plcok:0x%x @%p %d\n",
+  //              __func__, __LINE__, _read_plock((pdc_info)->plock_addr, sharedFD), pdc_info->plock_addr, sharedFD);        
+    }
+
+    return timeout;
+}
+
 long dc_wait_vsync_timeout(DC_INFO *pdc_info)
 {
 	unsigned long   flags;
@@ -791,7 +880,7 @@ long dc_wait_vsync_timeout(DC_INFO *pdc_info)
 
     if (!timeout) {
         unsigned int flag = pli_IPCReadULONG((BYTE*)pdc_info->vo_vsync_flag);
-        eprintk("[%s %d] wait vsync timeout! vo_vsync_flag:0x%08x\n",
+        iprintk("[%s %d] wait vsync timeout! vo_vsync_flag:0x%08x\n",
                 __func__, __LINE__, flag);
     }
 
@@ -878,7 +967,7 @@ static struct sync_fence *dc_sw_complete_fence(DC_INFO *pdc_info)
         pdc_info->timeline_max = 1;
     }
 
-    dprintk("[%s %d] sw_sync_pt_create (%d)\n", __func__, __LINE__, pdc_info->timeline_max);
+    //dprintk("[%s %d] sw_sync_pt_create (%d)\n", __func__, __LINE__, pdc_info->timeline_max);
     pt = sw_sync_pt_create(pdc_info->timeline, pdc_info->timeline_max);
     pdc_info->timeline_max++;
     if (!pt)
@@ -927,7 +1016,7 @@ static int dc_buffer_import(DC_INFO *pdc_info,
         //goto done;
     }
 
-    dprintk("[%s %d] buf->acquire_fenc : %p\n", __func__, __LINE__, buf->acquire.fence);
+    //dprintk("[%s %d] buf->acquire_fenc : %p\n", __func__, __LINE__, buf->acquire.fence);
 done:
     /*
      * if (ret < 0)
@@ -962,6 +1051,7 @@ struct sync_fence *dc_device_post_to_work(DC_INFO * pdc_info,
     cfg->config.bufs = bufs;
 
     mutex_lock(&pdc_info->post_lock);
+    
     ret = dc_sw_complete_fence(pdc_info);
     if (IS_ERR(ret))
         goto err_fence;
@@ -1000,6 +1090,8 @@ struct sync_fence *dc_device_post(DC_INFO *pdc_info,
 struct sync_fence *dc_simple_post(DC_INFO *pdc_info,
         struct dc_buffer *buf)
 {
+    //eprintk("[%s %d] buf.phyAddr %x\n", __func__, __LINE__, buf->phyAddr);
+ 
     return dc_device_post(pdc_info, buf, 1);
 }
 
@@ -1012,6 +1104,9 @@ EXPORT_SYMBOL(DC_QueueBuffer);
 static int dc_do_simple_post_config(VENUSFB_MACH_INFO * video_info, void *arg)
 {
     DC_INFO * pdc_info = (DC_INFO*)video_info->dc_info;
+#if 1    //william
+    struct fb_info *fb  = pdc_info->pfbi;
+#endif
     struct dc_simple_post_config __user *cfg = (struct dc_simple_post_config __user *) arg;
     struct sync_fence *complete_fence = NULL;
     int complete_fence_fd;
@@ -1030,7 +1125,12 @@ static int dc_do_simple_post_config(VENUSFB_MACH_INFO * video_info, void *arg)
         eprintk("[%s %d] ret = %d\n", __func__, __LINE__, ret);
         goto err_import;
     }
-
+#if 1    //william
+	if (buf.phyAddr==0)
+     buf.phyAddr=fb->fix.smem_start
+                            + fb->fix.line_length * fb->var.yoffset
+                            + fb->var.xoffset *  (fb->var.bits_per_pixel / 8);
+#endif
     complete_fence = dc_simple_post(pdc_info, &buf);
     if (IS_ERR(complete_fence)) {
         ret = PTR_ERR(complete_fence);
@@ -1060,7 +1160,7 @@ int DC_Swap_Buffer(struct fb_info *fb, VENUSFB_MACH_INFO * video_info)
     DC_INFO * pdc_info = (DC_INFO*)video_info->dc_info;
     struct sync_fence *complete_fence = NULL;
     struct dc_buffer buf;
-
+        return 0;
     if (pdc_info->flags & SUSPEND) {
         dc_wait_vsync_timeout(pdc_info);
         return 0;
@@ -1080,11 +1180,12 @@ int DC_Swap_Buffer(struct fb_info *fb, VENUSFB_MACH_INFO * video_info)
 
     if (IS_ERR(complete_fence))
         goto err;
-
+    eprintk("[%s %d offset %x]!!!!!!! \n", __func__, __LINE__, buf.offset);
+#if 0    
     dc_fence_wait(pdc_info, complete_fence);
 
     sync_fence_put(complete_fence);
-
+#endif
     if (debug)
         console_lock();
     return 0;
@@ -1109,6 +1210,7 @@ static int dc_prepare_framebuffer(DC_INFO *pdc_info, struct dc_buffer *buffer)
 
     buffer->stride      = fb->fix.line_length;
     buffer->format      = (pdc_info->flags & BG_SWAP)? INBAND_CMD_GRAPHIC_FORMAT_RGBA8888 : INBAND_CMD_GRAPHIC_FORMAT_ARGB8888_LITTLE;
+    iprintk("BPI:[%s %d]\n", __func__, __LINE__);
 
     if (pdc_info->flags & CHANGE_RES && pdc_info->uiRes32Width > 0 && pdc_info->uiRes32Height > 0) {
         buffer->width   = pdc_info->uiRes32Width;
@@ -1118,7 +1220,7 @@ static int dc_prepare_framebuffer(DC_INFO *pdc_info, struct dc_buffer *buffer)
         buffer->height  = fb->var.yres;
     }
 
-    if (!(buffer->flags & eBuffer_USE_GLOBAL_ALPHA))
+    if (buffer->flags & eBuffer_USE_GLOBAL_ALPHA)
         buffer->alpha       = pdc_info->gAlpha;
 
     if (pdc_info->CTX == -1)
@@ -1135,9 +1237,9 @@ static int dc_prepare_framebuffer_target(DC_INFO *pdc_info, struct dc_buffer *bu
     struct fb_info *fb  = pdc_info->pfbi;
     bool bIsAFBC = (buffer->flags & eBuffer_AFBC_Enable)?true:false;
 
-    //dprintk("[%s] phyAddr:0x%08x", __FUNCTION__, buffer->phyAddr);
     buffer->stride      = fb->fix.line_length;
     buffer->format      = (pdc_info->flags & BG_SWAP)? INBAND_CMD_GRAPHIC_FORMAT_RGBA8888 : INBAND_CMD_GRAPHIC_FORMAT_ARGB8888_LITTLE;
+    iprintk("BPI:[%s %d]\n", __func__, __LINE__);
 
     if (!bIsAFBC && pdc_info->flags & CHANGE_RES && pdc_info->uiRes32Width > 0 && pdc_info->uiRes32Height > 0) {
         buffer->width   = pdc_info->uiRes32Width;
@@ -1147,9 +1249,11 @@ static int dc_prepare_framebuffer_target(DC_INFO *pdc_info, struct dc_buffer *bu
         buffer->height  = fb->var.yres;
     }
 
-    if (!(buffer->flags & eBuffer_USE_GLOBAL_ALPHA))
+    if (buffer->flags & eBuffer_USE_GLOBAL_ALPHA)
         buffer->alpha       = pdc_info->gAlpha;
-
+ 
+   //dprintk("[%s] buffer->format:%d buffer->alpha:%d", __FUNCTION__, buffer->format, buffer->alpha);
+ 
     if (pdc_info->CTX == -1)
         pdc_info->CTX = 0;
     else
@@ -1176,8 +1280,10 @@ static int dc_prepare_user_buffer(DC_INFO *pdc_info, struct dc_buffer *buffer)
             buffer->format      = (pdc_info->flags & BG_SWAP)?
                 INBAND_CMD_GRAPHIC_FORMAT_RGBA8888 : INBAND_CMD_GRAPHIC_FORMAT_ARGB8888_LITTLE;
 
-        if (!(buffer->flags & eBuffer_USE_GLOBAL_ALPHA))
+        if (buffer->flags & eBuffer_USE_GLOBAL_ALPHA)
             buffer->alpha       = pdc_info->gAlpha;
+        buffer->format      = INBAND_CMD_GRAPHIC_FORMAT_ARGB8888_LITTLE;
+        buffer->alpha       = 250;
     }
 
     if (pdc_info->CTX == -1)
@@ -1210,7 +1316,7 @@ static int dc_queue_vo_buffer(DC_INFO *pdc_info, struct dc_buffer *buffer)
     obj.context         = (unsigned int) buffer->context;
     obj.PTSH            = 0;
     obj.PTSL            = 0;
-    obj.colorkey        = -1;
+    obj.colorkey        = buffer->colorkey;
     obj.alpha           = buffer->alpha;
     obj.x               = 0;
     obj.y               = 0;
@@ -1225,7 +1331,6 @@ static int dc_queue_vo_buffer(DC_INFO *pdc_info, struct dc_buffer *buffer)
     obj.afbc                = (buffer->flags & eBuffer_AFBC_Enable)?1:0;
     obj.afbc_block_split    = (buffer->flags & eBuffer_AFBC_Split)?1:0;
     obj.afbc_yuv_transform  = (buffer->flags & eBuffer_AFBC_YUV_Transform)?1:0;
-
 #ifdef DC2VO_SUPPORT_MEMORY_TRASH
     if (gbMemoryTrash && obj.afbc)
         obj.afbc |= VO_AFBC_DEBUG_MASK;
@@ -1263,7 +1368,7 @@ err:
 static int dc_queue_framebuffer_target(DC_INFO *pdc_info, struct dc_buffer *buffer)
 {
 
-    dprintk("[%s %d]\n", __func__, __LINE__);
+    //dprintk("[%s %d]\n", __func__, __LINE__);
 
     if(dc_prepare_framebuffer_target(pdc_info, buffer))
         goto err;
@@ -1453,7 +1558,7 @@ static void dc_post_work_func(struct kthread_work *work)
     list_replace_init(&pdc_info->post_list, &saved_list);
     mutex_unlock(&pdc_info->post_lock);
 
-    dprintk("[%s %d]\n", __func__, __LINE__);
+    //dprintk("[%s %d]\n", __func__, __LINE__);
 
     list_for_each_entry_safe(post, next, &saved_list, head) {
         int i;
@@ -1606,6 +1711,7 @@ int Init_post_Worker(VENUSFB_MACH_INFO * video_info)
     init_kthread_work(&pdc_info->free_work, dc_free_work_func);
 #endif /* End of CREATE_THREAD_FOR_RELEASE_DEBUG */
 
+
     return 0;
 
 err:
@@ -1655,7 +1761,13 @@ int DeInit_post_Worker(VENUSFB_MACH_INFO * video_info)
 int DC_Init(VENUSFB_MACH_INFO * video_info, struct fb_info *fbi, int irq)
 {
     int retval = 0;
-    if (DCINIT) goto DONE;
+    if (DCINIT)
+    {
+        //Fix Graphic(/dev/fb0) and Video(/dev/fb1) use the same dc2vo issue
+        if(video_info->dc_info == NULL)
+            video_info->dc_info = gpdc_info;
+        goto DONE;
+    }
 
     if (video_info->dc_info == NULL) {
         iprintk("ALLOC DC INFO BUFFER!\n");
@@ -1677,6 +1789,12 @@ int DC_Init(VENUSFB_MACH_INFO * video_info, struct fb_info *fbi, int irq)
             pdc_info->pfbi                  = fbi;
             pdc_info->vo_vsync_flag         = &ipc->vo_int_sync;
             pdc_info->irq                   = irq;
+#ifdef BPI
+#else
+            pdc_info->flags                 |= BG_SWAP;
+            pdc_info->gAlpha                = 250;
+    iprintk("BPI:[%s %d]\n", __func__, __LINE__);
+#endif
 
 #ifdef CONFIG_RTK_RPC
             gpdc_info = (DC_INFO*)video_info->dc_info;

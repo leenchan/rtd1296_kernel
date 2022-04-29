@@ -2,15 +2,15 @@
 # Makefile for the fastpath modules on top of IPv4.
 #
 
-include $(DIR_ROOT)/.config
+include  $(srctree)/.config
 
 #EXTRA_CFLAGS += -I $(DIR_LINUX)/drivers/net/rtl819x
-EXTRA_CFLAGS += -I $(DIR_LINUX)/net
+EXTRA_CFLAGS += -I  $(srctree)/net
 EXTRA_CFLAGS += -D__KERNEL__
 #EXTRA_CFLAGS += -Wno-implicit -Werror
 
 ifeq "$(CONFIG_MODEL_RTL89xxC_SDK)" "y"
-EXTRA_CFLAGS += --save-temps
+EXTRA_CFLAGS += -save-temps
 endif
 
 ifeq ($(CONFIG_RTL_IPTABLES_FAST_PATH),m)

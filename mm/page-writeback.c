@@ -2,7 +2,7 @@
  * mm/page-writeback.c
  *
  * Copyright (C) 2002, Linus Torvalds.
- * Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra <pzijlstr@redhat.com>
+ * Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra
  *
  * Contains functions related to writing back dirty pages at the
  * address_space level.
@@ -70,7 +70,11 @@ static long ratelimit_pages = 32;
 /*
  * Start background writeback (via writeback threads) at this percentage
  */
+#if defined(CONFIG_ARCH_RTD119X) || defined(CONFIG_ARCH_RTD129X)
+int dirty_background_ratio = 0;
+#else
 int dirty_background_ratio = 10;
+#endif
 
 /*
  * dirty_background_bytes starts at 0 (disabled) so that it is a function of
@@ -87,7 +91,11 @@ int vm_highmem_is_dirtyable;
 /*
  * The generator of dirty data starts writeback at this percentage
  */
+#if defined(CONFIG_ARCH_RTD119X) || defined(CONFIG_ARCH_RTD129X)
+int vm_dirty_ratio = 50;
+#else
 int vm_dirty_ratio = 20;
+#endif
 
 /*
  * vm_dirty_bytes starts at 0 (disabled) so that it is a function of
@@ -278,12 +286,7 @@ static unsigned long zone_dirtyable_memory(struct zone *zone)
 	unsigned long nr_pages;
 
 	nr_pages = zone_page_state(zone, NR_FREE_PAGES);
-	/*
-	 * Pages reserved for the kernel should not be considered
-	 * dirtyable, to prevent a situation where reclaim has to
-	 * clean pages in order to balance the zones.
-	 */
-	nr_pages -= min(nr_pages, zone->totalreserve_pages);
+	nr_pages -= min(nr_pages, zone->dirty_balance_reserve);
 
 	nr_pages += zone_page_state(zone, NR_INACTIVE_FILE);
 	nr_pages += zone_page_state(zone, NR_ACTIVE_FILE);
@@ -337,12 +340,7 @@ static unsigned long global_dirtyable_memory(void)
 	unsigned long x;
 
 	x = global_page_state(NR_FREE_PAGES);
-	/*
-	 * Pages reserved for the kernel should not be considered
-	 * dirtyable, to prevent a situation where reclaim has to
-	 * clean pages in order to balance the zones.
-	 */
-	x -= min(x, totalreserve_pages);
+	x -= min(x, dirty_balance_reserve);
 
 	x += global_page_state(NR_INACTIVE_FILE);
 	x += global_page_state(NR_ACTIVE_FILE);
@@ -1016,7 +1014,7 @@ static void wb_position_ratio(struct dirty_throttle_control *dtc)
 	 * scale global setpoint to wb's:
 	 *	wb_setpoint = setpoint * wb_thresh / thresh
 	 */
-	x = div_u64((u64)wb_thresh << 16, dtc->thresh + 1);
+	x = div_u64((u64)wb_thresh << 16, dtc->thresh | 1);
 	wb_setpoint = setpoint * (u64)x >> 16;
 	/*
 	 * Use span=(8*write_bw) in single wb case as indicated by
@@ -1031,7 +1029,7 @@ static void wb_position_ratio(struct dirty_throttle_control *dtc)
 
 	if (dtc->wb_dirty < x_intercept - span / 4) {
 		pos_ratio = div64_u64(pos_ratio * (x_intercept - dtc->wb_dirty),
-				      x_intercept - wb_setpoint + 1);
+				      (x_intercept - wb_setpoint) | 1);
 	} else
 		pos_ratio /= 4;
 
@@ -2337,11 +2335,6 @@ int generic_writepages(struct address_space *mapping,
 	struct blk_plug plug;
 	int ret;
 
-	struct backing_dev_info *bdi = inode_to_bdi(mapping->host);
-
-	if(bdi->dev == NULL)
-		return 0;
-
 	/* deal with chardevs and other special file */
 	if (!mapping->a_ops->writepage)
 		return 0;
@@ -2432,7 +2425,6 @@ void account_page_dirtied(struct page *page, struct address_space *mapping,
 
 	if (mapping_cap_account_dirty(mapping)) {
 		struct bdi_writeback *wb;
-        struct backing_dev_info *bdi = inode_to_bdi(mapping->host);
 
 		inode_attach_wb(inode, page);
 		wb = inode_to_wb(inode);
@@ -2440,12 +2432,8 @@ void account_page_dirtied(struct page *page, struct address_space *mapping,
 		mem_cgroup_inc_page_stat(memcg, MEM_CGROUP_STAT_DIRTY);
 		__inc_zone_page_state(page, NR_FILE_DIRTY);
 		__inc_zone_page_state(page, NR_DIRTIED);
-        
-        if(bdi->dev != NULL){
-            __inc_wb_stat(wb, WB_RECLAIMABLE);
-            __inc_wb_stat(wb, WB_DIRTIED);
-        }
-
+		__inc_wb_stat(wb, WB_RECLAIMABLE);
+		__inc_wb_stat(wb, WB_DIRTIED);
 		task_io_account_write(PAGE_CACHE_SIZE);
 		current->nr_dirtied++;
 		this_cpu_inc(bdp_ratelimits);
@@ -2636,7 +2624,6 @@ EXPORT_SYMBOL(set_page_dirty_lock);
 void cancel_dirty_page(struct page *page)
 {
 	struct address_space *mapping = page_mapping(page);
-    struct backing_dev_info *bdi = inode_to_bdi(mapping->host);
 
 	if (mapping_cap_account_dirty(mapping)) {
 		struct inode *inode = mapping->host;
@@ -2647,7 +2634,7 @@ void cancel_dirty_page(struct page *page)
 		memcg = mem_cgroup_begin_page_stat(page);
 		wb = unlocked_inode_to_wb_begin(inode, &locked);
 
-		if (TestClearPageDirty(page) && bdi->dev != NULL)
+		if (TestClearPageDirty(page))
 			account_page_cleaned(page, mapping, memcg, wb);
 
 		unlocked_inode_to_wb_end(inode, locked);

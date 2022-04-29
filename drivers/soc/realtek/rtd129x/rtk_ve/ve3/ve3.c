@@ -31,6 +31,7 @@
 #include <linux/of_irq.h>
 #include <linux/clkdev.h>
 #include <linux/clk-provider.h>
+#include <linux/clk.h>
 
 #include <soc/realtek/rtd129x_cpu.h>
 
@@ -100,7 +101,9 @@ typedef struct
 } hantrodec_t;
 
 static hantrodec_t hantrodec_data; /* dynamic allocation? */
-
+#if 1 //__LINUX_MEDIA_NAS__
+static unsigned int nInstance = 0; 
+#endif
 static int ReserveIO(void);
 static void ReleaseIO(void);
 
@@ -170,6 +173,36 @@ static void ve3_wrapper_setup(volatile u8 * base)
     ctrl_2 = (ctrl_2 & ~0x3f) | 0x1a;        // ve3_cti_cmd_depth for 1296 timing issue
     __raw_writel(ctrl_1, (base+0x3F00));
     __raw_writel(ctrl_2, (base+0x3F04));
+}
+
+static void ve3_pll_setting(unsigned long offset, unsigned int value, unsigned int bOverwrite, unsigned int bEnable)
+{
+    if (s_pll_phy_register == 0 || s_pll_virt_register == 0 || s_pll_size_register == 0)
+    {
+        printk(KERN_WARNING "In[%s][%d] didn't get pll register\n", __FUNCTION__, __LINE__);
+        return;
+    }
+    else if (offset > s_pll_size_register)
+    {
+        printk(KERN_WARNING "In[%s][%d] offset over than register size\n", __FUNCTION__, __LINE__);
+        return;
+    }
+
+    if (bOverwrite == 1)
+    {
+        __raw_writel(value, (volatile u8 *)(s_pll_virt_register+offset));
+    }
+    else
+    {
+        if (bEnable)
+        {
+            __raw_writel(__raw_readl((volatile u8 *)(s_pll_virt_register+offset)) | value, (volatile u8 *)(s_pll_virt_register+offset));
+        }
+        else
+        {
+            __raw_writel(__raw_readl((volatile u8 *)(s_pll_virt_register+offset)) & value, (volatile u8 *)(s_pll_virt_register+offset));
+        }
+    }
 }
 
 static int ve3_clk_pll_set_rate(struct clk *clk, unsigned int rate)
@@ -732,6 +765,11 @@ static long hantrodec_ioctl(struct file *filp, unsigned int cmd,
 			break;
 	}
 	break;
+#if 1//__LINUX_MEDIA_NAS__
+    case HANTRODEC_GET_INSTANCE: 
+        __put_user(nInstance, (unsigned int *) arg);
+        break;
+#endif
     default:
         return -ENOTTY;
     }
@@ -749,6 +787,9 @@ static long hantrodec_ioctl(struct file *filp, unsigned int cmd,
 static int hantrodec_open(struct inode *inode, struct file *filp)
 {
     PDEBUG("dev opened\n");
+#if 1//__LINUX_MEDIA_NAS__
+    nInstance ++;
+#endif
     return 0;
 }
 
@@ -765,6 +806,9 @@ static int hantrodec_release(struct inode *inode, struct file *filp)
     hantrodec_t *dev = &hantrodec_data;
 
     PDEBUG("closing ...\n");
+#if 1//__LINUX_MEDIA_NAS__
+    nInstance --;
+#endif
 
     for(n = 0; n < dev->cores; n++)
     {
@@ -959,7 +1003,10 @@ static int ve3_probe(struct platform_device *pdev)
     void __iomem *iobase;
     int irq;
     struct device_node *node = pdev->dev.of_node;
-
+#if 1//__LINUX_MEDIA_NAS__
+	if (!of_device_is_available(pdev->dev.of_node))
+		return -ENODEV;
+#endif
     of_address_to_resource(node, 0, &res);
     iobase = of_iomap(node, 0);
 
@@ -996,15 +1043,32 @@ static int ve3_probe(struct platform_device *pdev)
 
     ve3_irq = irq;
 
-    s_ve3_clk = ve3_clk_get(&pdev->dev);
+    if (pdev)
+        s_ve3_clk = ve3_clk_get(&pdev->dev);
+    else
+        s_ve3_clk = ve3_clk_get(NULL);
+
+    if (!s_ve3_clk)
+    {
+        printk(KERN_ERR "VE3: fail to get clock controller, but, do not treat as error, \n");
+    }
+    else
+    {
+        printk(KERN_INFO "VE3: get clock controller s_ve3_clk=0x%p\n", s_ve3_clk);
+    }
 
 #ifdef CONFIG_POWER_CONTROL
     s_pctrl_ve3 = ve3_pctrl_get();
     ve3_pctrl_on(s_pctrl_ve3);
 #endif
 
-    rstc_ve3 = reset_control_get(&pdev->dev, NULL);
+    rstc_ve3 = rstc_get("rstn_ve3");
 
+    /* RTK clock setting */
+    ve3_pll_setting(0x114, PLL_CLK_540, 1, 0); // VE1 PLL
+    ve3_pll_setting(0x118, (0x7), 1, 0); // VE1 PLL disable
+    __delay(100);
+    ve3_pll_setting(0x118, (0x3), 1, 0); // VE1 PLL enable
     reset_control_deassert(rstc_ve3); // RESET disable
     ve3_clk_enable(s_ve3_clk);
 
@@ -1171,6 +1235,10 @@ static int ve3_resume(struct device *dev)
 #endif
     ve3_clk_enable(s_ve3_clk);
     /* RTK clock setting */
+    ve3_pll_setting(0x114, PLL_CLK_540, 1, 0); // VE1 PLL
+    ve3_pll_setting(0x118, (0x7), 1, 0); // VE1 PLL disable
+    __delay(100);
+    ve3_pll_setting(0x118, (0x3), 1, 0); // VE1 PLL enable
     ve3_clk_disable(s_ve3_clk);
 #ifdef CONFIG_POWER_CONTROL
     ve3_pctrl_off(s_pctrl_ve3);

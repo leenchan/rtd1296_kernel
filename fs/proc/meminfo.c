@@ -19,12 +19,6 @@
 #include <asm/pgtable.h>
 #include "internal.h"
 
-#include "../../drivers/block/zram/zram_drv.h"
-
-extern void get_zram_mm_stat(struct zram_stats2 *pzram_stats2);
-
-//#define SHOW_SWAPINFO2
-
 void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
 {
 }
@@ -32,11 +26,7 @@ void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
 static int meminfo_proc_show(struct seq_file *m, void *v)
 {
 	struct sysinfo i;
-#ifdef SHOW_SWAPINFO2
-	struct sysinfo2 i2;
-#endif
 	unsigned long committed;
-	struct vmalloc_info vmi;
 	long cached;
 	long available;
 	unsigned long pagecache;
@@ -45,25 +35,18 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	struct zone *zone;
 	int lru;
 
-	struct zram_stats2 copy_zram_stats2;
-
 /*
  * display in kilobytes.
  */
 #define K(x) ((x) << (PAGE_SHIFT - 10))
 	si_meminfo(&i);
 	si_swapinfo(&i);
-#ifdef SHOW_SWAPINFO2
-	si_swapinfo2(&i2);
-#endif
 	committed = percpu_counter_read_positive(&vm_committed_as);
 
 	cached = global_page_state(NR_FILE_PAGES) -
 			total_swapcache_pages() - i.bufferram;
 	if (cached < 0)
 		cached = 0;
-
-	get_vmalloc_info(&vmi);
 
 	for (lru = LRU_BASE; lru < NR_LRU_LISTS; lru++)
 		pages[lru] = global_page_state(NR_LRU_BASE + lru);
@@ -99,8 +82,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	if (available < 0)
 		available = 0;
 
-	get_zram_mm_stat(&copy_zram_stats2);
-
 	/*
 	 * Tagged format, for easy grepping and expansion.
 	 */
@@ -128,16 +109,8 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 #ifndef CONFIG_MMU
 		"MmapCopy:       %8lu kB\n"
 #endif
-#ifdef SHOW_SWAPINFO2
-		"SwapToBeUsed:   %8lu kB\n"
-		"SwapNrPages:    %8lu kB\n"
-		"SwapPagesTotal: %8lu kB\n"
-#endif
 		"SwapTotal:      %8lu kB\n"
 		"SwapFree:       %8lu kB\n"
-		"ZRAM Used:      %8lu kB\n"
-		"ZRAM Compr:     %8lu kB\n"
-		"ZRAM Phy Used:  %8lu kB\n"
 		"Dirty:          %8lu kB\n"
 		"Writeback:      %8lu kB\n"
 		"AnonPages:      %8lu kB\n"
@@ -169,14 +142,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		"CmaTotal:       %8lu kB\n"
 		"CmaFree:        %8lu kB\n"
 #endif
-#if 1
-		"wmark low:      %8lu kB\n"
-		"pagecache:      %8lu kB\n"
-#endif
-#ifdef CONFIG_CMA
-		"cma_area_count: %d\n"
-		"MAX_CMA_AREAS:  %d\n"
-#endif
 		,
 		K(i.totalram),
 		K(i.freeram),
@@ -201,16 +166,8 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 #ifndef CONFIG_MMU
 		K((unsigned long) atomic_long_read(&mmap_pages_allocated)),
 #endif
-#ifdef SHOW_SWAPINFO2
-		K(i2.nr_to_be_unused),
-		K(i2.nr_swap_pages),
-		K(i2.total_swap_pages),
-#endif
 		K(i.totalswap),
 		K(i.freeswap),
-		K(copy_zram_stats2.pages_stored),
-		(copy_zram_stats2.compr_data_size>>10),
-		K(copy_zram_stats2.mem_used),
 		K(global_page_state(NR_FILE_DIRTY)),
 		K(global_page_state(NR_WRITEBACK)),
 		K(global_page_state(NR_ANON_PAGES)),
@@ -231,8 +188,8 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		K(vm_commit_limit()),
 		K(committed),
 		(unsigned long)VMALLOC_TOTAL >> 10,
-		vmi.used >> 10,
-		vmi.largest_chunk >> 10
+		0ul, // used to be vmalloc 'used'
+		0ul  // used to be vmalloc 'largest_chunk'
 #ifdef CONFIG_MEMORY_FAILURE
 		, atomic_long_read(&num_poisoned_pages) << (PAGE_SHIFT - 10)
 #endif
@@ -243,14 +200,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 #ifdef CONFIG_CMA
 		, K(totalcma_pages)
 		, K(global_page_state(NR_FREE_CMA_PAGES))
-#endif
-#if 1
-		, K(wmark_low)
-		, K(pagecache)
-#endif
-#ifdef CONFIG_CMA
-		, cma_area_count
-		, MAX_CMA_AREAS
 #endif
 		);
 

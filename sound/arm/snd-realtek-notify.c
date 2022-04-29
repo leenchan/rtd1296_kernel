@@ -1,12 +1,8 @@
-/**
- * snd-realtek-notify.c - Realtek alsa driver
+/*
+ * snd-realtek-notify.c - Audio Notification
  *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * Copyright (C) 2016-2017 Realtek Semiconductor Corporation
+ * Copyright (C) 2016-2017 Cheng-Yu Lee <cylee12@realtek.com>
  */
 
 #define pr_fmt(fmt) "snd-rtk-an: " fmt
@@ -31,16 +27,10 @@ static inline struct ion_client *__get_ion_client(void)
 }
 
 enum {
-	ENUM_DT_AI_EN = 0, /* this is used by acpu */
-	ENUM_DT_AI_AIN, /* always set this bit if using AI */
+	ENUM_DT_AI_EN = 0,
+	ENUM_DT_AI_AIN,
 	ENUM_DT_AI_ADC,
 	ENUM_DT_AI_ANALOG_IN,
-};
-
-enum {
-	ENUM_AI_I2S_STATUS = 0,
-	ENUM_AI_I2S_PIN_SHARE_BIT, /* pin-share:1, pin-dependent:0 */
-	ENUM_AI_I2S_AI_MASTER_BIT, /* AI-master:1, AI-slave:0 */
 };
 
 enum {
@@ -51,13 +41,10 @@ enum {
 	ENUM_DT_AO_GLOBAL = 4,
 };
 
-/* privateInfo for AI */
-#define AN_AI_DEVICE_ON         0
-#define AN_AI_DEVICE_I2S_CONF   1
-
-/* privateInfo for AO */
+#define AN_AI_DEVICE_ON    0
 #define AN_AO_DEVICE_OFF   0
 #define AN_AO_I2S_CH       1
+
 
 static int __send_rpc(struct ion_client *client,
 	AUDIO_ENUM_AIO_PRIVAETINFO info, unsigned int *data, int size)
@@ -168,18 +155,6 @@ static int __init rtk_audio_notifier_ai_init(struct device *dev,
 		dev_err(dev, "muxpad0 must not set directly, use pinctrl\n");
 	}
 
-	if (of_property_match_string(np, "ai,type", "i2s") >= 0) {
-		rpcd->data[AN_AI_DEVICE_I2S_CONF] |=
-			BIT(ENUM_AI_I2S_STATUS);
-
-		if (of_find_property(np, "ai,i2s-pin-shared", NULL))
-			rpcd->data[AN_AI_DEVICE_I2S_CONF] |=
-				BIT(ENUM_AI_I2S_PIN_SHARE_BIT);
-		if (of_find_property(np, "ai,i2s-master", NULL))
-			rpcd->data[AN_AI_DEVICE_I2S_CONF] |=
-				BIT(ENUM_AI_I2S_AI_MASTER_BIT);
-	}
-
 	return rpc_data_is_empty(rpcd) ? send_rpc(dev, rpcd) : 0;
 }
 
@@ -235,9 +210,8 @@ static struct rpc_data ai_data = {
 	.info = ENUM_PRIVATEINFO_AIO_AI_INTERFACE_SWITCH_CONTROL,
 	.data = {
 		[AN_AI_DEVICE_ON] = BIT(ENUM_DT_AI_AIN) | BIT(ENUM_DT_AI_ADC),
-		[AN_AI_DEVICE_I2S_CONF] = 0,
 	},
-	.size = 2,
+	.size = 1,
 	.init = rtk_audio_notifier_ai_init,
 };
 
@@ -245,9 +219,8 @@ static struct rpc_data ai_analog_data = {
 	.info = ENUM_PRIVATEINFO_AIO_AI_INTERFACE_SWITCH_CONTROL,
 	.data = {
 		[AN_AI_DEVICE_ON] = BIT(ENUM_DT_AI_AIN) | BIT(ENUM_DT_AI_ANALOG_IN),
-		[AN_AI_DEVICE_I2S_CONF] = 0,
 	},
-	.size = 2,
+	.size = 1,
 	.init = rtk_audio_notifier_ai_init,
 };
 

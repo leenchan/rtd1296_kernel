@@ -77,16 +77,6 @@
 #include <linux/capability.h>
 #include <linux/user_namespace.h>
 
-#if defined(CONFIG_RTL_ETH_PRIV_SKB)
-#include <net/rtl/rtl_types.h>
-#include <net/rtl/rtl_nic.h>
-#endif
-
-#ifdef CONFIG_RTL8190_PRIV_SKB
-extern int is_rtl8190_priv_buf(unsigned char *head);
-extern void free_rtl8190_priv_buf(unsigned char *head);
-#endif
-
 struct kmem_cache *skbuff_head_cache __read_mostly;
 static struct kmem_cache *skbuff_fclone_cache __read_mostly;
 int sysctl_max_skb_frags __read_mostly = MAX_SKB_FRAGS;
@@ -235,11 +225,11 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	 * aligned memory blocks, unless SLUB/SLAB debug is enabled.
 	 * Both skb->head and skb_shared_info are cache line aligned.
 	 */
-#if defined(CONFIG_RTL_819X) || defined(CONFIG_RTL8192CD) || defined(CONFIG_RTL8190) || defined(CONFIG_RTL8192SE)
+#if defined(CONFIG_RTL_819X)
 	size = SKB_DATA_ALIGN(size+RTL_PRIV_DATA_SIZE);
 #else
 	size = SKB_DATA_ALIGN(size);
-#endif
+#endif /* CONFIG_RTL_819X */
 
 	size += SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	data = kmalloc_reserve(size, gfp_mask, node, &pfmemalloc);
@@ -274,34 +264,13 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	skb->mac_header = (typeof(skb->mac_header))~0U;
 	skb->transport_header = (typeof(skb->transport_header))~0U;
 
-#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
-	skb->from_dev = NULL;
-	skb->vlan_member = 0;
-#endif
-
-#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
-	skb->switch_port = NULL;
-#endif
-
 #if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined(CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
 	skb->passThruFlag = 0;
 #endif /* CONFIG_RTL_CUSTOM_PASSTHRU && CONFIG_RTL_VLAN_8021Q && CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG */
 
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST) || defined(CONFIG_RTL_QOS_VLANID_SUPPORT) || defined (CONFIG_RTL_VLAN_8021Q)
+#if defined(CONFIG_RTL_HARDWARE_MULTICAST) || defined (CONFIG_RTL_VLAN_8021Q)
 	skb->srcPort = 0xFFFF;
 	skb->srcVlanId = 0;
-#endif
-
-#if defined(CONFIG_RTL_QOS_8021P_SUPPORT)
-	skb->srcVlanPriority = 0;
-#endif
-
-#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)
-	skb->original_dscp = 0;
-#endif
-
-#if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
-	skb->original_vlanpri = 0;
 #endif
 
 #if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
@@ -346,113 +315,6 @@ nodata:
 	goto out;
 }
 EXPORT_SYMBOL(__alloc_skb);
-
-#if defined(CONFIG_RTL8190_PRIV_SKB) || defined(CONFIG_RTL_ETH_PRIV_SKB)
-struct sk_buff *dev_alloc_8190_skb(unsigned char *data, int size)
-{
-		struct sk_buff *skb;
-	struct skb_shared_info *shinfo;
-
-	struct kmem_cache *cache;
-	cache = skbuff_head_cache;
-	/* Get the HEAD */
-		skb = kmem_cache_alloc(cache, GFP_ATOMIC & ~__GFP_DMA);
-		if (!skb)
-				goto out;
-
-		memset(skb, 0, offsetof(struct sk_buff, truesize));
-		atomic_set(&skb->users, 1);
-		skb->head = data;
-		skb->data = data;
-		skb->tail = data;
-
-	size = SKB_DATA_ALIGN(size+RTL_PRIV_DATA_SIZE+NET_SKB_PAD);
-
-		skb->end  = data + size;
-		skb->truesize = size + sizeof(struct sk_buff);
-
-		/* make sure we initialize shinfo sequentially */
-		shinfo = skb_shinfo(skb);
-		atomic_set(&shinfo->dataref, 1);
-		shinfo->nr_frags  = 0;
-		shinfo->gso_size = 0;
-		shinfo->gso_segs = 0;
-		shinfo->gso_type = 0;
-		shinfo->ip6_frag_id = 0;
-		shinfo->frag_list = NULL;
-
-#ifdef CONFIG_RTK_VOIP_VLAN_ID
-		skb->rx_vlan = 0;
-		skb->rx_wlan = 0;
-		skb->priority = 0;
-#endif
-
-#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
-	skb->from_dev = NULL;
-	skb->vlan_member = 0;
-#endif
-
-#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
-	skb->switch_port = NULL;
-#endif
-
-#if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined (CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
-	skb->passThruFlag = 0;
-#endif
-
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST) ||defined(CONFIG_RTL_QOS_VLANID_SUPPORT)||defined (CONFIG_RTL_VLAN_8021Q)
-	skb->srcPort=0xFFFF;
-	skb->srcVlanId=0;
-#endif
-
-#if	defined(CONFIG_RTL_QOS_8021P_SUPPORT)
-	skb->srcVlanPriority=0;
-#endif
-
-#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)
-	skb->original_dscp=0;
- #endif
-
- #if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
-	skb->original_vlanpri=0;
- #endif
-
-#if defined(CONFIG_NETFILTER_XT_MATCH_PHYPORT) || defined(CONFIG_RTL_FAST_FILTER) || defined(CONFIG_RTL_QOS_PATCH) || defined(CONFIG_RTK_VOIP_QOS)|| defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) ||defined(CONFIG_RTL_MAC_FILTER_CARE_INPORT) ||defined(CONFIG_RTL_HW_QOS_SUPPORT_WLAN)
-	skb->srcPhyPort=0xFF;
-	skb->dstPhyPort=0xFF;
-#endif
-
-#if defined(CONFIG_RTL_VLAN_8021Q)
-	memset(skb->linux_vlan_src_tag, 0, 4);
-#endif
-
-#if defined (CONFIG_RTL_LOCAL_PUBLIC)
-	skb->srcLocalPublicIp=0;
-	skb->fromLocalPublic=0;
-	skb->toLocalPublic=0;
-#endif
-
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT) && defined(CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY)
-	skb->decision_bitmap = 0;
-	memset(skb->mark_ext, 0, sizeof(skb->mark_ext));
-#endif
-#if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
-	skb->inDev=NULL;
-#endif
-
-#ifdef CONFIG_RTK_VOIP_VLAN_ID
-	skb_reserve(skb, RTL_PRIV_DATA_SIZE+4); // for VLAN TAG insertion
-#else
-	skb_reserve(skb, RTL_PRIV_DATA_SIZE);
-#endif
-
-		return skb;
-
-out:
-		return NULL;
-}
-#endif // CONFIG_RTL8190_PRIV_SKB
-
 
 /**
  * __build_skb - build a network buffer
@@ -522,94 +384,18 @@ struct sk_buff *build_skb(void *data, unsigned int frag_size)
 }
 EXPORT_SYMBOL(build_skb);
 
-struct netdev_alloc_cache {
-	struct page_frag	frag;
-	/* we maintain a pagecount bias, so that we dont dirty cache line
-	 * containing page->_count every time we allocate a fragment.
-	 */
-	unsigned int		pagecnt_bias;
-};
-static DEFINE_PER_CPU(struct netdev_alloc_cache, netdev_alloc_cache);
-static DEFINE_PER_CPU(struct netdev_alloc_cache, napi_alloc_cache);
-
-static struct page *__page_frag_refill(struct netdev_alloc_cache *nc,
-				       gfp_t gfp_mask)
-{
-	const unsigned int order = NETDEV_FRAG_PAGE_MAX_ORDER;
-	struct page *page = NULL;
-	gfp_t gfp = gfp_mask;
-
-	if (order) {
-		gfp_mask |= __GFP_COMP | __GFP_NOWARN | __GFP_NORETRY |
-			    __GFP_NOMEMALLOC;
-		page = alloc_pages_node(NUMA_NO_NODE, gfp_mask, order);
-		nc->frag.size = PAGE_SIZE << (page ? order : 0);
-	}
-
-	if (unlikely(!page))
-		page = alloc_pages_node(NUMA_NO_NODE, gfp, 0);
-
-	nc->frag.page = page;
-
-	return page;
-}
-
-static void *__alloc_page_frag(struct netdev_alloc_cache __percpu *cache,
-			       unsigned int fragsz, gfp_t gfp_mask)
-{
-	struct netdev_alloc_cache *nc = this_cpu_ptr(cache);
-	struct page *page = nc->frag.page;
-	unsigned int size;
-	int offset;
-
-	if (unlikely(!page)) {
-refill:
-		page = __page_frag_refill(nc, gfp_mask);
-		if (!page)
-			return NULL;
-
-		/* if size can vary use frag.size else just use PAGE_SIZE */
-		size = NETDEV_FRAG_PAGE_MAX_ORDER ? nc->frag.size : PAGE_SIZE;
-
-		/* Even if we own the page, we do not use atomic_set().
-		 * This would break get_page_unless_zero() users.
-		 */
-		atomic_add(size - 1, &page->_count);
-
-		/* reset page count bias and offset to start of new frag */
-		nc->pagecnt_bias = size;
-		nc->frag.offset = size;
-	}
-
-	offset = nc->frag.offset - fragsz;
-	if (unlikely(offset < 0)) {
-		if (!atomic_sub_and_test(nc->pagecnt_bias, &page->_count))
-			goto refill;
-
-		/* if size can vary use frag.size else just use PAGE_SIZE */
-		size = NETDEV_FRAG_PAGE_MAX_ORDER ? nc->frag.size : PAGE_SIZE;
-
-		/* OK, page count is 0, we can safely set it */
-		atomic_set(&page->_count, size);
-
-		/* reset page count bias and offset to start of new frag */
-		nc->pagecnt_bias = size;
-		offset = size - fragsz;
-	}
-
-	nc->pagecnt_bias--;
-	nc->frag.offset = offset;
-
-	return page_address(page) + offset;
-}
+static DEFINE_PER_CPU(struct page_frag_cache, netdev_alloc_cache);
+static DEFINE_PER_CPU(struct page_frag_cache, napi_alloc_cache);
 
 static void *__netdev_alloc_frag(unsigned int fragsz, gfp_t gfp_mask)
 {
+	struct page_frag_cache *nc;
 	unsigned long flags;
 	void *data;
 
 	local_irq_save(flags);
-	data = __alloc_page_frag(&netdev_alloc_cache, fragsz, gfp_mask);
+	nc = this_cpu_ptr(&netdev_alloc_cache);
+	data = __alloc_page_frag(nc, fragsz, gfp_mask);
 	local_irq_restore(flags);
 	return data;
 }
@@ -629,7 +415,9 @@ EXPORT_SYMBOL(netdev_alloc_frag);
 
 static void *__napi_alloc_frag(unsigned int fragsz, gfp_t gfp_mask)
 {
-	return __alloc_page_frag(&napi_alloc_cache, fragsz, gfp_mask);
+	struct page_frag_cache *nc = this_cpu_ptr(&napi_alloc_cache);
+
+	return __alloc_page_frag(nc, fragsz, gfp_mask);
 }
 
 void *napi_alloc_frag(unsigned int fragsz)
@@ -639,54 +427,9 @@ void *napi_alloc_frag(unsigned int fragsz)
 EXPORT_SYMBOL(napi_alloc_frag);
 
 /**
- *	__alloc_rx_skb - allocate an skbuff for rx
- *	@length: length to allocate
- *	@gfp_mask: get_free_pages mask, passed to alloc_skb
- *	@flags:	If SKB_ALLOC_RX is set, __GFP_MEMALLOC will be used for
- *		allocations in case we have to fallback to __alloc_skb()
- *		If SKB_ALLOC_NAPI is set, page fragment will be allocated
- *		from napi_cache instead of netdev_cache.
- *
- *	Allocate a new &sk_buff and assign it a usage count of one. The
- *	buffer has unspecified headroom built in. Users should allocate
- *	the headroom they think they need without accounting for the
- *	built in space. The built in space is used for optimisations.
- *
- *	%NULL is returned if there is no free memory.
- */
-static struct sk_buff *__alloc_rx_skb(unsigned int length, gfp_t gfp_mask,
-				      int flags)
-{
-	struct sk_buff *skb = NULL;
-	unsigned int fragsz = SKB_DATA_ALIGN(length) +
-			      SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
-
-	if (fragsz <= PAGE_SIZE && !(gfp_mask & (__GFP_WAIT | GFP_DMA))) {
-		void *data;
-
-		if (sk_memalloc_socks())
-			gfp_mask |= __GFP_MEMALLOC;
-
-		data = (flags & SKB_ALLOC_NAPI) ?
-			__napi_alloc_frag(fragsz, gfp_mask) :
-			__netdev_alloc_frag(fragsz, gfp_mask);
-
-		if (likely(data)) {
-			skb = build_skb(data, fragsz);
-			if (unlikely(!skb))
-				put_page(virt_to_head_page(data));
-		}
-	} else {
-		skb = __alloc_skb(length, gfp_mask,
-				  SKB_ALLOC_RX, NUMA_NO_NODE);
-	}
-	return skb;
-}
-
-/**
  *	__netdev_alloc_skb - allocate an skbuff for rx on a specific device
  *	@dev: network device to receive on
- *	@length: length to allocate
+ *	@len: length to allocate
  *	@gfp_mask: get_free_pages mask, passed to alloc_skb
  *
  *	Allocate a new &sk_buff and assign it a usage count of one. The
@@ -696,19 +439,58 @@ static struct sk_buff *__alloc_rx_skb(unsigned int length, gfp_t gfp_mask,
  *
  *	%NULL is returned if there is no free memory.
  */
-struct sk_buff *__netdev_alloc_skb(struct net_device *dev,
-				   unsigned int length, gfp_t gfp_mask)
+struct sk_buff *__netdev_alloc_skb(struct net_device *dev, unsigned int len,
+				   gfp_t gfp_mask)
 {
+	struct page_frag_cache *nc;
+	unsigned long flags;
 	struct sk_buff *skb;
+	bool pfmemalloc;
+	void *data;
 
-	length += NET_SKB_PAD;
-	skb = __alloc_rx_skb(length, gfp_mask, 0);
+	len += NET_SKB_PAD;
 
-	if (likely(skb)) {
-		skb_reserve(skb, NET_SKB_PAD);
-		skb->dev = dev;
+	if ((len > SKB_WITH_OVERHEAD(PAGE_SIZE)) ||
+	    (gfp_mask & (__GFP_DIRECT_RECLAIM | GFP_DMA))) {
+		skb = __alloc_skb(len, gfp_mask, SKB_ALLOC_RX, NUMA_NO_NODE);
+		if (!skb)
+			goto skb_fail;
+		goto skb_success;
 	}
 
+	len += SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
+	len = SKB_DATA_ALIGN(len);
+
+	if (sk_memalloc_socks())
+		gfp_mask |= __GFP_MEMALLOC;
+
+	local_irq_save(flags);
+
+	nc = this_cpu_ptr(&netdev_alloc_cache);
+	data = __alloc_page_frag(nc, len, gfp_mask);
+	pfmemalloc = nc->pfmemalloc;
+
+	local_irq_restore(flags);
+
+	if (unlikely(!data))
+		return NULL;
+
+	skb = __build_skb(data, len);
+	if (unlikely(!skb)) {
+		skb_free_frag(data);
+		return NULL;
+	}
+
+	/* use OR instead of assignment to avoid clearing of bits in mask */
+	if (pfmemalloc)
+		skb->pfmemalloc = 1;
+	skb->head_frag = 1;
+
+skb_success:
+	skb_reserve(skb, NET_SKB_PAD);
+	skb->dev = dev;
+
+skb_fail:
 	return skb;
 }
 EXPORT_SYMBOL(__netdev_alloc_skb);
@@ -716,7 +498,7 @@ EXPORT_SYMBOL(__netdev_alloc_skb);
 /**
  *	__napi_alloc_skb - allocate skbuff for rx in a specific NAPI instance
  *	@napi: napi instance this buffer was allocated for
- *	@length: length to allocate
+ *	@len: length to allocate
  *	@gfp_mask: get_free_pages mask, passed to alloc_skb and alloc_pages
  *
  *	Allocate a new sk_buff for use in NAPI receive.  This buffer will
@@ -726,19 +508,49 @@ EXPORT_SYMBOL(__netdev_alloc_skb);
  *
  *	%NULL is returned if there is no free memory.
  */
-struct sk_buff *__napi_alloc_skb(struct napi_struct *napi,
-				 unsigned int length, gfp_t gfp_mask)
+struct sk_buff *__napi_alloc_skb(struct napi_struct *napi, unsigned int len,
+				 gfp_t gfp_mask)
 {
+	struct page_frag_cache *nc = this_cpu_ptr(&napi_alloc_cache);
 	struct sk_buff *skb;
+	void *data;
 
-	length += NET_SKB_PAD + NET_IP_ALIGN;
-	skb = __alloc_rx_skb(length, gfp_mask, SKB_ALLOC_NAPI);
+	len += NET_SKB_PAD + NET_IP_ALIGN;
 
-	if (likely(skb)) {
-		skb_reserve(skb, NET_SKB_PAD + NET_IP_ALIGN);
-		skb->dev = napi->dev;
+	if ((len > SKB_WITH_OVERHEAD(PAGE_SIZE)) ||
+	    (gfp_mask & (__GFP_DIRECT_RECLAIM | GFP_DMA))) {
+		skb = __alloc_skb(len, gfp_mask, SKB_ALLOC_RX, NUMA_NO_NODE);
+		if (!skb)
+			goto skb_fail;
+		goto skb_success;
 	}
 
+	len += SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
+	len = SKB_DATA_ALIGN(len);
+
+	if (sk_memalloc_socks())
+		gfp_mask |= __GFP_MEMALLOC;
+
+	data = __alloc_page_frag(nc, len, gfp_mask);
+	if (unlikely(!data))
+		return NULL;
+
+	skb = __build_skb(data, len);
+	if (unlikely(!skb)) {
+		skb_free_frag(data);
+		return NULL;
+	}
+
+	/* use OR instead of assignment to avoid clearing of bits in mask */
+	if (nc->pfmemalloc)
+		skb->pfmemalloc = 1;
+	skb->head_frag = 1;
+
+skb_success:
+	skb_reserve(skb, NET_SKB_PAD + NET_IP_ALIGN);
+	skb->dev = napi->dev;
+
+skb_fail:
 	return skb;
 }
 EXPORT_SYMBOL(__napi_alloc_skb);
@@ -786,10 +598,12 @@ static void skb_clone_fraglist(struct sk_buff *skb)
 
 static void skb_free_head(struct sk_buff *skb)
 {
+	unsigned char *head = skb->head;
+
 	if (skb->head_frag)
-		put_page(virt_to_head_page(skb->head));
+		skb_free_frag(head);
 	else
-		kfree(skb->head);
+		kfree(head);
 }
 
 static void skb_release_data(struct sk_buff *skb)
@@ -820,22 +634,7 @@ static void skb_release_data(struct sk_buff *skb)
 	if (shinfo->frag_list)
 		kfree_skb_list(shinfo->frag_list);
 
-#if defined(CONFIG_RTL_ETH_PRIV_SKB)
-	if (is_rtl865x_eth_priv_buf(skb->head)) {
-		free_rtl865x_eth_priv_buf(skb->head);
-	}
-	else
-#endif
-#ifdef CONFIG_RTL8190_PRIV_SKB
-	if (is_rtl8190_priv_buf(skb->head))
-	{
-		free_rtl8190_priv_buf(skb->head);
-	}
-	else
-#endif
-	{
-		skb_free_head(skb);
-	}
+	skb_free_head(skb);
 }
 
 /*
@@ -845,9 +644,6 @@ static void kfree_skbmem(struct sk_buff *skb)
 {
 	struct sk_buff_fclones *fclones;
 
-#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
-	skb->from_dev = NULL;
-#endif
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
 		kmem_cache_free(skbuff_head_cache, skb);
@@ -1044,20 +840,11 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 	CHECK_SKB_FIELD(mark_ext);
 #endif
 
-#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
-	CHECK_SKB_FIELD(from_dev);
-	CHECK_SKB_FIELD(vlan_member);
-#endif
-
-#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
-	CHECK_SKB_FIELD(switch_port);
-#endif
-
 #if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined(CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
 	CHECK_SKB_FIELD(passThruFlag);
 #endif /* CONFIG_RTL_CUSTOM_PASSTHRU && CONFIG_RTL_VLAN_8021Q && CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG */
 
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST) || defined(CONFIG_RTL_QOS_VLANID_SUPPORT) || defined (CONFIG_RTL_VLAN_8021Q)
+#if defined(CONFIG_RTL_HARDWARE_MULTICAST) || defined (CONFIG_RTL_VLAN_8021Q)
 	CHECK_SKB_FIELD(srcPort);
 	//CHECK_SKB_FIELD(srcVlanId);
 #endif
@@ -1067,18 +854,6 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 #if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
 	CHECK_SKB_FIELD(inDev);
-#endif
-
-#if	defined(CONFIG_RTL_QOS_8021P_SUPPORT)
-	//CHECK_SKB_FIELD(srcVlanPriority);
-#endif
-
-#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)
-	CHECK_SKB_FIELD(original_dscp);
-#endif
-
-#if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
-	CHECK_SKB_FIELD(original_vlanpri);
 #endif
 
 #if defined(CONFIG_NETFILTER_XT_MATCH_PHYPORT) || defined(CONFIG_RTL_FAST_FILTER) || defined(CONFIG_RTL_QOS_PATCH) || defined(CONFIG_RTK_VOIP_QOS) || defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) ||defined(CONFIG_RTL_MAC_FILTER_CARE_INPORT) ||defined(CONFIG_RTL_HW_QOS_SUPPORT_WLAN)
@@ -1125,19 +900,11 @@ static struct sk_buff *__skb_clone(struct sk_buff *n, struct sk_buff *skb)
 	C(data);
 	C(truesize);
 
-#if defined(CONFIG_RTL_ISP_MULTI_WAN_SUPPORT)
-	C(from_dev);
-	C(vlan_member);
-#endif
-
-#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
-	C(switch_port);
-#endif
 #if defined(CONFIG_RTL_CUSTOM_PASSTHRU) && defined(CONFIG_RTL_VLAN_8021Q) && defined(CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG)
 	C(passThruFlag);
 #endif /* CONFIG_RTL_CUSTOM_PASSTHRU && CONFIG_RTL_VLAN_8021Q && CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG */
 
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST) || defined(CONFIG_RTL_QOS_VLANID_SUPPORT) || defined (CONFIG_RTL_VLAN_8021Q)
+#if defined(CONFIG_RTL_HARDWARE_MULTICAST) || defined (CONFIG_RTL_VLAN_8021Q)
 	C(srcPort);
 	C(srcVlanId);
 #endif
@@ -1145,18 +912,6 @@ static struct sk_buff *__skb_clone(struct sk_buff *n, struct sk_buff *skb)
 #if defined(CONFIG_RTL_IPTABLES_FAST_PATH)
 	C(inDev);
 #endif
-
-#if	defined(CONFIG_RTL_QOS_8021P_SUPPORT)
-	C(srcVlanPriority);
-#endif
-
-#if defined(CONFIG_RTL_DSCP_IPTABLE_CHECK)
-	C(original_dscp);
- #endif
-
- #if defined(CONFIG_RTL_VLANPRI_IPTABLE_CHECK)
-	C(original_vlanpri);
- #endif
 
 #if defined(CONFIG_NETFILTER_XT_MATCH_PHYPORT) || defined(CONFIG_RTL_FAST_FILTER) || defined(CONFIG_RTL_QOS_PATCH) || defined(CONFIG_RTK_VOIP_QOS)|| defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) ||defined(CONFIG_RTL_MAC_FILTER_CARE_INPORT) ||defined(CONFIG_RTL_HW_QOS_SUPPORT_WLAN)
 	C(srcPhyPort);
@@ -1312,11 +1067,7 @@ static void skb_headers_offset_update(struct sk_buff *skb, int off)
 	skb->inner_mac_header += off;
 }
 
-#if defined(CONFIG_RTL_ETH_PRIV_SKB) || defined(CONFIG_NET_WIRELESS_AGN) || defined(CONFIG_NET_WIRELESS_AG) || defined(CONFIG_WIRELESS)
-void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
-#else
 static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
-#endif
 {
 	__copy_skb_header(new, old);
 
@@ -1505,19 +1256,6 @@ int pskb_expand_head(struct sk_buff *skb, int nhead, int ntail,
 
 		skb_release_data(skb);
 	} else {
-#if defined(CONFIG_RTL_ETH_PRIV_SKB)
-		if (is_rtl865x_eth_priv_buf(skb->head)) {
-			free_rtl865x_eth_priv_buf(skb->head);
-		}
-		else
-#endif
-#ifdef CONFIG_RTL8190_PRIV_SKB
-		if (is_rtl8190_priv_buf(skb->head))
-		{
-			free_rtl8190_priv_buf(skb->head);
-		}
-		else
-#endif
 		skb_free_head(skb);
 	}
 	off = (data + nhead) - skb->head;
@@ -2225,15 +1963,39 @@ static bool __skb_splice_bits(struct sk_buff *skb, struct pipe_inode_info *pipe,
 	return false;
 }
 
+ssize_t skb_socket_splice(struct sock *sk,
+			  struct pipe_inode_info *pipe,
+			  struct splice_pipe_desc *spd)
+{
+	int ret;
+
+	/* Drop the socket lock, otherwise we have reverse
+	 * locking dependencies between sk_lock and i_mutex
+	 * here as compared to sendfile(). We enter here
+	 * with the socket lock held, and splice_to_pipe() will
+	 * grab the pipe inode lock. For sendfile() emulation,
+	 * we call into ->sendpage() with the i_mutex lock held
+	 * and networking will grab the socket lock.
+	 */
+	release_sock(sk);
+	ret = splice_to_pipe(pipe, spd);
+	lock_sock(sk);
+
+	return ret;
+}
+
 /*
  * Map data from the skb to a pipe. Should handle both the linear part,
  * the fragments, and the frag list. It does NOT handle frag lists within
  * the frag list, if such a thing exists. We'd probably need to recurse to
  * handle that cleanly.
  */
-int skb_splice_bits(struct sk_buff *skb, unsigned int offset,
+int skb_splice_bits(struct sk_buff *skb, struct sock *sk, unsigned int offset,
 		    struct pipe_inode_info *pipe, unsigned int tlen,
-		    unsigned int flags)
+		    unsigned int flags,
+		    ssize_t (*splice_cb)(struct sock *,
+					 struct pipe_inode_info *,
+					 struct splice_pipe_desc *))
 {
 	struct partial_page partial[MAX_SKB_FRAGS];
 	struct page *pages[MAX_SKB_FRAGS];
@@ -2246,7 +2008,6 @@ int skb_splice_bits(struct sk_buff *skb, unsigned int offset,
 		.spd_release = sock_spd_release,
 	};
 	struct sk_buff *frag_iter;
-	struct sock *sk = skb->sk;
 	int ret = 0;
 
 	/*
@@ -2269,23 +2030,12 @@ int skb_splice_bits(struct sk_buff *skb, unsigned int offset,
 	}
 
 done:
-	if (spd.nr_pages) {
-		/*
-		 * Drop the socket lock, otherwise we have reverse
-		 * locking dependencies between sk_lock and i_mutex
-		 * here as compared to sendfile(). We enter here
-		 * with the socket lock held, and splice_to_pipe() will
-		 * grab the pipe inode lock. For sendfile() emulation,
-		 * we call into ->sendpage() with the i_mutex lock held
-		 * and networking will grab the socket lock.
-		 */
-		release_sock(sk);
-		ret = splice_to_pipe(pipe, &spd);
-		lock_sock(sk);
-	}
+	if (spd.nr_pages)
+		ret = splice_cb(sk, pipe, &spd);
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(skb_splice_bits);
 
 /**
  *	skb_store_bits - store bits from kernel buffer to skb
@@ -3269,6 +3019,24 @@ int skb_append_datato_frags(struct sock *sk, struct sk_buff *skb,
 	return 0;
 }
 EXPORT_SYMBOL(skb_append_datato_frags);
+
+int skb_append_pagefrags(struct sk_buff *skb, struct page *page,
+			 int offset, size_t size)
+{
+	int i = skb_shinfo(skb)->nr_frags;
+
+	if (skb_can_coalesce(skb, i, page, offset)) {
+		skb_frag_size_add(&skb_shinfo(skb)->frags[i - 1], size);
+	} else if (i < MAX_SKB_FRAGS) {
+		get_page(page);
+		skb_fill_page_desc(skb, i, page, offset, size);
+	} else {
+		return -EMSGSIZE;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(skb_append_pagefrags);
 
 /**
  *	skb_pull_rcsum - pull skb and update receive checksum
@@ -4339,6 +4107,92 @@ int skb_checksum_setup(struct sk_buff *skb, bool recalculate)
 }
 EXPORT_SYMBOL(skb_checksum_setup);
 
+/**
+ * skb_checksum_maybe_trim - maybe trims the given skb
+ * @skb: the skb to check
+ * @transport_len: the data length beyond the network header
+ *
+ * Checks whether the given skb has data beyond the given transport length.
+ * If so, returns a cloned skb trimmed to this transport length.
+ * Otherwise returns the provided skb. Returns NULL in error cases
+ * (e.g. transport_len exceeds skb length or out-of-memory).
+ *
+ * Caller needs to set the skb transport header and free any returned skb if it
+ * differs from the provided skb.
+ */
+static struct sk_buff *skb_checksum_maybe_trim(struct sk_buff *skb,
+					       unsigned int transport_len)
+{
+	struct sk_buff *skb_chk;
+	unsigned int len = skb_transport_offset(skb) + transport_len;
+	int ret;
+
+	if (skb->len < len)
+		return NULL;
+	else if (skb->len == len)
+		return skb;
+
+	skb_chk = skb_clone(skb, GFP_ATOMIC);
+	if (!skb_chk)
+		return NULL;
+
+	ret = pskb_trim_rcsum(skb_chk, len);
+	if (ret) {
+		kfree_skb(skb_chk);
+		return NULL;
+	}
+
+	return skb_chk;
+}
+
+/**
+ * skb_checksum_trimmed - validate checksum of an skb
+ * @skb: the skb to check
+ * @transport_len: the data length beyond the network header
+ * @skb_chkf: checksum function to use
+ *
+ * Applies the given checksum function skb_chkf to the provided skb.
+ * Returns a checked and maybe trimmed skb. Returns NULL on error.
+ *
+ * If the skb has data beyond the given transport length, then a
+ * trimmed & cloned skb is checked and returned.
+ *
+ * Caller needs to set the skb transport header and free any returned skb if it
+ * differs from the provided skb.
+ */
+struct sk_buff *skb_checksum_trimmed(struct sk_buff *skb,
+				     unsigned int transport_len,
+				     __sum16(*skb_chkf)(struct sk_buff *skb))
+{
+	struct sk_buff *skb_chk;
+	unsigned int offset = skb_transport_offset(skb);
+	__sum16 ret;
+
+	skb_chk = skb_checksum_maybe_trim(skb, transport_len);
+	if (!skb_chk)
+		goto err;
+
+	if (!pskb_may_pull(skb_chk, offset))
+		goto err;
+
+	skb_pull_rcsum(skb_chk, offset);
+	ret = skb_chkf(skb_chk);
+	skb_push_rcsum(skb_chk, offset);
+
+	if (ret)
+		goto err;
+
+	return skb_chk;
+
+err:
+	if (skb_chk && skb_chk != skb)
+		kfree_skb(skb_chk);
+
+	return NULL;
+
+}
+EXPORT_SYMBOL(skb_checksum_trimmed);
+
 void __skb_warn_lro_forwarding(const struct sk_buff *skb)
 {
 	net_warn_ratelimited("%s: received packets cannot be forwarded while LRO is enabled\n",
@@ -4646,15 +4500,16 @@ int skb_vlan_push(struct sk_buff *skb, __be16 vlan_proto, u16 vlan_tci)
 		__skb_push(skb, offset);
 		err = __vlan_insert_tag(skb, skb->vlan_proto,
 					skb_vlan_tag_get(skb));
-		if (err)
+		if (err) {
+			__skb_pull(skb, offset);
 			return err;
+		}
+
 		skb->protocol = skb->vlan_proto;
 		skb->mac_len += VLAN_HLEN;
-		__skb_pull(skb, offset);
 
-		if (skb->ip_summed == CHECKSUM_COMPLETE)
-			skb->csum = csum_add(skb->csum, csum_partial(skb->data
-					+ (2 * ETH_ALEN), VLAN_HLEN, 0));
+		skb_postpush_rcsum(skb, skb->data + (2 * ETH_ALEN), VLAN_HLEN);
+		__skb_pull(skb, offset);
 	}
 	__vlan_hwaccel_put_tag(skb, vlan_proto, vlan_tci);
 	return 0;
@@ -4693,7 +4548,7 @@ struct sk_buff *alloc_skb_with_frags(unsigned long header_len,
 		return NULL;
 
 	gfp_head = gfp_mask;
-	if (gfp_head & __GFP_WAIT)
+	if (gfp_head & __GFP_DIRECT_RECLAIM)
 		gfp_head |= __GFP_REPEAT;
 
 	*errcode = -ENOBUFS;
@@ -4708,7 +4563,7 @@ struct sk_buff *alloc_skb_with_frags(unsigned long header_len,
 
 		while (order) {
 			if (npages >= 1 << order) {
-				page = alloc_pages((gfp_mask & ~__GFP_WAIT) |
+				page = alloc_pages((gfp_mask & ~__GFP_DIRECT_RECLAIM) |
 						   __GFP_COMP |
 						   __GFP_NOWARN |
 						   __GFP_NORETRY,

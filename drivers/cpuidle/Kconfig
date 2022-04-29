@@ -50,6 +50,6 @@ config ARCH_NEEDS_CPU_IDLE_COUPLED
 endmenu
 
 config ARM_CPUIDLE_RTK
-    bool
-    default y
-    depends on HOTPLUG_CPU
+	bool
+	default y
+	depends on HOTPLUG_CPU

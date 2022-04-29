@@ -1,14 +1,3 @@
-/*
- * hdmirx_video_dev.c - RTK hdmi rx driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include "hdmirx_video_dev.h"
 
 #include "v4l2_hdmi_dev.h"
@@ -26,13 +15,20 @@
 
 int hdmi_stream_on = 0;
 int hdmi_timestamp_mode = 0;// 0:system time, 1:90KHz timer
-struct physical_addr_map phy_buffer;
 
 struct hdmirx_format_desc {
 	char *name;
 	__u32 fcc;
 };
 const struct hdmirx_format_desc hdmi_rx_fmts[] = {
+	{
+		.name		= "RAW8",
+		.fcc		= V4L2_PIX_FMT_SGRBG8 ,
+	},
+	{
+		.name		= "RAW10",
+		.fcc		= V4L2_PIX_FMT_SGRBG10,
+	},
 	{
 		.name		= "Y/CbCr 4:2:2",
 		.fcc		= V4L2_PIX_FMT_NV16,
@@ -46,12 +42,12 @@ const struct hdmirx_format_desc hdmi_rx_fmts[] = {
 		.fcc		= V4L2_PIX_FMT_NV21,
 	},
 	{
-		.name		= "RGBA",
+		.name		= "ARGB",
 		.fcc		= V4L2_PIX_FMT_RGB32,
 	},
 	{
-		.name		= "ARGB",
-		.fcc		= V4L2_PIX_FMT_ARGB32,
+		.name		= "BGRA",
+		.fcc		= V4L2_PIX_FMT_BGR32,
 	}
 };
 #define V4L2_HDMI_RX_SUPPORT_FMT_NUM  sizeof(hdmi_rx_fmts)/sizeof(struct hdmirx_format_desc)
@@ -62,6 +58,7 @@ extern HDMI_INFO_T hdmi;
 extern HDMIRX_IOCTL_STRUCT_T hdmi_ioctl_struct;
 extern const HDMI_VIC_TABLE_T hdmi_vic_table[];
 
+extern unsigned char drvif_Hdmi_AVI_VIC(void);
 extern char Hdmi_IsbReady(void);
 extern int Hdmi_get_b_value(void);
 extern unsigned int rx_pitch_measurement(unsigned int output_h, MIPI_OUT_COLOR_SPACE_T output_color);
@@ -71,12 +68,6 @@ extern void HdmiRx_enable_hdcp2p2(unsigned char *key);
 #endif
 #if HDMI_REPEATER_SUPPORT
 void Set_Hdmi_repeater_mode(int enable);
-#endif
-#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-extern unsigned char TA_Load_flag ;
-#endif
-#ifdef CONFIG_RTK_HDCPRX_1P4_TEE
-extern unsigned char TA_HDCP1p4_Load_flag;
 #endif
 /*======================================================*/
 
@@ -89,12 +80,12 @@ MIPI_OUT_COLOR_SPACE_T V4L2_format_parse(unsigned int pixelformat)
 		case V4L2_PIX_FMT_NV21://Main
 			mipi_top.uv_seq = UV_NV21;
 			return OUT_8BIT_YUV420;
-        case V4L2_PIX_FMT_RGB32:/* 4BGR 0x34424752 */
-			return OUT_ABGR;
-        case V4L2_PIX_FMT_ARGB32:/* 42AB 0x34324142 */
-			return OUT_BGRA;
-		case V4L2_PIX_FMT_YUYV:
-			return OUT_8BIT_YUV422;
+        //case V4L2_PIX_FMT_RGB32:
+                //return OUT_BGRA;// byte 0~3: ARGB
+        case V4L2_PIX_FMT_BGR32:
+            return OUT_ARGB;// byte 0~3: BGRA, for HAL_PIXEL_FORMAT_BGRA_8888
+        //case V4L2_PIX_FMT_YUYV:
+            //return OUT_8BIT_YUV422;
         default:
             HDMIRX_ERROR("Unsupported pixel format: %c%c%c%c", FCC2ASCII(pixelformat));
             return OUT_UNKNOW;
@@ -108,11 +99,7 @@ int out_color_to_bpp(MIPI_OUT_COLOR_SPACE_T output_color)
 	switch(output_color){
 		case OUT_8BIT_YUV420://V4L2_PIX_FMT_NV12, V4L2_PIX_FMT_NV21
 			return 12;
-		case OUT_ARGB:
-			return 32;
-		case OUT_8BIT_YUV422:
-			return 16;
-		case OUT_10BIT_YUV422:
+		case OUT_ARGB://V4L2_PIX_FMT_BGR32
 			return 32;
 		default://all other ARGB formats
 			return 32;
@@ -139,21 +126,6 @@ static long v4l2_hdmi_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 
 			cap->version = LINUX_VERSION_CODE;
 			cap->capabilities = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
-
-#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-			if (TA_Load_flag ==0)
-			{
-				HDMIRX_INFO("CONFIG_RTK_HDCPRX_2P2_TEE is on, do hdcp init");
-				Hdmi_HdcpInit();
-			}
-#endif
-#ifdef CONFIG_RTK_HDCPRX_1P4_TEE
-			if (TA_HDCP1p4_Load_flag ==0)
-			{
-				HDMIRX_INFO("CONFIG_RTK_HDCPRX_1P4_TEE is on, do hdcp init");
-				Hdmi_HdcpInit();
-			}
-#endif
 			break;
 		}
 		case VIDIOC_CROPCAP:
@@ -238,18 +210,14 @@ static long v4l2_hdmi_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 
 			fival->type = V4L2_FRMIVAL_TYPE_DISCRETE;
 			fival->discrete.numerator = 1;
-			if (mipi_top.src_sel == 1) {
+			if(mipi_top.src_sel == 1)
+			{
 				unsigned int vic;
-
 				vic = drvif_Hdmi_AVI_VIC();
-				if (vic != 0) {
-					if(hdmi_vic_table[vic].interlace)
-						fival->discrete.denominator = hdmi_vic_table[vic].fps/2;
-					else
-						fival->discrete.denominator = hdmi_vic_table[vic].fps;
-				} else {
-					fival->discrete.denominator = hdmi.tx_timing.dvi_fps;
-				}
+				if(hdmi_vic_table[vic].interlace)
+					fival->discrete.denominator = hdmi_vic_table[vic].fps/2;
+				else
+					fival->discrete.denominator = hdmi_vic_table[vic].fps;
 			}
 			else
 				fival->discrete.denominator = 60;
@@ -339,8 +307,6 @@ static long v4l2_hdmi_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 			struct v4l2_buffer *buf = arg;
 
 			//HDMIRX_INFO(" ioctl VIDIOC_QBUF");
-			if (phy_buffer.enable)
-				phy_buffer.phys[buf->index] = buf->reserved2;
 
 			ret = vb2_qbuf(&dev->vb_hdmidq, buf);
 
@@ -402,11 +368,6 @@ static long v4l2_hdmi_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 			struct rx_hdcp_key *rx_key;
 			HDMIRX_INFO("ioctl VIDIOC_ENABLE_RX_HDCP\n");
 
-#ifndef CONFIG_RTK_HDCP_1x
-			HDMIRX_ERROR("Enable HDCP fail because HDCP TX is disabled");
-			break;
-#endif
-
 			rx_key = arg;
 
 #ifdef CONFIG_RTK_HDCPRX_2P2
@@ -446,20 +407,6 @@ static long v4l2_hdmi_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 			HDMIRX_INFO("ioctl VIDIOC_SET_EDID_TABLE\n");
 
 			HdmiRx_ChangeCurrentEDID(arg);
-
-			break;
-		}
-		case VIDIOC_SET_PHY_ADDR_MODE:
-		{
-			int *type = arg;
-
-			HDMIRX_INFO("ioctl VIDIOC_SET_PHY_ADDR_MODE\n");
-
-			phy_buffer.enable = (int)*type;
-			if (phy_buffer.enable == 1)
-				HDMIRX_INFO("Enable physical addr map");
-			else
-				HDMIRX_INFO("Disable physical addr map");
 
 			break;
 		}
@@ -578,11 +525,10 @@ static ssize_t show_hdmirx_video_info(struct device *cd, struct device_attribute
 		else
 			vic = 0;
 
-		if (vic != 0)
+		if(vic<=107)
 			fps = hdmi_vic_table[vic].fps;
 		else
-			fps = hdmi.tx_timing.dvi_fps;
-
+			fps = 60;
 	}
 
 	//pr_info("%s: %d %d %d %dx%d %u %d\n", __func__, status, mode, color, width, height, vic, fps);

@@ -228,6 +228,8 @@ struct usb_function {
 	struct list_head		list;
 	DECLARE_BITMAP(endpoints, 32);
 	const struct usb_function_instance *fi;
+
+	unsigned int		bind_deactivated:1;
 };
 
 int usb_add_function(struct usb_configuration *, struct usb_function *);
@@ -615,14 +617,14 @@ void usb_remove_function(struct usb_configuration *c, struct usb_function *f);
 
 /* messaging utils */
 #define DBG(d, fmt, args...) \
-	dev_dbg(((d)&&(d)->gadget)?&(d)->gadget->dev:NULL , fmt , ## args)
+	dev_dbg(&(d)->gadget->dev , fmt , ## args)
 #define VDBG(d, fmt, args...) \
-	dev_vdbg(((d)&&(d)->gadget)?&(d)->gadget->dev:NULL , fmt , ## args)
+	dev_vdbg(&(d)->gadget->dev , fmt , ## args)
 #define ERROR(d, fmt, args...) \
-	dev_err(((d)&&(d)->gadget)?&(d)->gadget->dev:NULL , fmt , ## args)
+	dev_err(&(d)->gadget->dev , fmt , ## args)
 #define WARNING(d, fmt, args...) \
-	dev_warn(((d)&&(d)->gadget)?&(d)->gadget->dev:NULL , fmt , ## args)
+	dev_warn(&(d)->gadget->dev , fmt , ## args)
 #define INFO(d, fmt, args...) \
-	dev_info(((d)&&(d)->gadget)?&(d)->gadget->dev:NULL , fmt , ## args)
+	dev_info(&(d)->gadget->dev , fmt , ## args)
 
 #endif	/* __LINUX_USB_COMPOSITE_H */

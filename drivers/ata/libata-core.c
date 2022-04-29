@@ -76,15 +76,11 @@
 #include "libata.h"
 #include "libata-transport.h"
 
-#ifdef CONFIG_AHCI_RTK
-extern struct task_struct *rtk_sata_dev_task;
-extern int RTK_SATA_DEV_FLAG;
-extern void rtk_scsi_dev_rescan(struct work_struct *work);
-extern void start_link(int port);
-#endif /* CONFIG_AHCI_RTK */
+#ifdef CONFIG_ARCH_RTD129X
+#include "ahci.h"
+#endif
 
 /* debounce timing parameters in msecs { interval, duration, timeout } */
-
 const unsigned long sata_deb_timing_normal[]		= {   5,  100, 2000 };
 const unsigned long sata_deb_timing_hotplug[]		= {  25,  500, 2000 };
 const unsigned long sata_deb_timing_long[]		= { 100, 2000, 5000 };
@@ -2726,12 +2722,6 @@ static void sata_print_link_status(struct ata_link *link)
 		tmp = (sstatus >> 4) & 0xf;
 		ata_link_info(link, "SATA link up %s (SStatus %X SControl %X)\n",
 			      sata_spd_string(tmp), sstatus, scontrol);
-#ifdef CONFIG_AHCI_RTK
-		if(rtk_sata_dev_task != NULL) {
-			if(RTK_SATA_DEV_FLAG==1)
-				queue_delayed_work(system_long_wq, &link->ap->scsi_userscan_task, 50);
-		}
-#endif /*CONFIG_AHCI_RTK*/
 	} else {
 		ata_link_info(link, "SATA link down (SStatus %X SControl %X)\n",
 			      sstatus, scontrol);
@@ -3533,9 +3523,6 @@ int sata_link_debounce(struct ata_link *link, const unsigned long *params,
 	unsigned long last_jiffies, t;
 	u32 last, cur;
 	int rc;
-#ifdef CONFIG_AHCI_RTK
-//	int sens_change=0, ret;
-#endif
 
 	t = ata_deadline(jiffies, params[2]);
 	if (time_before(t, deadline))
@@ -3556,29 +3543,8 @@ int sata_link_debounce(struct ata_link *link, const unsigned long *params,
 
 		/* DET stable? */
 		if (cur == last) {
-#ifdef CONFIG_AHCI_RTK
-#if 0
-			if (cur == 1 || cur == 0) {
-				if(time_before(jiffies, ata_deadline(last_jiffies, duration)))
-					continue;
-				else if(sens_change==0) {
-					ret = change_rx_sensitivity(link->ap->print_id);
-					if(ret==0)
-						last_jiffies = jiffies;
-					sens_change = 1;
-					continue;
-				}
-				if(time_before(jiffies, deadline))
-					continue;
-			}
-#else
 			if (cur == 1 && time_before(jiffies, deadline))
 				continue;
-#endif
-#else
-			if (cur == 1 && time_before(jiffies, deadline))
-				continue;
-#endif
 			if (time_after(jiffies,
 				       ata_deadline(last_jiffies, duration)))
 				return 0;
@@ -3642,9 +3608,6 @@ int sata_link_resume(struct ata_link *link, const unsigned long *params,
 			return rc;
 	} while ((scontrol & 0xf0f) != 0x300 && --tries);
 
-#ifdef CONFIG_AHCI_RTK
-	start_link(link->ap->port_no);
-#endif
 	if ((scontrol & 0xf0f) != 0x300) {
 		ata_link_warn(link, "failed to resume link (SControl %X)\n",
 			     scontrol);
@@ -3681,7 +3644,7 @@ int sata_link_resume(struct ata_link *link, const unsigned long *params,
  *	EH context.
  *
  *	RETURNS:
- *	0 on succes, -errno otherwise.
+ *	0 on success, -errno otherwise.
  */
 int sata_link_scr_lpm(struct ata_link *link, enum ata_lpm_policy policy,
 		      bool spm_wakeup)
@@ -4800,6 +4763,7 @@ void swap_buf_le16(u16 *buf, unsigned int buf_words)
 /**
  *	ata_qc_new_init - Request an available ATA command, and initialize it
  *	@dev: Device from whom we request an available command structure
+ *	@tag: tag
  *
  *	LOCKING:
  *	None.
@@ -5574,9 +5538,31 @@ void ata_dev_init(struct ata_device *dev)
 	/* SATA spd limit is bound to the attached device, reset together */
 	link->sata_spd_limit = link->hw_sata_spd_limit;
 	link->sata_spd = 0;
-#ifdef CONFIG_AHCI_RTK
-	sata_set_spd(link);
+
+#ifdef CONFIG_ARCH_RTD129X
+	if(sata_scr_valid(link)) {
+		bool set_spd = true;
+		struct ata_host *host = ap->host;
+		struct ahci_host_priv *hpriv = host->private_data;
+		void __iomem *mmio = hpriv->mmio;
+
+#ifdef CONFIG_PCIE1_RTD1295
+		if (is_pcie1_memory((u64)mmio)) {
+			set_spd = false;
+		}
 #endif
+
+#ifdef CONFIG_PCIE2_RTD1295
+		if (is_pcie2_memory((u64)mmio)) {
+			set_spd = false;
+		}
+#endif
+		if (set_spd) {
+			sata_set_spd(link);
+		}
+	}
+#endif
+
 	/* High bits of dev->flags are used to record warm plug
 	 * requests which occur asynchronously.  Synchronize using
 	 * host lock.
@@ -5703,10 +5689,6 @@ struct ata_port *ata_port_alloc(struct ata_host *host)
 
 	mutex_init(&ap->scsi_scan_mutex);
 	INIT_DELAYED_WORK(&ap->hotplug_task, ata_scsi_hotplug);
-#ifdef CONFIG_AHCI_RTK
-	ap->hotplug_flag = 0;
-	INIT_DELAYED_WORK(&ap->scsi_userscan_task, rtk_scsi_dev_rescan);
-#endif	
 	INIT_WORK(&ap->scsi_rescan_task, ata_scsi_dev_rescan);
 	INIT_LIST_HEAD(&ap->eh_done_q);
 	init_waitqueue_head(&ap->eh_wait_q);
@@ -6508,12 +6490,7 @@ static int __init ata_parse_force_one(char **cur,
 				      struct ata_force_ent *force_ent,
 				      const char **reason)
 {
-	/* FIXME: Currently, there's no way to tag init const data and
-	 * using __initdata causes build failure on some versions of
-	 * gcc.  Once __initdataconst is implemented, add const to the
-	 * following structure.
-	 */
-	static struct ata_force_param force_tbl[] __initdata = {
+	static const struct ata_force_param force_tbl[] __initconst = {
 		{ "40c",	.cbl		= ATA_CBL_PATA40 },
 		{ "80c",	.cbl		= ATA_CBL_PATA80 },
 		{ "short40c",	.cbl		= ATA_CBL_PATA40_SHORT },
@@ -6524,6 +6501,8 @@ static int __init ata_parse_force_one(char **cur,
 		{ "3.0Gbps",	.spd_limit	= 2 },
 		{ "noncq",	.horkage_on	= ATA_HORKAGE_NONCQ },
 		{ "ncq",	.horkage_off	= ATA_HORKAGE_NONCQ },
+		{ "noncqtrim",	.horkage_on	= ATA_HORKAGE_NO_NCQ_TRIM },
+		{ "ncqtrim",	.horkage_off	= ATA_HORKAGE_NO_NCQ_TRIM },
 		{ "dump_id",	.horkage_on	= ATA_HORKAGE_DUMP_ID },
 		{ "pio0",	.xfer_mask	= 1 << (ATA_SHIFT_PIO + 0) },
 		{ "pio1",	.xfer_mask	= 1 << (ATA_SHIFT_PIO + 1) },

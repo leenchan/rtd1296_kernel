@@ -6,11 +6,6 @@
 * Abstract :
 * Author : Hyking Liu (Hyking_liu@realsil.com.tw)
 * -------------------------------------------------------
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
 */
 #include <net/rtl/rtl_types.h>
 #include <net/rtl/rtl_glue.h>
@@ -7525,7 +7520,7 @@ int32 napt_show(struct seq_file *s, void *v)
 			continue;
 
 		if (asic_tcpudp.isValid == 1 || asic_tcpudp.isDedicated == 1) {
-/* len += seq_printf(s, "[%4d] %d.%d.%d.%d:%d {V,D}={%d,%d} col1(%d) col2(%d) static(%d) tcp(%d)\n", */
+/* seq_printf(s, "[%4d] %d.%d.%d.%d:%d {V,D}={%d,%d} col1(%d) col2(%d) static(%d) tcp(%d)\n", */
 /* idx, */
 /* asic_tcpudp.insideLocalIpAddr>>24, (asic_tcpudp.insideLocalIpAddr&0x00ff0000) >> 16, */
 /* (asic_tcpudp.insideLocalIpAddr&0x0000ff00)>>8, asic_tcpudp.insideLocalIpAddr&0x000000ff, */

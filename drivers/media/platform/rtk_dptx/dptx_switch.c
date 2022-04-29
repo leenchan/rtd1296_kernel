@@ -23,7 +23,6 @@
 static irqreturn_t rtk_hpd_isr(int irq, void *dev_id)
 {
 	struct rtk_dptx_switch *swdev = (struct rtk_dptx_switch *)dev_id;
-
 	schedule_delayed_work(&swdev->work, 1);
 
 	return IRQ_HANDLED;
@@ -50,6 +49,7 @@ static void dptx_switch_work_func(struct work_struct *work)
 	unsigned char *block;
 	struct edid *edid;
 
+	dptx_dev->isr_signal = true;
 	swdev->state = gpio_get_value(swdev->hpd_gpio);
 	if(swdev->state!=switch_get_state(&swdev->sw)) {
 		DPTX_ERR("%s\n", swdev->state?"plugged in":"pulled out");
@@ -70,12 +70,10 @@ static void dptx_switch_work_func(struct work_struct *work)
 			memset(&dptx_dev->cap.sink_cap, 0, sizeof(struct sink_capabilities_t));
 			dptx_add_edid_modes(edid, &dptx_dev->cap.sink_cap);
 			dptx_edid_to_eld(edid, &dptx_dev->cap.sink_cap);
-#ifdef SELF_TEST
-			dptx_config_tv_system(&dptx_dev->hwinfo);
-#endif
 		}
 
 		switch_set_state(&swdev->sw, swdev->state);
+		wake_up_interruptible(&dptx_dev->hpd_wait);
 	}
 }
 
@@ -98,7 +96,7 @@ int rtk_dptx_switch_resume(struct rtk_dptx_device *dptx_dev)
 	struct rtk_dptx_switch *swdev;
 
 	swdev = &dptx_dev->swdev;
-	enable_irq(swdev->hpd_irq);
+	disable_irq(swdev->hpd_irq);
 	schedule_delayed_work(&swdev->work, 10);
 
 	return 0;
@@ -120,7 +118,7 @@ int register_dptx_switch(struct rtk_dptx_device *dptx_dev)
 	INIT_DELAYED_WORK(&swdev->work, dptx_switch_work_func);
 
 	hpd = of_get_child_by_name(dptx_dev->dev->of_node, "dp_hpd");
-	
+
 	swdev->hpd_gpio = of_get_gpio(hpd, 0);
 	if(swdev->hpd_gpio < 0) {
 		DPTX_ERR("[%s] could not get gpio from of \n", __FUNCTION__);
@@ -143,7 +141,7 @@ int register_dptx_switch(struct rtk_dptx_device *dptx_dev)
 		DPTX_ERR("[%s] request irq fail\n", __FUNCTION__);
 		return -1;
 	}
-		
+
 	switch_set_state(&swdev->sw, 0);
 	schedule_delayed_work(&swdev->work, 200);
 

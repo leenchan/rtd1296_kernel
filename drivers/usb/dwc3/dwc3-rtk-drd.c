@@ -1,8 +1,6 @@
 /**
  * dwc3-rtk-drd.c - Realtek DWC3 Specific Glue layer
  *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -111,6 +109,7 @@ err0:
 	dev_info(dwc->dev, "%s END....", __func__);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(dwc3_drd_to_host);
 
 int dwc3_drd_to_device(struct dwc3 *dwc)
 {
@@ -184,6 +183,7 @@ err0:
 	dev_info(dwc->dev, "%s END....", __func__);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(dwc3_drd_to_device);
 
 int dwc3_drd_to_stop_all(struct dwc3 *dwc)
 {
@@ -202,3 +202,4 @@ int dwc3_drd_to_stop_all(struct dwc3 *dwc)
 	wmb();
 	return ret;
 }
+EXPORT_SYMBOL_GPL(dwc3_drd_to_stop_all);

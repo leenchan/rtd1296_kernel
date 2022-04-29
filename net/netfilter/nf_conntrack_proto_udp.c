@@ -45,10 +45,9 @@ unsigned int udp_get_timeouts_by_state(enum udp_conntrack state, void *ct_or_cp,
 	}
 	else {
 		struct ip_vs_conn *cp = (struct ip_vs_conn *)ct_or_cp;
-		net = ip_vs_conn_net(cp);
+		net = cp->ipvs->net;
 	}
 	unsigned int *udp_timeouts_run = udp_get_timeouts(net);
-	//net_warn_ratelimited("--%s--%d-- udp_timeouts_run[%d] = %d\n",__FUNCTION__,__LINE__,state,udp_timeouts_run[state]);
 	return udp_timeouts_run[state];
 }
 #else
@@ -66,6 +65,7 @@ static inline struct nf_udp_net *udp_pernet(struct net *net)
 
 static bool udp_pkt_to_tuple(const struct sk_buff *skb,
 			     unsigned int dataoff,
+			     struct net *net,
 			     struct nf_conntrack_tuple *tuple)
 {
 	const struct udphdr *hp;
@@ -116,22 +116,14 @@ static int udp_packet(struct nf_conn *ct,
 	/* If we've seen traffic both ways, this is some kind of UDP
 	   stream.  Extend timeout. */
 	if (test_bit(IPS_SEEN_REPLY_BIT, &ct->status)) {
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-		nf_ct_refresh_acct_udp(ct, ctinfo, skb,timeouts[UDP_CT_REPLIED], "ASSURED"); // assured
-#else
 		nf_ct_refresh_acct(ct, ctinfo, skb,
 				   timeouts[UDP_CT_REPLIED]);
-#endif
 		/* Also, more likely to be important, and not a probe */
 		if (!test_and_set_bit(IPS_ASSURED_BIT, &ct->status))
 			nf_conntrack_event_cache(IPCT_ASSURED, ct);
 	} else {
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-		nf_ct_refresh_acct_udp(ct, ctinfo, skb,timeouts[UDP_CT_UNREPLIED], "UNREPLIED"); // unreplied
-#else
 		nf_ct_refresh_acct(ct, ctinfo, skb,
 				   timeouts[UDP_CT_UNREPLIED]);
-#endif
 	}
 	return NF_ACCEPT;
 }

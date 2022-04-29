@@ -10,9 +10,6 @@
 
 H2_gKsvInfo gKsvInfo;
 
-#ifdef CONFIG_RTK_HDMITX
-extern int hdmitx_switch_get_state(void);
-#endif
 #ifdef TEST_HDCP2_2_RX_DRIVER
 /**
  * Interface definition / prototypes
@@ -27,11 +24,7 @@ extern int hdmitx_switch_get_state(void);
 unsigned char global_certRx[CERT_RX_SIZE] = {0};
 unsigned char global_kprivRx[KPRIVRX_SIZE] = {0};
  
- //HDCP2.2 repeater  add
-extern H2_RepeaterAuthSendRxIdList_PayLoad g_repeater_auth_rx_payload;
-extern unsigned char bhdcp_repeater_get_state ;
-extern unsigned char Repeater_clear_repeater_bit;
-unsigned char global_vprime[V_SIZE] = {0};
+
 /**
  * Attached KSVs
  */
@@ -44,7 +37,6 @@ unsigned char global_vprime[V_SIZE] = {0};
 	unsigned char txcaps[TXCAPS_SIZE];
 	unsigned char rxcaps[RXCAPS_SIZE];
 	unsigned char ks[KS_SIZE];
-	unsigned char vprime[32];
 } SessionSecrets_Rx;
 
 /**
@@ -212,33 +204,13 @@ H2status hdcp2_Rx_GetTxcaps(H2uint8 *txcaps, H2uint32 ulSize)
 
 H2status hdcp2_Rx_GenRxcaps(void)
 {
-	unsigned char rxcaps[3];
-//bhdcp_repeater_get_state = 0x1;
-if(bhdcp_repeater_get_state ==0x1)
-{
-		#ifdef CONFIG_RTK_HDMITX
-		if(hdmitx_switch_get_state()==1)//Wait HDMI TX
-		{
-			rxcaps[2] = 1;
-		}
-		else
-		#endif
-		{
-		       bhdcp_repeater_get_state =0;
-			rxcaps[2] = 0;
-    }
-       }
-else
-{
-    rxcaps[2] = 0;
-		//pr_err("hdcp2_Rx_GenRxcaps repeater =0");
- }
-
-//       rxcaps[2] = 1;
-rxcaps[1] = 0;
-rxcaps[0] = 2;
-memcpy(SessionSecrets_Rx.rxcaps, rxcaps, sizeof(SessionSecrets_Rx.rxcaps));
-return H2_OK;
+	unsigned rxcaps[3];
+	rxcaps[2] = 0;
+	rxcaps[2] |= 0;
+	rxcaps[1] = 0;
+	rxcaps[0] = 2;
+	memcpy(SessionSecrets_Rx.rxcaps, rxcaps, sizeof(SessionSecrets_Rx.rxcaps));
+	return H2_OK;
 }
 
 H2status hdcp2_Rx_GetRxcaps(H2uint8 *rxcaps, H2uint32 ulSize)
@@ -592,72 +564,29 @@ end_proc:
 	return H2_OK;
 }
 
-H2status hdcp2_Rx_CalMPrime(unsigned char *bstream_id_type, unsigned char *bseq_num_M, unsigned char *Mprime)
-{
-
-    #if 0
-	H2uint8 Kd_tmp[KD_SIZE] = {0x4f,0x14,0x8d,0x11,0xdd,0x49,0x18,0x10,0x6f,0xab,0x16,0x6f,
-							0xf6,0xfd,0xa6,0xed,0xb5,0x02,0x0c,0x0d,0xf2,0x81,0xba,0xdf,
-							0xe4,0x19,0x77,0xfa,0xd0,0xac,0x61,0x17 };
-
-	H2uint8 bstream_id_T[2] = {0,0x1};
-	H2uint8 bseq_num_M_T[3] = {0,0,0};
-	#else
-
-	H2uint8 Kd_tmp[KD_SIZE] = {0};
-	spu_GetKD(Kd_tmp);
-	#endif
-    Compute_Mprime_22(Kd_tmp, bstream_id_type, bseq_num_M, Mprime);
-	memset(Kd_tmp, 0, sizeof(Kd_tmp));
-}
 /**
  * Compute and return vPrime.
  */
-#define test_Vprime  0
-H2status hdcp2_Rx_CalvPrime(unsigned char *receiver_id, unsigned char *temp_rxinfor, unsigned char *temp_seq_num, unsigned char *Vprime)
-{
-#if test_Vprime
-H2uint8 Kd_tmp[KD_SIZE] = {0x4f,0x14,0x8d,0x11,0xdd,0x49,0x18,0x10,0x6f,0xab,0x16,0x6f,
-							0xf6,0xfd,0xa6,0xed,0xb5,0x02,0x0c,0x0d,0xf2,0x81,0xba,0xdf,
-							0xe4,0x19,0x77,0xfa,0xd0,0xac,0x61,0x17 };
-
-#else
-	H2uint8 Kd_tmp[KD_SIZE] = {0};
-	H2uint8 rev_receive_ID[5]={0};
-	spu_GetKD(Kd_tmp);
-#endif
-
-#if test_Vprime
-	Compute_Vprime_22(Kd_tmp, receiver_ID_LIST, global_rxinfo, global_seq_num_V, global_Vprime);
-	spu_print(global_Vprime, 32);
-	pr_err("TEST \n");
-#endif
-
-	Compute_Vprime_22(Kd_tmp, receiver_id, temp_rxinfor, temp_seq_num, Vprime);
-	//spu_print(Vprime, 32);
-	memset(Kd_tmp, 0, sizeof(Kd_tmp));
-}
-
-
 H2status hdcp2_Rx_GetvPrime(H2uint8 *pOut, H2uint32 ulSize)
 {
 	H2status rc = H2_ERROR;
-	memcpy(pOut, &SessionSecrets_Rx.vprime, sizeof(SessionSecrets_Rx.vprime));
+	static H2uint8 vPrimeBuff[5 * MAX_DEVICECOUNT + 4];
+	H2uint8 Kd_tmp[KD_SIZE];
+
+	memcpy(vPrimeBuff, gKsvInfo.Ksvs, gKsvInfo.DeviceCount * 5);
+	vPrimeBuff[gKsvInfo.DeviceCount * 5] = gKsvInfo.Depth;
+	vPrimeBuff[gKsvInfo.DeviceCount * 5 + 1] = gKsvInfo.DeviceCount;
+	vPrimeBuff[gKsvInfo.DeviceCount * 5 + 2] = gKsvInfo.DevicesExceeded;
+	vPrimeBuff[gKsvInfo.DeviceCount * 5 + 3] = gKsvInfo.DepthExceeded;
+	spu_GetKD(Kd_tmp);
+	rc = hmacsha256(Kd_tmp, KD_SIZE, vPrimeBuff, gKsvInfo.DeviceCount * 5 + 4, pOut);
+
+	memset(Kd_tmp, 0, sizeof(Kd_tmp));
 	return rc;
 }
 
-H2status hdcp2_Rx_GetKsvInfo(H2uint8 *Devices, H2uint8 *Depth, H2uint8 *DevicesExceeded, H2uint8 *DepthExceeded, H2uint8 *pKSVs ,H2uint8 *repeater_down_stream,H2uint8 *repeater_hdcp1_down_stream)
+H2status hdcp2_Rx_GetKsvInfo(H2uint8 *Devices, H2uint8 *Depth, H2uint8 *DevicesExceeded, H2uint8 *DepthExceeded, H2uint8 *pKSVs)
 {
-       #if REAPETER_2p2
-       gKsvInfo.DeviceCount = g_repeater_auth_rx_payload.deviceCount;
-	gKsvInfo.Depth =   g_repeater_auth_rx_payload.depth ;
-	gKsvInfo.DevicesExceeded = g_repeater_auth_rx_payload.maxDevsExceeded;
-	gKsvInfo.DepthExceeded =g_repeater_auth_rx_payload.maxCascadeExceeded;
-	gKsvInfo.HDCP20RepeaterDownStream=g_repeater_auth_rx_payload.HDCP2_0_repeater_downstream;
-	gKsvInfo.HDCP1DeviceDownStream =g_repeater_auth_rx_payload.HDCP1_device_downstream;
-       memcpy(pKSVs, g_repeater_auth_rx_payload.Receiver_ID_LIST,  5*gKsvInfo.DeviceCount);
-//	pr_err("hdcp2_Rx_GetKsvInfo ID list 2  %x ,%x ,%x ,%x ,%x ",g_repeater_auth_rx_payload.Receiver_ID_LIST[5],g_repeater_auth_rx_payload.Receiver_ID_LIST[6],g_repeater_auth_rx_payload.Receiver_ID_LIST[7],g_repeater_auth_rx_payload.Receiver_ID_LIST[8],g_repeater_auth_rx_payload.Receiver_ID_LIST[9]);
-	#else
 	unsigned char Buff[5 * MAX_DEVICECOUNT + 16];
 	int ret = read_binary_file("/tmp/ksv_list.bin", Buff, sizeof(Buff));
 	H2DBGLOG((LOCALDBG, "ReadKSVData=%d\n", ret));
@@ -674,23 +603,13 @@ H2status hdcp2_Rx_GetKsvInfo(H2uint8 *Devices, H2uint8 *Depth, H2uint8 *DevicesE
 		gKsvInfo.DepthExceeded = (gKsvInfo.Depth > 4) ? 1 : 0;
 		memcpy(gKsvInfo.Ksvs, &Buff[1], gKsvInfo.DeviceCount * 5);
 	}
-		gKsvInfo.DeviceCount = 1; //ret / 5;
-		gKsvInfo.Depth =   1 ; //Buff[0] + 1;
-		gKsvInfo.DevicesExceeded = (gKsvInfo.DeviceCount > H2_MAX_DEVICECOUNT) ? 1 : 0;
-		gKsvInfo.DepthExceeded = (gKsvInfo.Depth > 4) ? 1 : 0;
-	//	memcpy(gKsvInfo.Ksvs, &Buff[1], gKsvInfo.DeviceCount * 5);
-
-	#endif
 	if (Devices) {
 		H2DBGLOG((LOCALDBG, "Device Count: %u\r\n", gKsvInfo.DeviceCount));
 		*Devices = gKsvInfo.DeviceCount;
-		//pr_err("Devices =%x \n" , *Devices);
 	}
 	if (Depth) {
 		H2DBGLOG((LOCALDBG, "Depth: %u\r\n", gKsvInfo.Depth));
 		*Depth = gKsvInfo.Depth;
-
-			//pr_err("Depth =%x \n" , *Depth);
 	}
 	if (DevicesExceeded) {
 		H2DBGLOG((LOCALDBG, "Devices Exceeded: %u\r\n", gKsvInfo.DevicesExceeded));
@@ -700,21 +619,10 @@ H2status hdcp2_Rx_GetKsvInfo(H2uint8 *Devices, H2uint8 *Depth, H2uint8 *DevicesE
 		H2DBGLOG((LOCALDBG, "Depth Exceeded: %u\r\n", gKsvInfo.DepthExceeded));
 		*DepthExceeded = gKsvInfo.DepthExceeded;
 	}
-	if(repeater_down_stream){
-	*repeater_down_stream = gKsvInfo.HDCP20RepeaterDownStream;
-		
-	}
-
-	if(repeater_down_stream){
-	*repeater_hdcp1_down_stream = gKsvInfo.HDCP1DeviceDownStream;
-	}
-	#if 0
 	if (pKSVs && !gKsvInfo.DevicesExceeded && !gKsvInfo.DepthExceeded) {
 		H2DBGLOG((LOCALDBG, "Copying %u KSVs\r\n", gKsvInfo.DeviceCount));
 		memcpy(pKSVs, gKsvInfo.Ksvs, gKsvInfo.DeviceCount * 5);
 	}
-
-	#endif
 	return H2_OK;
 }
 

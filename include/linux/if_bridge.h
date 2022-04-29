@@ -46,6 +46,7 @@ struct br_ip_list {
 #define BR_LEARNING_SYNC	BIT(9)
 #define BR_PROXYARP_WIFI	BIT(10)
 
+#define BR_DEFAULT_AGEING_TIME	(300 * HZ)
 #if defined (CONFIG_RTL_IGMP_SNOOPING)
 #define BRCTL_SET_IGMPPROXY_PID 200
 #if defined (CONFIG_RT_MULTIPLE_BR_SUPPORT)

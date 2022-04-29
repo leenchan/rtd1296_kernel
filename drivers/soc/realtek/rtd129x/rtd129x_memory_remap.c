@@ -1,13 +1,3 @@
-/*
- * rtd129x_memory_remap.c
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- */
-
 #include <linux/atomic.h>
 #include <linux/dmi.h>
 #include <linux/efi.h>
@@ -69,12 +59,7 @@ static void rtk_mem_remap_init(struct device_node *np)
 #endif /* CONFIG_RTK_RBUS_BARRIER */
 
 #ifdef CONFIG_RTK_RPC
-#if defined(CONFIG_ION_RTK_PHOENIX) || defined(CONFIG_XEN)
 	rpc_ringbuf_base = (void *)(u64)of_iomap(np, 5);
-#else
-	rpc_ringbuf_base = (void *)(u64)of_iomap(np, 4);
-#endif /* defined(CONFIG_ION_RTK_PHOENIX) || defined(CONFIG_XEN) */
-
 	rpc_common_base = (void *)(u64)of_iomap(np, 1);
 #endif /* CONFIG_RTK_RPC */
 

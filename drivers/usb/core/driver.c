@@ -160,6 +160,7 @@ static ssize_t remove_id_store(struct device_driver *driver, const char *buf,
 	spin_lock(&usb_driver->dynids.lock);
 	list_for_each_entry_safe(dynid, n, &usb_driver->dynids.list, node) {
 		struct usb_device_id *id = &dynid->id;
+
 		if ((id->idVendor == idVendor) &&
 		    (id->idProduct == idProduct)) {
 			list_del(&dynid->node);
@@ -263,15 +264,6 @@ static int usb_probe_device(struct device *dev)
 	return error;
 }
 
-#ifdef CONFIG_USB_PATCH_ON_RTK
-int RTK_usb_probe_device(struct device *dev)
-{
-	int ret = 0;
-	ret = usb_probe_device(dev);
-	return ret;
-}
-#endif
-
 /* called from driver core with dev locked */
 static int usb_unbind_device(struct device *dev)
 {
@@ -283,15 +275,6 @@ static int usb_unbind_device(struct device *dev)
 		usb_autosuspend_device(udev);
 	return 0;
 }
-
-#ifdef CONFIG_USB_PATCH_ON_RTK
-int RTK_usb_unbind_device(struct device *dev)
-{
-	int ret = 0;
-	ret = usb_unbind_device(dev);
-	return ret;
-}
-#endif
 
 /* called from driver core with dev locked */
 static int usb_probe_interface(struct device *dev)
@@ -312,6 +295,10 @@ static int usb_probe_interface(struct device *dev)
 
 	if (udev->authorized == 0) {
 		dev_err(&intf->dev, "Device is not authorized for usage\n");
+		return error;
+	} else if (intf->authorized == 0) {
+		dev_err(&intf->dev, "Interface %d is not authorized for usage\n",
+				intf->altsetting->desc.bInterfaceNumber);
 		return error;
 	}
 
@@ -438,12 +425,10 @@ static int usb_unbind_interface(struct device *dev)
 		if (ep->streams == 0)
 			continue;
 		if (j == 0) {
-			eps = kmalloc(USB_MAXENDPOINTS * sizeof(void *),
+			eps = kmalloc_array(USB_MAXENDPOINTS, sizeof(void *),
 				      GFP_KERNEL);
-			if (!eps) {
-				dev_warn(dev, "oom, leaking streams\n");
+			if (!eps)
 				break;
-			}
 		}
 		eps[j++] = ep;
 	}
@@ -532,6 +517,10 @@ int usb_driver_claim_interface(struct usb_driver *driver,
 	dev = &iface->dev;
 	if (dev->driver)
 		return -EBUSY;
+
+	/* reject claim if interface is not authorized */
+	if (!iface->authorized)
+		return -ENODEV;
 
 	udev = interface_to_usbdev(iface);
 
@@ -1466,14 +1455,6 @@ int usb_suspend(struct device *dev, pm_message_t msg)
 int usb_resume_complete(struct device *dev)
 {
 	struct usb_device *udev = to_usb_device(dev);
-#ifdef CONFIG_USB_PATCH_ON_RTK
-	/* [DEV_FIX]1. USB reset mechanism allows only 3 times after Boot or Resume
-	 * commit 3e6a470b06ea6e37edded163aa814c8c24f04ced
-	 */
-	struct usb_hcd *hcd = bus_to_hcd(udev->bus);
-
-	hcd->reset_quota = 3;
-#endif
 
 	/* For PM complete calls, all we do is rebind interfaces
 	 * whose needs_binding flag is set
@@ -1909,10 +1890,4 @@ struct bus_type usb_bus_type = {
 	.name =		"usb",
 	.match =	usb_device_match,
 	.uevent =	usb_uevent,
-#ifdef CONFIG_USB_PATCH_ON_RTK
-/* [DEV_FIX]implement New USB reset mechanism with CRT reset to workaround any HW or IP issues
- * commit 319ff9f5c298b94517a10d4ced59812b54994347
- */
-	.bus_groups =	usb_gbus_groups,
-#endif
 };

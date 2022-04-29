@@ -45,7 +45,8 @@ static inline long do_strnlen_user(const char __user *src, unsigned long count, 
 	src -= align;
 	max += align;
 
-	unsafe_get_user(c, (unsigned long __user *)src, efault);
+	if (unlikely(unsafe_get_user(c,(unsigned long __user *)src)))
+		return 0;
 	c |= aligned_byte_mask(align);
 
 	for (;;) {
@@ -60,7 +61,8 @@ static inline long do_strnlen_user(const char __user *src, unsigned long count, 
 		if (unlikely(max <= sizeof(unsigned long)))
 			break;
 		max -= sizeof(unsigned long);
-		unsafe_get_user(c, (unsigned long __user *)(src+res), efault);
+		if (unlikely(unsafe_get_user(c,(unsigned long __user *)(src+res))))
+			return 0;
 	}
 	res -= align;
 
@@ -75,7 +77,6 @@ static inline long do_strnlen_user(const char __user *src, unsigned long count, 
 	 * Nope: we hit the address space limit, and we still had more
 	 * characters the caller would have wanted. That's 0.
 	 */
-efault:
 	return 0;
 }
 
@@ -84,7 +85,8 @@ efault:
  * @str: The string to measure.
  * @count: Maximum count (including NUL character)
  *
- * Context: User context only.  This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Get the size of a NUL-terminated string in user space.
  *
@@ -125,7 +127,8 @@ EXPORT_SYMBOL(strnlen_user);
  * strlen_user: - Get the size of a user string INCLUDING final NUL.
  * @str: The string to measure.
  *
- * Context: User context only.  This function may sleep.
+ * Context: User context only. This function may sleep if pagefaults are
+ *          enabled.
  *
  * Get the size of a NUL-terminated string in user space.
  *

@@ -69,6 +69,4 @@ extern void Hdmi_HDCP_2_2_Init(void);
 extern void  msg_hander(void);
 extern void drvif_Hdmi_HDCP2_2_Write_Data_to_TX(unsigned char* bSendData,unsigned short wLen);
 extern void drvif_KS_Setting(unsigned char* bKs);
-extern void DownStream_done(void);
-extern void Set_Rx_status_Ready(void);
 #endif

@@ -4,6 +4,7 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 
+#include "rtk_rtl8367.h"
 #include "smi.h"
 #include "port.h"
 #include "l2.h"
@@ -17,6 +18,7 @@
 #include "rtl8367c_asicdrv_port.h"
 #include "port.h"
 #include "stat.h"
+
 
 #define RTL836X_PROC_DIR_NAME           "rtl836x"
 #define RTL836X_PROC_VLAN_DIR_NAME      "rtl836x/vlan"
@@ -91,7 +93,7 @@ static int port_status_read(struct seq_file *s, void *v)
     unsigned int i = 0;
     rtk_stat_counter_t rxcntr, txcntr;
 
-    for(i=0; i<5; i++) {
+    for(i=0; i<LANPORTNUM; i++) {
         memset(&Portstatus, 0x0, sizeof(rtk_port_mac_ability_t));
         if( rtk_port_macStatus_get(i, &Portstatus) == RT_ERR_OK )
         {
@@ -119,7 +121,7 @@ static int port_status_read(struct seq_file *s, void *v)
         rxcntr = 0x0;
         rtk_stat_port_get(i, STAT_Dot3StatsSymbolErrors, &rxcntr);
         seq_printf(s, "   rx data symbol errors count:[%x]\n", rxcntr);
-
+        
         rxcntr = 0x0;
         rtk_stat_port_get(i, STAT_EtherStatsFragments, &rxcntr);
         seq_printf(s, "   rx EtherStatsFragments count:[%x]\n", rxcntr);
@@ -135,25 +137,25 @@ static int port_status_read(struct seq_file *s, void *v)
 
     rxcntr = 0x0;
     txcntr = 0x0;
-    rtk_stat_port_get(EXT_PORT0, STAT_IfInOctets, &rxcntr);
-    rtk_stat_port_get(EXT_PORT0, STAT_IfOutOctets, &txcntr);
+    rtk_stat_port_get(RGMIIPORT, STAT_IfInOctets, &rxcntr);
+    rtk_stat_port_get(RGMIIPORT, STAT_IfOutOctets, &txcntr);
     seq_printf(s, "   tx count :[%x]\n", txcntr);
     seq_printf(s, "   rx count :[%x]\n", rxcntr);
 
     rxcntr = 0x0;
-    rtk_stat_port_get(EXT_PORT0, STAT_Dot3StatsFCSErrors, &rxcntr);
+    rtk_stat_port_get(RGMIIPORT, STAT_Dot3StatsFCSErrors, &rxcntr);
     seq_printf(s, "   rx FCS error count :[%x]\n", rxcntr);
 
     rxcntr = 0x0;
-    rtk_stat_port_get(EXT_PORT0, STAT_Dot3StatsSymbolErrors, &rxcntr);
+    rtk_stat_port_get(RGMIIPORT, STAT_Dot3StatsSymbolErrors, &rxcntr);
     seq_printf(s, "   rx data symbol errors count:[%x]\n", rxcntr);
 
     rxcntr = 0x0;
-    rtk_stat_port_get(EXT_PORT0, STAT_EtherStatsFragments, &rxcntr);
+    rtk_stat_port_get(RGMIIPORT, STAT_EtherStatsFragments, &rxcntr);
     seq_printf(s, "   rx EtherStatsFragments count:[%x]\n", rxcntr);
 
     rxcntr = 0x0;
-    rtk_stat_port_get(EXT_PORT0, STAT_EtherStatsJabbers, &rxcntr);
+    rtk_stat_port_get(RGMIIPORT, STAT_EtherStatsJabbers, &rxcntr);
     seq_printf(s, "   rx EtherStatsJabbers count:[%x]\n", rxcntr);
 
     return 0;
@@ -579,7 +581,7 @@ static struct file_operations cputagEnable_proc_fops = {
 /* cpu tag port setting */
 static int cputagPort_read(struct seq_file *s, void *v)
 {
-    rtk_port_t port = EXT_PORT0;
+    rtk_port_t port = RGMIIPORT;
     rtk_cpu_insert_t mode;
 
     rtk_cpu_tagPort_get(&port, &mode);
@@ -619,7 +621,7 @@ static int cputagPort_write(struct file *filp, const char *buff,
 
         num = sscanf(tmpbuf,"%d", &mode);
         if((mode >= 0) && (mode < 2)) {
-            rtk_cpu_tagPort_set(EXT_PORT0, mode) ;
+            rtk_cpu_tagPort_set(RGMIIPORT, mode) ;
         }
     }
 
@@ -670,7 +672,6 @@ static int rgmiidelay_write(struct file *filp, const char *buff,
     unsigned int num = 0;
     unsigned int port = 0;
     rtk_data_t txDelay, rxDelay;
-    rtk_api_ret_t ret;
 
     if (buff && !copy_from_user(tmpbuf, buff, len)) {
         tmpbuf[len - 1] = '\0';
@@ -684,9 +685,7 @@ static int rgmiidelay_write(struct file *filp, const char *buff,
             port = EXT_PORT0;
         }
         
-        ret = rtk_port_rgmiiDelayExt_set(port, txDelay, rxDelay);
-        pr_err("rgmiiDelay: port %d, tx delay %d, rx delay %d, ret %d\n",
-		port, txDelay, rxDelay, ret);
+        rtk_port_rgmiiDelayExt_set(port, txDelay, rxDelay);
     }
 
     return len;
@@ -711,10 +710,20 @@ static int rgmiiInfo_read(struct seq_file *s, void *v)
 {
     rtk_mode_ext_t mode;
     rtk_port_mac_ability_t mac_cfg;
-
+   
     rtk_port_macForceLinkExt_get(EXT_PORT0, &mode, &mac_cfg);
-
     seq_printf(s, "EXT_PORT0:\n");
+    seq_printf(s, "    mode:     [%d]\n", mode);
+    seq_printf(s, "    forcemode:[%d]\n", mac_cfg.forcemode);
+    seq_printf(s, "    speed:    [%d]\n", mac_cfg.speed);
+    seq_printf(s, "    duplex:   [%d]\n", mac_cfg.duplex);
+    seq_printf(s, "    link:     [%d]\n", mac_cfg.link);
+    seq_printf(s, "    nway:     [%d]\n", mac_cfg.nway);
+    seq_printf(s, "    txpause:  [%d]\n", mac_cfg.txpause);
+    seq_printf(s, "    rxpause:  [%d]\n", mac_cfg.rxpause);
+
+    rtk_port_macForceLinkExt_get(EXT_PORT1, &mode, &mac_cfg);
+    seq_printf(s, "EXT_PORT1:\n");
     seq_printf(s, "    mode:     [%d]\n", mode);
     seq_printf(s, "    forcemode:[%d]\n", mac_cfg.forcemode);
     seq_printf(s, "    speed:    [%d]\n", mac_cfg.speed);
@@ -736,9 +745,37 @@ static int rgmiiInfo_write(struct file *filp, const char *buff,
     unsigned long len, void *data)
 {
     char tmpbuf[8] = {0};
+    unsigned int port = 0;
+    unsigned int num = 0;
+    rtk_mode_ext_t mode;
+    rtk_port_mac_ability_t mac_cfg;
 
     if (buff && !copy_from_user(tmpbuf, buff, len)) {
         tmpbuf[len - 1] = '\0';
+
+        num = sscanf(tmpbuf,"%d", &port);
+    }
+
+    mac_cfg.forcemode = MAC_FORCE;
+    mac_cfg.speed = PORT_SPEED_1000M;
+    mac_cfg.duplex = FULL_DUPLEX;
+    mac_cfg.link = PORT_LINKUP;
+    mac_cfg.nway = DISABLED;
+    mac_cfg.txpause = ENABLED;
+    mac_cfg.rxpause = ENABLED; 
+
+    if(port = 0)
+    {
+        mode = MODE_EXT_RGMII;
+        rtk_port_macForceLinkExt_set(EXT_PORT0, mode,&mac_cfg);
+        mode = MODE_EXT_DISABLE;
+        rtk_port_macForceLinkExt_set(EXT_PORT1, mode,&mac_cfg);
+    }
+    else if(port = 1) {
+        mode = MODE_EXT_RGMII;
+        rtk_port_macForceLinkExt_set(EXT_PORT1, mode,&mac_cfg);
+        mode = MODE_EXT_DISABLE;
+        rtk_port_macForceLinkExt_set(EXT_PORT0, mode,&mac_cfg);
     }
 
     return len;

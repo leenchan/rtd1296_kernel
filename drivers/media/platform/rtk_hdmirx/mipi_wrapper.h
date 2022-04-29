@@ -1,14 +1,3 @@
-/*
- * mipi_wrapper.h - RTK hdmi rx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #ifndef _MIPI_WRAPPER_H_
 #define _MIPI_WRAPPER_H_
 
@@ -51,7 +40,7 @@ typedef enum {
 	OUT_AGRB  = 0x12,
 	OUT_AGBR  = 0x13,
 	OUT_ABRG  = 0x14,
-	OUT_ABGR  = 0x15,/* Byte 0~3: RGBA */
+	OUT_ABGR  = 0x15,
 	OUT_RGBA  = 0x16,
 	OUT_RBGA  = 0x17,
 	OUT_GRBA  = 0x18,
@@ -87,33 +76,6 @@ typedef struct {
 	int pitch;
 	struct work_struct mipi_reset_work;
 } MIPI_TOP_INFO;
-
-struct MIPI_COLOR_COEFF {
-	unsigned int c1;
-	unsigned int c2;
-	unsigned int c3;
-	unsigned int c4;
-	unsigned int c5;
-	unsigned int c6;
-	unsigned int c7;
-	unsigned int c8;
-	unsigned int c9;
-	unsigned int k1;
-	unsigned int k2;
-	unsigned int k3;
-};
-
-enum {
-	Y2R_REC709_FULL = 0,
-	Y2R_REC709_LIMITED = 1,
-	Y2R_REC601_FULL = 2,
-	Y2R_REC601_LIMITED = 3,
-	R2Y_REC709_FULL = 4,
-	R2Y_REC709_LIMITED = 5,
-	R2Y_REC601_FULL = 6,
-	R2Y_REC601_LIMITED = 7,
-	COLOR_COEFF_MAX = 8
-};
 
 enum {
 	DEMUX8   =	   0x0,
@@ -162,8 +124,6 @@ enum {
 	DTYPE_MJPEG   =    0x31,	
 }; 
 
-void register_mipi_ion(struct v4l2_hdmi_dev *dev);
-void deregister_mipi_ion(struct v4l2_hdmi_dev *dev);
 void mipi_reset_work_func(struct work_struct *work);
 void stop_mipi_process(void);
 void set_mipi_env(void);

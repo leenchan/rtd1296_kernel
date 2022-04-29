@@ -13,4 +13,3 @@ obj-$(CONFIG_UIO_RTK_RBUS)		+= uio_rtk_rbus.o
 obj-$(CONFIG_UIO_RTK_REFCLK)	+= uio_rtk_refclk.o
 obj-$(CONFIG_UIO_RTK_SE)		+= uio_rtk_se.o
 obj-$(CONFIG_UIO_RTK_MD)		+= uio_rtk_md.o
-obj-$(CONFIG_UIO_RTK_TP)		+= uio_rtk_tp.o

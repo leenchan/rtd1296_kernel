@@ -118,30 +118,8 @@ struct nf_conn {
 	u_int32_t secmark;
 #endif
 
-#if defined(CONFIG_NETFILTER_XT_MATCH_LAYER7) || \
-	defined(CONFIG_NETFILTER_XT_MATCH_LAYER7_MODULE)
-	struct {
-		/*
-		 * e.g. "http". NULL before decision. "unknown" after decision
-		 * if no match.
-		 */
-		char *app_proto;
-		/*
-		 * application layer data so far. NULL after match decision.
-		 */
-		char *app_data;
-		unsigned int app_data_len;
-	} layer7;
-#endif
-
 	/* Extensions */
 	struct nf_ct_ext *ext;
-
-	#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-	struct list_head	state_tuple;
-	char drop_flag;
-	char removed;
-	#endif
 
 	#if defined(CONFIG_RTL_HW_NAT_BYPASS_PKT)
 	unsigned long count;
@@ -149,7 +127,6 @@ struct nf_conn {
 
 	/* Storage reserved for other modules, must be the last member */
 	union nf_conntrack_proto proto;
-
 };
 
 static inline struct nf_conn *
@@ -217,52 +194,18 @@ void *nf_ct_alloc_hashtable(unsigned int *sizep, int nulls);
 
 void nf_ct_free_hashtable(void *hash, unsigned int size);
 
-struct nf_conntrack_tuple_hash *
-__nf_conntrack_find(struct net *net, u16 zone,
-		    const struct nf_conntrack_tuple *tuple);
-
 int nf_conntrack_hash_check_insert(struct nf_conn *ct);
 bool nf_ct_delete(struct nf_conn *ct, u32 pid, int report);
 
 bool nf_ct_get_tuplepr(const struct sk_buff *skb, unsigned int nhoff,
-		       u_int16_t l3num, struct nf_conntrack_tuple *tuple);
+		       u_int16_t l3num, struct net *net,
+		       struct nf_conntrack_tuple *tuple);
 bool nf_ct_invert_tuplepr(struct nf_conntrack_tuple *inverse,
 			  const struct nf_conntrack_tuple *orig);
 
 void __nf_ct_refresh_acct(struct nf_conn *ct, enum ip_conntrack_info ctinfo,
 			  const struct sk_buff *skb,
 			  unsigned long extra_jiffies, int do_acct);
-
-#if defined(CONFIG_RTL_NF_CONNTRACK_GARBAGE_NEW)
-extern void __nf_ct_refresh_acct_proto(void *ct,
-				      enum ip_conntrack_info ctinfo,
-				      const void *skb,
-				      unsigned long extra_jiffies,
-				      int do_acct,
-				      unsigned char proto,
-				      void * extra1,
-				      void * extra2);
-
-static inline void nf_ct_refresh_acct_tcp(struct nf_conn *ct,
-				      enum ip_conntrack_info ctinfo,
-				      const struct sk_buff *skb,
-				      unsigned long extra_jiffies,
-				      enum tcp_conntrack oldstate,
-				      enum tcp_conntrack newstate)
-{
-	__nf_ct_refresh_acct_proto(ct, ctinfo, skb, extra_jiffies, 1, 6, (void *)oldstate, (void *)newstate);
-}
-
-
-static inline void nf_ct_refresh_acct_udp(struct nf_conn *ct,
-				      enum ip_conntrack_info ctinfo,
-				      const struct sk_buff *skb,
-				      unsigned long extra_jiffies, char * status)
-{
-	__nf_ct_refresh_acct_proto(ct, ctinfo, skb, extra_jiffies, 1, 17, (void *)status, (void *)0);
-}
-#endif
-
 
 /* Refresh conntrack for this many jiffies and do accounting */
 static inline void nf_ct_refresh_acct(struct nf_conn *ct,
@@ -311,27 +254,16 @@ static inline struct nf_conn *nf_ct_untracked_get(void)
 }
 void nf_ct_untracked_status_or(unsigned long bits);
 
-#if defined(CONFIG_RTL_BATTLENET_ALG)
-#define BATTLENET_PORT 6112
-#define RTL_DEV_NAME_NUM(name,num)	name#num
-#define RTL_PS_PPP_NAME	"ppp"
-#define RTL_PS_PPP0_DEV_NAME RTL_DEV_NAME_NUM(RTL_PS_PPP_NAME,0)
-extern unsigned int wan_ip;
-extern unsigned int wan_mask;
-extern struct net_device *rtl865x_getBattleNetWanDev(void );
-extern int rtl865x_getBattleNetDevIpAndNetmask(struct net_device * dev, unsigned int *ipAddr, unsigned int *netMask );
-extern struct nf_conn *rtl_find_ct_by_tuple_src(struct nf_conntrack_tuple *tuple, int *flag);
-extern struct nf_conn *rtl_find_ct_by_tuple_dst(struct nf_conntrack_tuple *tuple, int *flag);
-
-#endif
-
-
 /* Iterate over all conntracks: if iter returns true, it's deleted. */
 void nf_ct_iterate_cleanup(struct net *net,
 			   int (*iter)(struct nf_conn *i, void *data),
 			   void *data, u32 portid, int report);
+
+struct nf_conntrack_zone;
+
 void nf_conntrack_free(struct nf_conn *ct);
-struct nf_conn *nf_conntrack_alloc(struct net *net, u16 zone,
+struct nf_conn *nf_conntrack_alloc(struct net *net,
+				   const struct nf_conntrack_zone *zone,
 				   const struct nf_conntrack_tuple *orig,
 				   const struct nf_conntrack_tuple *repl,
 				   gfp_t gfp);
@@ -363,14 +295,6 @@ static inline bool nf_is_loopback_packet(const struct sk_buff *skb)
 	return skb->dev && skb->skb_iif && skb->dev->flags & IFF_LOOPBACK;
 }
 
-#if defined(CONFIG_RTL_819X)
-/* by default disable */
-#if defined(CONFIG_FAST_PATH_SPI_ENABLED)
-#define FAST_PATH_SPI_ENABLED		1
-#endif
-#endif
-
-
 struct kernel_param;
 
 int nf_conntrack_set_hashsize(const char *val, struct kernel_param *kp);
@@ -379,13 +303,16 @@ extern unsigned int nf_conntrack_max;
 extern unsigned int nf_conntrack_hash_rnd;
 void init_nf_conntrack_hash_rnd(void);
 
-void nf_conntrack_tmpl_insert(struct net *net, struct nf_conn *tmpl);
+struct nf_conn *nf_ct_tmpl_alloc(struct net *net,
+				 const struct nf_conntrack_zone *zone,
+				 gfp_t flags);
+void nf_ct_tmpl_free(struct nf_conn *tmpl);
 
 #define NF_CT_STAT_INC(net, count)	  __this_cpu_inc((net)->ct.stat->count)
 #define NF_CT_STAT_INC_ATOMIC(net, count) this_cpu_inc((net)->ct.stat->count)
 
 #define MODULE_ALIAS_NFCT_HELPER(helper) \
-		MODULE_ALIAS("nfct-helper-" helper)
+        MODULE_ALIAS("nfct-helper-" helper)
 
 #if defined(CONFIG_RTL_819X)
 #define RTL_NF_ALG_CTL 1

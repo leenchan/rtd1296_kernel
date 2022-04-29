@@ -50,9 +50,6 @@ int HYPERVISOR_physdev_op(int cmd, void *arg);
 int HYPERVISOR_vcpu_op(int cmd, int vcpuid, void *extra_args);
 int HYPERVISOR_tmem_op(void *arg);
 int HYPERVISOR_multicall(struct multicall_entry *calls, uint32_t nr);
-#ifdef CONFIG_RTK_XEN_HYPERCALL
-int HYPERVISOR_rtk_hypercall_op(unsigned int cmd, void *arg);
-#endif
 
 static inline int
 HYPERVISOR_suspend(unsigned long start_info_mfn)

@@ -30,12 +30,6 @@
 #include <sound/info.h>
 #include <sound/control.h>
 
-#ifdef RTK_TRACE_ALSA_EN
-#define RTK_TRACE_ALSA(format, ...) printk(KERN_ALERT format, ##__VA_ARGS__);
-#else
-#define RTK_TRACE_ALSA(format, ...)
-#endif
-
 /* max number of user-defined controls */
 #define MAX_USER_CONTROLS	32
 #define MAX_CONTROL_COUNT	1028
@@ -1614,7 +1608,6 @@ static int _snd_ctl_register_ioctl(snd_kctl_ioctl_func_t fcn, struct list_head *
 {
 	struct snd_kctl_ioctl *pn;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	pn = kzalloc(sizeof(struct snd_kctl_ioctl), GFP_KERNEL);
 	if (pn == NULL)
 		return -ENOMEM;
@@ -1622,7 +1615,6 @@ static int _snd_ctl_register_ioctl(snd_kctl_ioctl_func_t fcn, struct list_head *
 	down_write(&snd_ioctl_rwsem);
 	list_add_tail(&pn->list, lists);
 	up_write(&snd_ioctl_rwsem);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 	return 0;
 }
 
@@ -1634,11 +1626,7 @@ static int _snd_ctl_register_ioctl(snd_kctl_ioctl_func_t fcn, struct list_head *
  */
 int snd_ctl_register_ioctl(snd_kctl_ioctl_func_t fcn)
 {
-    int ret;
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
-	ret = _snd_ctl_register_ioctl(fcn, &snd_control_ioctls);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
-    return ret;
+	return _snd_ctl_register_ioctl(fcn, &snd_control_ioctls);
 }
 EXPORT_SYMBOL(snd_ctl_register_ioctl);
 
@@ -1650,11 +1638,7 @@ EXPORT_SYMBOL(snd_ctl_register_ioctl);
  */
 int snd_ctl_register_ioctl_compat(snd_kctl_ioctl_func_t fcn)
 {
-    int ret;
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
-	ret = _snd_ctl_register_ioctl(fcn, &snd_control_compat_ioctls);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
-    return ret;
+	return _snd_ctl_register_ioctl(fcn, &snd_control_compat_ioctls);
 }
 EXPORT_SYMBOL(snd_ctl_register_ioctl_compat);
 #endif

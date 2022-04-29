@@ -117,10 +117,10 @@ int RPC_TOAGENT_DPTX_Config_TV_System(struct ion_client *client, struct VIDEO_RP
 	rpc->dptxInfo.reserved4 = htonl(arg->dptxInfo.reserved4);
 
 	if (send_rpc_command(RPC_AUDIO,
-			ENUM_VIDEO_KERNEL_RPC_CONFIG_TV_SYSTEM,
-			CONVERT_FOR_AVCPU(dat),
-			CONVERT_FOR_AVCPU(dat + get_rpc_alignment_offset(sizeof(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM))),
-			&RPC_ret))
+						ENUM_VIDEO_KERNEL_RPC_CONFIG_TV_SYSTEM,
+        				CONVERT_FOR_AVCPU(dat),
+        				CONVERT_FOR_AVCPU(dat + get_rpc_alignment_offset(sizeof(struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM))),
+						&RPC_ret))
 	{
 		printk(KERN_ERR "%s RPC fail\n", __FUNCTION__);
 		goto exit;

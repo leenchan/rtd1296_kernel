@@ -84,7 +84,7 @@ early_param("nodebugmon", early_debug_disable);
 static DEFINE_PER_CPU(int, mde_ref_count);
 static DEFINE_PER_CPU(int, kde_ref_count);
 
-void enable_debug_monitors(enum debug_el el)
+void enable_debug_monitors(enum dbg_active_el el)
 {
 	u32 mdscr, enable = 0;
 
@@ -104,7 +104,7 @@ void enable_debug_monitors(enum debug_el el)
 	}
 }
 
-void disable_debug_monitors(enum debug_el el)
+void disable_debug_monitors(enum dbg_active_el el)
 {
 	u32 mdscr, disable = 0;
 
@@ -152,6 +152,7 @@ static int debug_monitors_init(void)
 	/* Clear the OS lock. */
 	on_each_cpu(clear_os_lock, NULL, 1);
 	isb();
+	local_dbg_enable();
 
 	/* Register hotplug handler. */
 	__register_cpu_notifier(&os_lock_nb);
@@ -203,7 +204,7 @@ void unregister_step_hook(struct step_hook *hook)
 }
 
 /*
- * Call registered single step handers
+ * Call registered single step handlers
  * There is no Syndrome info to check for determining the handler.
  * So we call all the registered handlers, until the right handler is
  * found which returns zero.

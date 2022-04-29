@@ -1,14 +1,3 @@
-/**
- * snd-realtek_common.h - Realtek alsa driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #ifndef SND_RTK_COMMON_H
 #define SND_RTK_COMMON_H
 
@@ -50,7 +39,7 @@ typedef enum
     ENUM_VIDEO_KERNEL_RPC_CONFIG_HDMI_INFO_FRAME,
     ENUM_VIDEO_KERNEL_RPC_QUERY_DISPLAY_WIN,
     ENUM_VIDEO_KERNEL_RPC_PP_INIT_PIN,
-    ENUM_KERNEL_RPC_INIT_RINGBUF_AO, //need check this enum
+    ENUM_KERNEL_RPC_INIT_RINGBUF_AO, //need check this enum//Add by PC
     ENUM_VIDEO_KERNEL_RPC_VOUT_EDID_DATA,
     ENUM_KERNEL_RPC_AUDIO_POWER_SET,
     ENUM_VIDEO_KERNEL_RPC_VOUT_VDAC_SET,

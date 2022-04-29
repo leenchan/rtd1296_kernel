@@ -29,7 +29,7 @@
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/list.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/major.h>
 #include <linux/atomic.h>
 #include <linux/sysrq.h>
@@ -45,13 +45,6 @@
 #include <asm/uaccess.h>
 
 #include "hvc_console.h"
-
-#ifdef CONFIG_RTK_XEN_SUPPORT
-#include <xen/xen.h>
-#include <xen/hvc-console.h>
-static atomic_t crash_console_start = ATOMIC_INIT(-1);
-static void domu_crash_console_start(void);
-#endif
 
 #define HVC_MAJOR	229
 #define HVC_MINOR	0
@@ -268,10 +261,6 @@ static void hvc_check_console(int index)
 	 */
 	if (index == hvc_console.index)
 		register_console(&hvc_console);
-#ifdef CONFIG_RTK_XEN_SUPPORT
-	if (atomic_inc_and_test(&crash_console_start))
-		domu_crash_console_start();
-#endif
 }
 
 /*
@@ -330,7 +319,8 @@ static int hvc_install(struct tty_driver *driver, struct tty_struct *tty)
 	int rc;
 
 	/* Auto increments kref reference if found. */
-	if (!(hp = hvc_get_by_index(tty->index)))
+	hp = hvc_get_by_index(tty->index);
+	if (!hp)
 		return -ENODEV;
 
 	tty->driver_data = hp;
@@ -428,7 +418,7 @@ static void hvc_close(struct tty_struct *tty, struct file * filp)
 		 * there is no buffered data otherwise sleeps on a wait queue
 		 * waking periodically to check chars_in_buffer().
 		 */
-		tty_wait_until_sent_from_close(tty, HVC_CLOSE_WAIT);
+		tty_wait_until_sent(tty, HVC_CLOSE_WAIT);
 	} else {
 		if (hp->port.count < 0)
 			printk(KERN_ERR "hvc_close %X: oops, count is %d\n",
@@ -1015,51 +1005,3 @@ put_tty:
 out:
 	return err;
 }
-
-/* This isn't particularly necessary due to this being a console driver
- * but it is nice to be thorough.
- */
-static void __exit hvc_exit(void)
-{
-	if (hvc_driver) {
-		kthread_stop(hvc_task);
-
-		tty_unregister_driver(hvc_driver);
-		/* return tty_struct instances allocated in hvc_init(). */
-		put_tty_driver(hvc_driver);
-		unregister_console(&hvc_console);
-	}
-}
-module_exit(hvc_exit);
-
-#ifdef CONFIG_RTK_XEN_SUPPORT
-static void domu_crash_print(struct console *co, const char *b,
-                              unsigned count)
-{
-	static char buf[512] = "";
-
-	if (oops_in_progress && !xen_initial_domain()) {
-		strncpy(buf, b, count);
-		buf[count] = '\0';
-		xen_raw_console_write(buf);
-	}
-}
-
-static struct console domu_crash_console = {
-	.name		= "domu_crash",
-	.write		= domu_crash_print,
-	.flags		= CON_PRINTBUFFER | CON_ANYTIME | CON_ENABLED,
-	.index		= -1,
-};
-
-static void domu_crash_console_start(void)
-{
-	register_console(&domu_crash_console);
-}
-
-static void __exit domu_crash_console_exit(void)
-{
-	unregister_console(&domu_crash_console);
-}
-module_exit(domu_crash_console_exit);
-#endif

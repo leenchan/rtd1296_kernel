@@ -1376,65 +1376,96 @@ rtk_api_ret_t rtk_switch_init(void)
     switch_chip_t   switchChip;
 
     /* probe switch */
-    if((retVal = rtk_switch_probe(&switchChip)) != RT_ERR_OK)
+    if((retVal = rtk_switch_probe(&switchChip)) != RT_ERR_OK) {
+        printk(KERN_ERR "rtk_switch_probe fail.\n");
         return retVal;
+    }
 
     /* Set initial state */
 
-    if((retVal = rtk_switch_initialState_set(INIT_COMPLETED)) != RT_ERR_OK)
+    if((retVal = rtk_switch_initialState_set(INIT_COMPLETED)) != RT_ERR_OK) {
+        printk(KERN_ERR "rtk_switch_initialState_set fail.\n");
         return retVal;
+    }
+
+    printk(KERN_ERR "switchChip:[%d].\n", switchChip);
 
     /* Initial */
     switch(switchChip)
     {
         case CHIP_RTL8367C:
-            if((retVal = _rtk_switch_init_8367c()) != RT_ERR_OK)
+            if((retVal = _rtk_switch_init_8367c()) != RT_ERR_OK){
+                printk(KERN_ERR "_rtk_switch_init_8367c() fail.\n");
                 return retVal;
+            }
             break;
         case CHIP_RTL8370B:
-            if((retVal = _rtk_switch_init_8370b()) != RT_ERR_OK)
+            if((retVal = _rtk_switch_init_8370b()) != RT_ERR_OK){
+                printk(KERN_ERR "_rtk_switch_init_8370b() fail.\n");
                 return retVal;
+            }
             break;
         case CHIP_RTL8364B:
-            if((retVal = _rtk_switch_init_8364b()) != RT_ERR_OK)
+            if((retVal = _rtk_switch_init_8364b()) != RT_ERR_OK){
+                printk(KERN_ERR "_rtk_switch_init_8364b() fail.\n");
                 return retVal;
+            }
             break;
         case CHIP_RTL8363SC_VB:
-            if((retVal = _rtk_switch_init_8363sc_vb()) != RT_ERR_OK)
+            if((retVal = _rtk_switch_init_8363sc_vb()) != RT_ERR_OK){
+                printk(KERN_ERR "_rtk_switch_init_8363sc_vb() fail.\n");
                 return retVal;
+            }
             break;
         default:
+            printk(KERN_ERR "return RT_ERR_CHIP_NOT_FOUND.\n");
             return RT_ERR_CHIP_NOT_FOUND;
     }
 
     /* Set Old max packet length to 16K */
-    if((retVal = rtl8367c_setAsicRegBits(RTL8367C_REG_MAX_LENGTH_LIMINT_IPG, RTL8367C_MAX_LENTH_CTRL_MASK, 3)) != RT_ERR_OK)
+    if((retVal = rtl8367c_setAsicRegBits(RTL8367C_REG_MAX_LENGTH_LIMINT_IPG, RTL8367C_MAX_LENTH_CTRL_MASK, 3)) != RT_ERR_OK) {
+        printk(KERN_ERR "RTL8367C_REG_MAX_LENGTH_LIMINT_IPG fail.\n");
         return retVal;
+    }
 
-    if((retVal = rtl8367c_setAsicRegBits(RTL8367C_REG_MAX_LEN_RX_TX, RTL8367C_MAX_LEN_RX_TX_MASK, 3)) != RT_ERR_OK)
+    if((retVal = rtl8367c_setAsicRegBits(RTL8367C_REG_MAX_LEN_RX_TX, RTL8367C_MAX_LEN_RX_TX_MASK, 3)) != RT_ERR_OK) {
+        printk(KERN_ERR "RTL8367C_REG_MAX_LEN_RX_TX fail.\n");
         return retVal;
+    }
 
     /* ACL Mode */
-    if((retVal = rtl8367c_setAsicRegBits(RTL8367C_REG_ACL_ACCESS_MODE, RTL8367C_ACL_ACCESS_MODE_MASK, 1)) != RT_ERR_OK)
+    if((retVal = rtl8367c_setAsicRegBits(RTL8367C_REG_ACL_ACCESS_MODE, RTL8367C_ACL_ACCESS_MODE_MASK, 1)) != RT_ERR_OK){
+        printk(KERN_ERR "RTL8367C_REG_ACL_ACCESS_MODE fail.\n");
         return retVal;
+    }
 
     /* Max rate */
-    if((retVal = rtk_rate_igrBandwidthCtrlRate_set(halCtrl->hsg_logical_port, RTL8367C_QOS_RATE_INPUT_MAX_HSG, DISABLED, ENABLED)) != RT_ERR_OK)
+    if((retVal = rtk_rate_igrBandwidthCtrlRate_set(halCtrl->hsg_logical_port, RTL8367C_QOS_RATE_INPUT_MAX_HSG, DISABLED, ENABLED)) != RT_ERR_OK) {
+        printk(KERN_ERR "rtk_rate_igrBandwidthCtrlRate_set fail.\n");
         return retVal;
+    }
 
-    if((retVal = rtk_rate_egrBandwidthCtrlRate_set(halCtrl->hsg_logical_port, RTL8367C_QOS_RATE_INPUT_MAX_HSG, ENABLED)) != RT_ERR_OK)
+    if((retVal = rtk_rate_egrBandwidthCtrlRate_set(halCtrl->hsg_logical_port, RTL8367C_QOS_RATE_INPUT_MAX_HSG, ENABLED)) != RT_ERR_OK) {
+        printk(KERN_ERR "rtk_rate_egrBandwidthCtrlRate_set fail.\n");
         return retVal;
+    }
 
-    if((retVal = rtl8367c_setAsicReg(0x03fa, 0x0007)) != RT_ERR_OK)
+    if((retVal = rtl8367c_setAsicReg(0x03fa, 0x0007)) != RT_ERR_OK){
+        printk(KERN_ERR "rtl8367c_setAsicReg(0x03fa, 0x0007)) fail.\n");
         return retVal;
+    }
 
     /* Change unknown DA to per port setting */
-    if((retVal = rtl8367c_setAsicRegBits(RTL8367C_PORT_SECURIT_CTRL_REG, RTL8367C_UNKNOWN_UNICAST_DA_BEHAVE_MASK, 3)) != RT_ERR_OK)
+    if((retVal = rtl8367c_setAsicRegBits(RTL8367C_PORT_SECURIT_CTRL_REG, RTL8367C_UNKNOWN_UNICAST_DA_BEHAVE_MASK, 3)) != RT_ERR_OK) {
+        printk(KERN_ERR "RTL8367C_PORT_SECURIT_CTRL_REG fail.\n");
         return retVal;
+    }
 
     /* LUT lookup OP = 1 */
-    if ((retVal = rtl8367c_setAsicLutIpLookupMethod(1))!=RT_ERR_OK)
+    if ((retVal = rtl8367c_setAsicLutIpLookupMethod(1))!=RT_ERR_OK){
+        printk(KERN_ERR "rtl8367c_setAsicLutIpLookupMethod(1) fail.\n");
         return retVal;
+    }
 
     /* Set RMA */
     rmaCfg.portiso_leaky = 0;
@@ -1443,16 +1474,22 @@ rtk_api_ret_t rtk_switch_init(void)
     rmaCfg.trap_priority = 0;
     rmaCfg.discard_storm_filter = 0;
     rmaCfg.operation = 0;
-    if ((retVal = rtl8367c_setAsicRma(2, &rmaCfg))!=RT_ERR_OK)
+    if ((retVal = rtl8367c_setAsicRma(2, &rmaCfg))!=RT_ERR_OK) {
+        printk(KERN_ERR "rtl8367c_setAsicRma(2, &rmaCfg) fail.\n");
         return retVal;
+    }
 
     /* Enable TX Mirror isolation leaky */
-    if ((retVal = rtl8367c_setAsicPortMirrorIsolationTxLeaky(ENABLED)) != RT_ERR_OK)
+    if ((retVal = rtl8367c_setAsicPortMirrorIsolationTxLeaky(ENABLED)) != RT_ERR_OK) {
+        printk(KERN_ERR "rtl8367c_setAsicPortMirrorIsolationTxLeaky fail.\n");
         return retVal;
+    }
 
     /* INT EN */
-    if((retVal = rtl8367c_setAsicRegBit(RTL8367C_REG_IO_MISC_FUNC, RTL8367C_INT_EN_OFFSET, 1)) != RT_ERR_OK)
+    if((retVal = rtl8367c_setAsicRegBit(RTL8367C_REG_IO_MISC_FUNC, RTL8367C_INT_EN_OFFSET, 1)) != RT_ERR_OK) {
+        printk(KERN_ERR "RTL8367C_REG_IO_MISC_FUNC fail.\n");
         return retVal;
+    }
 
     return RT_ERR_OK;
 }

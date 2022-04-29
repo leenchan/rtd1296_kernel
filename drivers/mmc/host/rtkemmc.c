@@ -46,6 +46,7 @@
 #include <linux/of_gpio.h>
 #include <asm/cacheflush.h>
 #include <linux/pm_runtime.h>
+#include <linux/proc_fs.h>
 #include <soc/realtek/rtd129x_cpu.h>
 #include <soc/realtek/rtd129x_lockapi.h>
 
@@ -64,9 +65,10 @@
 #define BANNER      "Realtek eMMC Driver"
 #define VERSION     "$Id: rtkemmc.c Kylin 2015-11-06 18:00 $"
 
-#define DMA_ALLOC_LENGTH     (0x80000)
+#define DMA_ALLOC_LENGTH     (2048)
 #define DESC_ALLOC_LENGTH   (1024*1024)
 
+//#define BL31_TSP_TEST
 //#define EMMC_PARAM_TEST
 //#define DBG_PORT
 #define PHASE_INHERITED
@@ -78,28 +80,6 @@
 static u32 VP0_saved = 0xFF, VP1_saved =0xFF;
 #endif
 
-#ifdef RTK_EMMC_HEALTH_REPORT
-        int health_report_fd;
-#endif 
-
-#define DQS_INHERITED
-#ifdef DQS_INHERITED
-static u32 dqs_saved = 0xff;
-#endif
-
-int suspend = 0;
-int suspend_VP0=0xff, suspend_VP1=0xff;
-int suspend_dqs=0x88;
-
-unsigned int GLOBAL=0;
-static u32 pddrive_nf_s3[5] = {0};
-unsigned char compare1[DMA_ALLOC_LENGTH];
-unsigned char compare2[DMA_ALLOC_LENGTH];
-static int mmc_Tuning_HS400(struct rtkemmc_host *emmc_port,u32 mode);
-static void rtkemmc_dqs_tuning(struct mmc_host *host);
-void set_RTK_initial_flag(int flag);
-//int mmc_flush_cache(struct mmc_card *card);
-
 static void down_speed_handling(struct rtkemmc_host *emmc_port);
 //void set_RTK_initial_flag(int flag);
 int mmc_select_hs200(struct mmc_card *card);
@@ -110,14 +90,14 @@ struct mmc_host * mmc_host_local = NULL;
 static u32 rtk_emmc_bus_wid = 0;
 static volatile struct backupRegs gRegTbl;
 static volatile int g_bResuming;
-volatile int g_bTuning;
+extern volatile int g_bTuning;
 static int bSendCmd0=0;
 volatile unsigned int gCurrentBootMode=MODE_SDR;
 volatile unsigned int gPreventRetry=0;
 static volatile unsigned int  g_crinit=0;
 static struct rw_semaphore cr_rw_sem;
 //ip descriptor on ddr
-unsigned int* gddr_descriptor=NULL;
+extern unsigned int* gddr_descriptor=NULL;
 static unsigned int* gddr_descriptor_org=NULL;
 //internal emmc dma buffer on ddr
 static unsigned char* gddr_dma=NULL;
@@ -125,19 +105,28 @@ static unsigned char* gddr_dma_org=NULL;
 
 volatile void __iomem  *sb2_debug;   
 
-u32 rtkemmc_global_blksize;
-u32 rtkemmc_global_bytecnt;
-u32 rtkemmc_global_dbaddr;
+extern u32 rtkemmc_global_blksize;
+extern u32 rtkemmc_global_bytecnt;
+extern u32 rtkemmc_global_dbaddr;
 
 
+#ifdef BL31_TSP_TEST
+ssize_t tsp_trigger(struct file *filp, const char __user *buff, unsigned long len, void *data);
+static struct proc_dir_entry *proc_file = NULL;
+static struct file_operations proc_fops = 
+{
+.owner = THIS_MODULE,
+.write = tsp_trigger
+};
+
+#endif
 static u32 pddrive_nf_s0[5] = {0};
 static u32 pddrive_nf_s2[5] = {0};
 
 struct clk * clk_en_emmc;
 struct clk * clk_en_emmc_ip;
-struct clk * clk_cr;
 
-int cmd_resend=0;
+extern int cmd_resend=0;
 static void rtkemmc_request(struct mmc_host *host, struct mmc_request *mrq);
 static int rtkemmc_get_ro(struct mmc_host *mmc);
 static void rtkemmc_set_ios(struct mmc_host *host, struct mmc_ios *ios);
@@ -157,8 +146,14 @@ static int rtkemmc_execute_tuning(struct mmc_host *host, u32 opcode);
 static int rtkemmc_prepare_hs400_tuning(struct mmc_host *host, struct mmc_ios *ios);
 void phase(struct rtkemmc_host *emmc_port, u32 VP0, u32 VP1);
 
+#ifdef BPI
 int rtkemmc_select_timing(struct mmc_card *card);
 void rtkemmc_select_card_type(struct mmc_card *card);
+#else
+extern int rtkemmc_select_timing(struct mmc_card *card);
+extern void rtkemmc_select_card_type(struct mmc_card *card);
+#endif
+
 typedef void (*set_gpio_func_t)(u32 gpio_num,u8 dir,u8 level);
 
 static const struct mmc_host_ops rtkemmc_ops = {
@@ -166,8 +161,7 @@ static const struct mmc_host_ops rtkemmc_ops = {
     .get_ro         = rtkemmc_get_ro,
     .set_ios        = rtkemmc_set_ios,
     .execute_tuning = rtkemmc_execute_tuning,
-    .prepare_hs400_tuning = rtkemmc_prepare_hs400_tuning,
-    .dqs_tuning = rtkemmc_dqs_tuning
+    .prepare_hs400_tuning = rtkemmc_prepare_hs400_tuning
 };
 
 #define UNSTUFF_BITS(resp,start,size)					\
@@ -184,27 +178,29 @@ static const struct mmc_host_ops rtkemmc_ops = {
 		__res & __mask;						\
 	})
 
-void rtkemmc_hw_reset(void)
-{
-	struct mmc_host * mmc = mmc_host_local;
-	struct rtkemmc_host *emmc_port;
-	u32 reg_val=0;
-	emmc_port = mmc_priv(mmc);
-	if(emmc_port!=NULL) {
-		printk(KERN_ERR "muxpad0=0x%x, before emmc do hw reset...\n",readl(emmc_port->emmc_membase + EMMC_muxpad0));
-		reg_val = readl(emmc_port->emmc_membase + EMMC_muxpad0);
-		reg_val &= ~0xFFFF0C3C;
-		reg_val |= 0xaaaa0828;
-		writel(reg_val, emmc_port->emmc_membase+EMMC_muxpad0);
-		mdelay(1);
-		printk(KERN_ERR "muxpad0=0x%x, emmc do really hw reset...\n",readl(emmc_port->emmc_membase + EMMC_muxpad0));
-		writel(0x0, emmc_port->emmc_membase+0x78);
-		mdelay(1);
-		writel(0x1, emmc_port->emmc_membase+0x78);
-	}
-}
-EXPORT_SYMBOL(rtkemmc_hw_reset);
+#ifdef BL31_TSP_TEST
 
+ssize_t tsp_trigger(struct file *filp, const char __user *buff, unsigned long len, void *data) 
+{ 
+#if 0	
+	printk(KERN_ERR "tsp_trigger !!! \n");
+	unsigned int arg1 = 3, arg2 = 5;
+	printk(KERN_ERR "TSP_ADD: x1 = 3, x2 = 5 \n");
+	asm volatile("mov x1, %0" : : "r"(arg1): "cc");
+	asm volatile("mov x2, %0" : : "r"(arg2): "cc");
+	asm volatile("ldr x0, =0xf2002000" : : : "cc");
+	asm volatile("isb" : : : "cc");
+	asm volatile("smc #0" : : : "cc");
+	asm volatile("isb" : : : "cc");
+	asm volatile("mov %0, x1" : "=r"(arg1): : "cc");
+	asm volatile("mov %0, x2" : "=r"(arg2): : "cc");
+	asm volatile("isb" : : : "cc");
+	printk(KERN_ERR "Result: x1 = %u, x2 = %u \n",arg1, arg2);
+#endif	
+	return len; 
+}
+
+#endif
 static void make_ip_des(u32 dma_addr, u32 dma_length, u32 p_des_base, struct rtkemmc_host *emmc_port){
 
         u32  blk_cnt;
@@ -354,8 +350,8 @@ static void rtkemmc_set_pin_mux(struct rtkemmc_host *emmc_port)
     //set default i/f to emmc      
     reg_val = readl(emmc_port->emmc_membase + EMMC_muxpad0);
 	reg_val &= ~0xFFFF0C3C;
-    //reg_val |= 0xaaaa0828;	//comment by Jim
-	reg_val |= 0xaaaa0824;	//2017/1/17 modified by Jim, change pin mux to NAND flash instead of emmc rstn
+    //reg_val |= 0xaaaa0828;	
+	reg_val |= 0xaaaa0824;	//modified by Jim 2017.1.17, mux to NAND flash I/F instead of EMMC rst_n
 	rtkemmc_writel(reg_val, emmc_port->emmc_membase+EMMC_muxpad0);
 	sync(emmc_port);
     	rtkemmc_writel((readl(emmc_port->emmc_membase + EMMC_muxpad1)&0xffffcfff)|0x2000, emmc_port->emmc_membase + EMMC_muxpad1); //kylin data strobe pad mux
@@ -425,9 +421,7 @@ static int wait_done_timeout(struct rtkemmc_host *emmc_port, volatile u32 *addr,
 			
             if(n++ > 3000000)
             {
-		rtk_lockapi_lock2(flags2, _at_("wait_done_timeout"));
-		printk(KERN_ERR "Timeout!!! addr=%x, mask=%x, value=%x, emmc_port->emmc_membase + EMMC_STATUS=%x\n",addr,mask,value,readl(emmc_port->emmc_membase + EMMC_STATUS));
-		 rtk_lockapi_unlock2(flags2, _at_("wait_done_timeout"));
+        		printk(KERN_ERR "Timeout!!\n");
                 return -1;
             }
 			udelay(1);
@@ -445,7 +439,7 @@ static void rtkemmc_set_freq(struct rtkemmc_host *emmc_port, u32 freq)
 	isb();
 	sync(emmc_port);
 
-	//disable clk_en_emmc_ip, using common clk framework`
+	//disable clk_en_emmc_ip
 	//tmp_val = (readl(emmc_port->crt_membase + SYS_CLOCK_ENABLE1) & 0xefffffff);
 	//rtkemmc_writel(tmp_val, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
 	clk_disable_unprepare(clk_en_emmc_ip);
@@ -491,7 +485,7 @@ static void rtkemmc_set_freq(struct rtkemmc_host *emmc_port, u32 freq)
 	isb();
 	sync(emmc_port);
 	
-	//enable clk_en_emmc_ip
+	//enable clk_en_emmc_ip	
 	//tmp_val = (readl(emmc_port->crt_membase + SYS_CLOCK_ENABLE1) | 0x10000000);
 	//rtkemmc_writel(tmp_val, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
 
@@ -784,20 +778,20 @@ static int rtkemmc_set_rspparam(struct rtkemmc_host *emmc_port, struct sd_cmd_pk
 		case MMC_ERASE:
 			cmd_info->cmd_para = (CMD_START_CMD|CMD_USE_HOLD_REG|CMD_CHK_RESP_CRC|CMD_RSP_EXP);
 	    	cmd_info->rsp_len = 6;
-			break;
+			break;	
 	case MMC_GEN_CMD:
-	    if(cmd_info->cmd->arg & 0x1) {   //read single block
-		cmd_info->cmd->arg = 0x1;
-		cmd_info->cmd_para = (CMD_START_CMD|CMD_USE_HOLD_REG|CMD_DATA_EXP|CMD_CHK_RESP_CRC|CMD_RSP_EXP|CMD_WAIT_PRV_DATA_COMPLETE);
-		cmd_info->rsp_len = 6;
-		break;
-	    }
-	    else {      //write single block
-		cmd_info->cmd->arg = 0x0;
-		cmd_info->cmd_para = (CMD_START_CMD|CMD_USE_HOLD_REG|CMD_RD_WR|CMD_DATA_EXP|CMD_CHK_RESP_CRC|CMD_RSP_EXP);
-		cmd_info->rsp_len = 6;
-		break;
-	    }
+            if(cmd_info->cmd->arg & 0x1) {   //read single block
+                cmd_info->cmd->arg = 0x1;
+                cmd_info->cmd_para = (CMD_START_CMD|CMD_USE_HOLD_REG|CMD_DATA_EXP|CMD_CHK_RESP_CRC|CMD_RSP_EXP|CMD_WAIT_PRV_DATA_COMPLETE);
+                cmd_info->rsp_len = 6;
+                break;
+            }
+            else {      //write single block
+                cmd_info->cmd->arg = 0x0;
+                cmd_info->cmd_para = (CMD_START_CMD|CMD_USE_HOLD_REG|CMD_RD_WR|CMD_DATA_EXP|CMD_CHK_RESP_CRC|CMD_RSP_EXP);
+                cmd_info->rsp_len = 6;
+                break;
+            }
         default:
             cmd_info->cmd_para = (CMD_START_CMD|CMD_USE_HOLD_REG);
 	    cmd_info->rsp_len = 6;
@@ -1213,18 +1207,6 @@ STR_CMD_RET:
     return err;
 }
 
-void rtkemmc_speed_up(void)
-{
-        struct mmc_host * mmc = mmc_host_local;
-        struct rtkemmc_host *emmc_port;
-
-        emmc_port = mmc_priv(mmc);
-
-        rtkemmc_set_freq(emmc_port,0x46);  //80Mhz
-        rtkemmc_set_ip_div(emmc_port,EMMC_CLOCK_DIV_8);
-}
-EXPORT_SYMBOL(rtkemmc_speed_up);
-
 static u32 rtkemmc_chk_cmdcode(struct mmc_command* cmd){
     u32 cmdcode;
 
@@ -1301,18 +1283,6 @@ static int SD_Stream(struct sd_cmd_pkt *cmd_info)
     //printk("%s cmd_info->data->blksz * cmd_info->data->blocks =0x%x \n", __func__, 	cmd_info->data->blksz * cmd_info->data->blocks); 
     dma_leng = cmd_info->data->blksz * cmd_info->data->blocks;
 
-#ifdef RTK_EMMC_HEALTH_REPORT
-	//if(host->remainder == 0) printk(KERN_INFO "cmd_info->data->blksz = %d\n", cmd_info->data->blksz);
-	//1G = 1024 x 1024 x 1024 bytes, so emmc size is from ext_csd,
-	if((cmd_info->cmd->opcode==24 || cmd_info->cmd->opcode==25) && host->card!=NULL) {
-		host->remainder += cmd_info->data->blocks;
-		if(host->remainder/host->card->ext_csd.sectors > 0) {
-			host->wr_emmc_size_cnt += (host->remainder/host->card->ext_csd.sectors);
-			host->remainder = host->remainder % host->card->ext_csd.sectors;
-		}
-	}
-	if(host->wr_emmc_size_cnt > 3000) printk(KERN_ERR "EMMC write count is larger than 3000 times of emmc size!!!\n");
-#endif
 		//				PAGE_SIZE, dir);
 #ifdef SHOW_MMC_PRD
     printk("dma_addr:0x%x; dma_leng:0x%x\n",dma_addr,dma_leng);
@@ -1432,7 +1402,7 @@ static void down_speed_handling(struct rtkemmc_host *emmc_port)
                 rtk_lockapi_unlock2(flags2, _at_("down_speed_handling"));
 
         host_card_stop2(emmc_port);
-        polling_to_tran_state(emmc_port,MMC_WRITE_MULTIPLE_BLOCK,1);
+        polling_to_tran_state(emmc_port,1);
 
         if (!g_bResuming)
                 gCurrentBootMode = MODE_SDR;
@@ -1444,7 +1414,7 @@ static void down_speed_handling(struct rtkemmc_host *emmc_port)
         rtkemmc_set_ip_div(emmc_port, EMMC_CLOCK_DIV_2); // 100MHZ/2 = 50MHZ
         rtkemmc_set_pad_driving(emmc_port,0x33, 0x33, 0x33, 0x33);
 
-	rtkemmc_writel(3, emmc_port->crt_membase + SYS_PLL_EMMC1);      //980001f0
+        rtkemmc_writel(3, emmc_port->crt_membase + SYS_PLL_EMMC1);      //980001f0
         isb();
 
         sync(emmc_port);
@@ -1665,7 +1635,7 @@ done:
 	if(cmd_resend==1) {
                         cmd_resend=0;
                         down_speed_handling(emmc_port);
-        }
+        }	
         //spin_unlock(&emmc_port->lock);
 }
 
@@ -1697,23 +1667,17 @@ static int rtkemmc_execute_tuning(struct mmc_host *host, u32 opcode)
     g_bTuning = 1;
     switch(host->mode)
     {
+	default:
 	case MODE_SDR:
 		mmc_Tuning_SDR50(emmc_port);
-		set_RTK_initial_flag(1);
 		break;
 	case MODE_DDR:
 		mmc_Tuning_DDR50(emmc_port);
-		set_RTK_initial_flag(1);
 		break;
 	case MODE_HS200:
-		mmc_Tuning_HS200(emmc_port,host->mode);
-		set_RTK_initial_flag(1);
-                break;
 	case MODE_HS400:
-		mmc_Tuning_HS400(emmc_port,host->mode);
+		mmc_Tuning_HS200(emmc_port,host->mode);
 		break;
-	default:
-		set_RTK_initial_flag(1);
     } 
 	g_bTuning = 0;
     return 0;
@@ -1721,20 +1685,15 @@ static int rtkemmc_execute_tuning(struct mmc_host *host, u32 opcode)
 
 static int rtkemmc_prepare_hs400_tuning(struct mmc_host *host, struct mmc_ios *ios)
 {
-	unsigned long flags2;
-        struct rtkemmc_host *emmc_port;
-        emmc_port = mmc_priv(host);
-        printk(KERN_ERR "Prepare HS400 mode...\n");
-        rtk_lockapi_lock2(flags2, _at_("rtkemmc_prepare_hs400_tuning"));
-        rtkemmc_writel(0x88 ,emmc_port->emmc_membase + EMMC_DQS_CTRL1);
-        rtk_lockapi_unlock2(flags2, _at_("rtkemmc_prepare_hs400_tuning"));
-	return 0;
+    //do nothing
+
+    return 0;
 }
 static void rtkemmc_set_ios(struct mmc_host *host, struct mmc_ios *ios)
 {
     struct rtkemmc_host *emmc_port;
     u32 tmp_clock, busmode=0;
-    unsigned long flags2;
+    unsigned long flags;
     u32 cur_timing = 0;
 
     emmc_port = mmc_priv(host);
@@ -1760,9 +1719,7 @@ static void rtkemmc_set_ios(struct mmc_host *host, struct mmc_ios *ios)
              	rtkemmc_set_ip_div(emmc_port,EMMC_CLOCK_DIV_NON);
 		isb();
         	sync(emmc_port);
-		rtk_lockapi_lock2(flags2, _at_("rtkemmc_set_ios"));
 		rtkemmc_writel(0x80000000 ,emmc_port->emmc_membase + EMMC_DDR_REG); //enable HS400
-		rtk_lockapi_unlock2(flags2, _at_("rtkemmc_set_ios"));
 		isb();
         	sync(emmc_port);
             	printk(KERN_INFO "%s - enable HS400, DDR_REG:0x%08x\n",__func__,readl(emmc_port->emmc_membase + EMMC_DDR_REG));
@@ -1793,23 +1750,20 @@ static void rtkemmc_set_ios(struct mmc_host *host, struct mmc_ios *ios)
         printk(KERN_INFO "set bus width 8\n");
         rtkemmc_set_bits(emmc_port,BUS_WIDTH_8);
         busmode = BUS_WIDTH_8;
-	rtk_lockapi_lock2(flags2, _at_("rtkemmc_set_ios"));
         if (cur_timing == MMC_TIMING_MMC_HS400)
     	{
    		rtkemmc_writel(0x00010001, emmc_port->emmc_membase + EMMC_UHSREG); //DDR
 		isb();
        		sync(emmc_port);
-		rtkemmc_writel(0x88 ,emmc_port->emmc_membase + EMMC_DQS_CTRL1); //dqs dly tap
+		rtkemmc_writel(0x90 ,emmc_port->emmc_membase + EMMC_DQS_CTRL1); //dqs dly tap
 		isb();
        		sync(emmc_port);
 		//rtkemmc_dump_registers(emmc_port);
        		sync(emmc_port);
-		printk(KERN_INFO "HS400 : set DDR mode and dqs delay tap EMMC_UHSREG=%x\n", readl(emmc_port->emmc_membase + EMMC_UHSREG));
+       		printk(KERN_INFO "HS400 : set DDR mode and dqs delay tap\n");
    	}
-	else {
+    	else
     		rtkemmc_writel(0x00000001, emmc_port->emmc_membase + EMMC_UHSREG); //non-DDR, such as SDR / HS200
-	}
-	rtk_lockapi_unlock2(flags2, _at_("rtkemmc_set_ios"));
     } else if (ios->bus_width == MMC_BUS_WIDTH_4){
        	printk(KERN_INFO "set bus width 4\n");
         rtkemmc_set_bits(emmc_port,BUS_WIDTH_4);
@@ -1823,7 +1777,6 @@ static void rtkemmc_dump_registers(struct rtkemmc_host *emmc_port)
     printk(KERN_INFO "%s : \n", __func__);
 	printk(KERN_INFO "EMMC_muxpad0 = 0x%08x \n", readl(emmc_port->emmc_membase + EMMC_muxpad0));
 	printk(KERN_INFO "EMMC_muxpad1 = 0x%08x \n", readl(emmc_port->emmc_membase + EMMC_muxpad1));
-	printk(KERN_INFO "EMMC_muxpad2 = 0x%08x \n", readl(emmc_port->emmc_membase + EMMC_muxpad2));
 	printk(KERN_INFO "EMMC_PFUNC_NF1 = 0x%08x \n", readl(emmc_port->emmc_membase + EMMC_PFUNC_NF1));
 	printk(KERN_INFO "EMMC_PFUNC_CR  = 0x%08x \n", readl(emmc_port->emmc_membase + EMMC_PFUNC_CR));
 	printk(KERN_INFO "EMMC_PDRIVE_NF1 = 0x%08x \n", readl(emmc_port->emmc_membase + EMMC_PDRIVE_NF1));
@@ -1847,7 +1800,6 @@ static void rtkemmc_restore_registers(struct rtkemmc_host *emmc_port)
 
 	rtkemmc_writel(gRegTbl.emmc_mux_pad0, emmc_port->emmc_membase + EMMC_muxpad0);
 	rtkemmc_writel(gRegTbl.emmc_mux_pad1, emmc_port->emmc_membase + EMMC_muxpad1);
-	rtkemmc_writel(gRegTbl.emmc_mux_pad2, emmc_port->emmc_membase + EMMC_muxpad2);
 	rtkemmc_writel(gRegTbl.emmc_pfunc_nf1, emmc_port->emmc_membase + EMMC_PFUNC_NF1);
 	rtkemmc_writel(gRegTbl.emmc_pfunc_cr, emmc_port->emmc_membase + EMMC_PFUNC_CR);
 	rtkemmc_writel(gRegTbl.emmc_pdrive_nf1, emmc_port->emmc_membase + EMMC_PDRIVE_NF1);
@@ -1871,7 +1823,6 @@ static void rtkemmc_backup_registers(struct rtkemmc_host *emmc_port)
 	
    	gRegTbl.emmc_mux_pad0 = readl(emmc_port->emmc_membase + EMMC_muxpad0);
    	gRegTbl.emmc_mux_pad1 = readl(emmc_port->emmc_membase + EMMC_muxpad1);
-	gRegTbl.emmc_mux_pad2 = readl(emmc_port->emmc_membase + EMMC_muxpad2);
 	gRegTbl.emmc_pfunc_nf1 = readl(emmc_port->emmc_membase + EMMC_PFUNC_NF1);
 	gRegTbl.emmc_pfunc_cr = readl(emmc_port->emmc_membase + EMMC_PFUNC_CR);
 	gRegTbl.emmc_pdrive_nf1 = readl(emmc_port->emmc_membase + EMMC_PDRIVE_NF1);
@@ -1910,11 +1861,7 @@ static void rtkemmc_chk_card_insert(struct rtkemmc_host *emmc_port)
 		VP1_saved = (readl(emmc_port->crt_membase + SYS_PLL_EMMC1) & 0x00001f00) >> 8;
 	}
 #endif
-
-#ifdef DQS_INHERITED
-	if (dqs_saved == 0xff)
-		dqs_saved = readl(emmc_port->emmc_membase + EMMC_DQS_CTRL1);
-#endif
+	
 	rtkemmc_writel(3, emmc_port->crt_membase + SYS_PLL_EMMC1);
         isb();
         sync(emmc_port);
@@ -1928,7 +1875,7 @@ static void rtkemmc_chk_card_insert(struct rtkemmc_host *emmc_port)
         rtkemmc_writel(0x00000001, emmc_port->emmc_membase + EMMC_PWREN);
         isb();
         sync(emmc_port);
-        rtkemmc_writel(0x0000ffce, emmc_port->emmc_membase + EMMC_INTMASK);
+        rtkemmc_writel(0x0000ffff, emmc_port->emmc_membase + EMMC_INTMASK);
         isb();
         sync(emmc_port);
         rtkemmc_writel(0xffffffff, emmc_port->emmc_membase + EMMC_RINTSTS);
@@ -1965,7 +1912,7 @@ static void rtkemmc_chk_card_insert(struct rtkemmc_host *emmc_port)
         rtkemmc_writel(0x00000080, emmc_port->emmc_membase + EMMC_BMOD);
         isb();
         sync(emmc_port);
-        rtkemmc_writel(0x0000ffce, emmc_port->emmc_membase + EMMC_INTMASK);
+        rtkemmc_writel(0x0000ffcf, emmc_port->emmc_membase + EMMC_INTMASK);
         isb();
         sync(emmc_port);
         //rtkemmc_writel(0x00600000, emmc_port->emmc_membase + EMMC_DBADDR);
@@ -2446,7 +2393,7 @@ void mmc_host_reset(struct rtkemmc_host *emmc_port)
 		rtkemmc_writel(0x00000001, emmc_port->emmc_membase + EMMC_PWREN);
 		isb();
 		sync(emmc_port);
-		rtkemmc_writel(0x0000ffce, emmc_port->emmc_membase + EMMC_INTMASK);
+		rtkemmc_writel(0x0000ffff, emmc_port->emmc_membase + EMMC_INTMASK);
 		isb();
 		sync(emmc_port);
 		rtkemmc_writel(0xffffffff, emmc_port->emmc_membase + EMMC_RINTSTS);
@@ -2488,7 +2435,7 @@ void mmc_host_reset(struct rtkemmc_host *emmc_port)
 		rtkemmc_writel(0x00000080, emmc_port->emmc_membase + EMMC_BMOD);
 		isb();
 		sync(emmc_port);
-		rtkemmc_writel(0x0000ffce, emmc_port->emmc_membase + EMMC_INTMASK);
+		rtkemmc_writel(0x0000ffcf, emmc_port->emmc_membase + EMMC_INTMASK);
 		isb();
 		sync(emmc_port);
 		rtkemmc_writel(0x00600000, emmc_port->emmc_membase + EMMC_DBADDR);
@@ -2573,74 +2520,76 @@ void phase(struct rtkemmc_host *emmc_port, u32 VP0, u32 VP1){
 
 int search_best(u32 window, u32 range)
 {
-        int i, j, k, max;
-        int window_temp[32];
-        int window_start[32];
-        int window_end[32];
-        int window_max=0;
-        int window_best=0;
-        int parse_end=1;
-
-        for( i=0; i<0x20; i++ ) {
-                window_temp[i]=0;
-                window_start[i]=0;
-                window_end[i]=-1;
-        }
-        j=1;
-        i=0;
-        k=0;
-        max=0;
-
-	while((i<(range-1)) && (k<(range-1))){
-                parse_end=0;
-                for( i=window_end[j-1]+1; i<range; i++ ){
-                        if (((window>>i)&1)==1 ){
-                                window_start[j]=i;
-                                break;
-                        }
-                }
-                if( i==range){
-                        break;
-                }
-                for( k=window_start[j]+1; k<range; k++ ){
-                        if(((window>>k)&1)==0){
-                                window_end[j]=k-1;
-                                parse_end=1;
-                                break;
-                        }
-                }
-                if(parse_end==0){
-                        window_end[j]=range-1;
-                }
-                j++;
-        }
-        for(i=1; i<j; i++){
-                window_temp[i]= window_end[i]-window_start[i]+1;
-        }
-        if((((window)&1)==1)&&(((window>>(range-1))&1)==1))
-        {
-                window_temp[1]=window_temp[1]+window_temp[j-1];
-                window_start[1]=window_start[j-1];
-        }
-        for(i=1; i<j; i++){
-                if(window_temp[i]>window_max){
-                        window_max=window_temp[i];
-                        max=i;
-                }
-        }
-        if(window==0xffffffff){
-                window_best=0x10;
-        }
-        else if((window==0xffff)&&(range==0x10)){
-                window_best=0x8;
-                }
-        else if((((window&1)==1)&&(((window>>(range-1))&1)==1))&&(max==1)){
-                window_best=(((window_start[max]+window_end[max]+range)/2)&0x1f);
-        }
-        else {
-                window_best=((window_start[max]+window_end[max])/2)&0x1f;
-        }
-        return window_best;
+	int i, j, k, max;
+	int window_temp[32];
+	int window_start[32];
+	int window_end[32];	
+	int window_max=0;	
+	int window_best=0;	
+	int parse_end=1;
+	for( i=0; i<0x20; i++ ){
+		window_temp[i]=0;	
+		window_start[i]=0;	
+		window_end[i]=-1;	
+		}
+	j=1;
+	i=0;
+	k=0;
+	max=0;
+	while((i<0x1f) && (k<0x1f)){	
+		parse_end=0;
+		for( i=window_end[j-1]+1; i<0x20; i++ ){
+			if (((window>>i)&1)==1 ){
+				window_start[j]=i;
+				break;
+				}
+			}	
+		if( i==0x20){			
+			break;
+			}	
+		for( k=window_start[j]+1; k<0x20; k++ ){
+			if(((window>>k)&1)==0){
+				window_end[j]=k-1;
+				parse_end=1;
+				break;			
+				}
+			}
+		if(parse_end==0){
+			window_end[j]=0x1f;
+			}				
+			j++;
+		}	
+	for(i=1; i<j; i++){
+		window_temp[i]= window_end[i]-window_start[i]+1;
+	}
+	if((((window>>(0x20-range))&1)==1)&&(((window>>0x1f)&1)==1))
+	{
+		window_temp[1]=window_temp[1]+window_temp[j-1];
+		window_start[1]=window_start[j-1];
+		}
+	for(i=1; i<j; i++){
+		if(window_temp[i]>window_max){
+			window_max=window_temp[i];
+			max=i;
+			}
+		}
+	if(window==0xffffffff){
+		window_best=0x10;
+		}	
+	else if((window==0xffff0000)&&(range==0x10)){
+		window_best=0x18;
+		}	
+	else if(((((window>>(0x20-range))&1)==1)&&(((window>>0x1f)&1)==1))&&(max==1)){
+		window_best=(((window_start[max]+window_end[max]+range)/2)&0x1f)|(0x20-range);
+		
+	}
+	else {
+		window_best=((window_start[max]+window_end[max])/2)&0x1f;	
+	}	
+	MMCPRINTF(KERN_INFO "window start=0x%x \n", window_start[max]);	
+	MMCPRINTF(KERN_INFO "window end=0x%x \n", window_end[max]);	
+	MMCPRINTF(KERN_INFO "window best=0x%x \n", window_best);	
+	return window_best;
 }
 
 int check_error(struct rtkemmc_host *emmc_port){
@@ -2710,16 +2659,14 @@ int check_error(struct rtkemmc_host *emmc_port){
 	return 0;
 }
 
-void rtkemmc_phase_tuning(struct rtkemmc_host *emmc_port,u32 mode,int flag)
+void rtkemmc_phase_tuning(struct rtkemmc_host *emmc_port,u32 mode)
 {
 	u32 TX_window=0;
 	u32 RX_window=0;
-	u32 TX1_window=0;
+	
 	int TX_fixed=0xff;
 	int RX_fixed=0xff;
-	int TX_best=0x0;
-        int RX_best=0x0;
-	int TX1_best=0x0;
+	
 	int i=0;
 	u32 range=0;
 	u16 state=0;
@@ -2729,25 +2676,7 @@ void rtkemmc_phase_tuning(struct rtkemmc_host *emmc_port,u32 mode,int flag)
 	else
 		range = 0x20;
 
-	if(suspend == 1 && (emmc_port->tx_tuning || emmc_port->rx_tuning) && emmc_port->mmc->card->cid.manfid != 0x13)
-        {
-		if(emmc_port->tx_tuning==0 && emmc_port->rx_tuning==1) {
-			phase(emmc_port, VP0_saved, suspend_VP1);
-		}
-		else if(emmc_port->tx_tuning==1 && emmc_port->rx_tuning==0)
-		{
-			phase(emmc_port, suspend_VP0, VP1_saved);
-		}
-		else {
-			phase(emmc_port, suspend_VP0, suspend_VP1);
-		}
-		sync(emmc_port);
-		printk(KERN_ERR "suspend/resume: restore tx & rx phase: TX=0x%x, RX=0x%x\n", suspend_VP0, suspend_VP1);
-		if(mode == MODE_HS200) {
-			suspend = 0;
-		}
-		return;
-	}
+
 #ifdef PHASE_INHERITED
 	host_card_stop(emmc_port);
 	if (emmc_port->tx_tuning || emmc_port->rx_tuning){
@@ -2757,7 +2686,6 @@ void rtkemmc_phase_tuning(struct rtkemmc_host *emmc_port,u32 mode,int flag)
   	else{
 		phase(emmc_port, VP0_saved, VP1_saved); //VP0, VP1 phase
 		sync(emmc_port);
-		printk(KERN_ERR "Inherit bootcode tuning phase: TX=0x%x, RX=0x%x\n", VP0_saved, VP1_saved);
 		return;
   	}
 #else
@@ -2775,24 +2703,24 @@ void rtkemmc_phase_tuning(struct rtkemmc_host *emmc_port,u32 mode,int flag)
 		printk(KERN_ERR "++++++++++++++++++\nFIXED TX_PHASE = 0x%02x\n++++++++++++++++++\n", TX_fixed);
 	}
 	else if (emmc_port->tx_tuning) {
-		if (mode == MODE_HS400 && flag==1)
-                        printk(KERN_ERR "Start HS400 TX Tuning: \n");
-                else if(flag==1)
-                        printk(KERN_ERR "Start HS200 TX Tuning:\n");
-                for(i=0;i<range;i++) {
-                        phase(emmc_port, i, 0xff);
-#ifdef DEBUG
-                        printk("phase =0x%x \n", i);
-#endif
-
-                        if(rtkemmc_send_cmd13(emmc_port, &state) != 0)
-                                TX_window= TX_window&(~(1<<i));
-                        else
-                                TX_window= TX_window|((1<<i));
-                }
-                TX_best = search_best(TX_window, range);
-                if(flag==1)printk(KERN_ERR "TX_WINDOW = 0x%08x\n TX_best=0x%x\n", TX_window, TX_best);
-                phase(emmc_port, TX_best, 0xff);
+		
+		printk(KERN_ERR "++++++++++++++++++ Start HS200 TX Tuning, mode:0x%08x ",mode);
+		for(i=(0x20-range); i<0x20; i++){
+			phase(emmc_port, i, 0xff);
+			#ifdef DEBUG		
+			printk("phase =0x%x \n", i);
+			#endif
+			if(rtkemmc_send_cmd13(emmc_port, &state) != 0)
+			{
+				TX_window= TX_window&(~(1<<i));
+			}
+			else
+			{
+				TX_window= TX_window|((1<<i));		
+			}
+		}
+		printk(KERN_ERR "++++++++++++++++++\nTX_WINDOW = 0x%08x\n++++++++++++++++++\n", TX_window);	
+		phase(emmc_port, search_best(TX_window, range), 0xff);
 	}
 
 	if (RX_fixed != 0xff) {
@@ -2800,49 +2728,23 @@ void rtkemmc_phase_tuning(struct rtkemmc_host *emmc_port,u32 mode,int flag)
 		printk(KERN_ERR "++++++++++++++++++\nFIXED RX_PHASE = 0x%02x\n++++++++++++++++++\n", RX_fixed);
 	}
 	else if (emmc_port->rx_tuning) {
-		if (mode == MODE_HS400 && flag==1)
-                        printk(KERN_ERR "Start HS400 RX Tuning:\n");
-                else if(flag==1)
-                        printk(KERN_ERR "Start HS200 RX Tuning:\n ");
-                for(i=0;i<range;i++) {
-                        phase(emmc_port, 0xff, i);
-#ifdef DEBUG
-                        printk("phase =0x%x \n", i);
-#endif
-                        if(rtkemmc_send_cmd18(emmc_port, 1024, 0x100, 0) != 0)
-                                RX_window= RX_window&(~(1<<i));
-                        else
-                                RX_window= RX_window|((1<<i));
-                }
-                RX_best = search_best(RX_window, range);
-		suspend_VP1 = RX_best;
-                if(flag==1)printk(KERN_ERR "RX_WINDOW = 0x%08x RX_best=0x%x\n", RX_window,RX_best);
-                phase(emmc_port, 0xff, RX_best);
-	}
-	if (TX_fixed != 0xff) {
-                phase(emmc_port, TX_fixed, 0xff);
-                printk(KERN_ERR "++++++++++++++++++\nFIXED TX_PHASE = 0x%02x\n++++++++++++++++++\n", TX_fixed);
-        }
-        else if (emmc_port->tx_tuning) {
-		TX1_window= TX_window;
-                if (mode == MODE_HS400 && flag==1)
-                        printk(KERN_ERR "Start HS400 TX Tuning2:\n");
-                else if(flag==1)
-                        printk(KERN_ERR "Start HS200 TX Tuning2:\n");
-                for(i=0;i<range;i++) {
-                        if(((TX_window>>i)&1)==1) {
-                                phase(emmc_port, i, 0xff);
-#ifdef DEBUG
-                                printk("phase =0x%x \n", i);
-#endif
-                                if(rtkemmc_send_cmd25(emmc_port, 1024,0xfe,0) != 0)
-                                        TX1_window= TX1_window&(~(1<<i));
-                        }
-                }
-                TX1_best = search_best(TX1_window, range);
-		suspend_VP0 = TX1_best;
-                if(flag==1)printk(KERN_ERR "TX1_WINDOW = 0x%08x TX1_best=0x%x\n", TX1_window,TX1_best);
-                phase(emmc_port, TX1_best, 0xff);
+		printk(KERN_ERR "++++++++++++++++++ Start HS200 RX Tuning ");	
+		for(i=(0x20-range); i<0x20; i++){
+			phase(emmc_port, 0xff, i);
+			#ifdef DEBUG		
+			printk("phase =0x%x \n", i);
+			#endif
+			if(rtkemmc_send_cmd18(emmc_port) != 0)
+			{
+				RX_window= RX_window&(~(1<<i));
+			}
+			else
+			{
+				RX_window= RX_window|((1<<i));		
+			}
+		}
+		printk(KERN_ERR "++++++++++++++++++\nRX_WINDOW = 0x%08x\n++++++++++++++++++\n", RX_window);	
+		phase(emmc_port, 0xff, search_best(RX_window, range));
 	}
 	sync(emmc_port);
 }
@@ -2884,37 +2786,12 @@ static int mmc_Tuning_HS200(struct rtkemmc_host *emmc_port,u32 mode){
 	}
 #endif
 
-	rtkemmc_phase_tuning(emmc_port,mode,1);
-	//mmc_flush_cache(host->card);
+	rtkemmc_phase_tuning(emmc_port,mode);
 	sync(emmc_port);	
-	mdelay(10);
+	udelay(100);
     up_write(&cr_rw_sem);
 
 	return 0;
-}
-
-static int mmc_Tuning_HS400(struct rtkemmc_host *emmc_port,u32 mode)
-{
-        MMCPRINTF("%s \n", __func__);
-        down_write(&cr_rw_sem);
-        if (!g_bResuming)
-                gCurrentBootMode = MODE_HS400;
-        MMCPRINTF("[LY]sdr gCurrentBootMode =%d\n",gCurrentBootMode);
-        rtkemmc_set_freq(emmc_port, 0xa6); //200Mhz
-        rtkemmc_set_ip_div(emmc_port, EMMC_CLOCK_DIV_NON); // 200MHZ/1 = 200MHZ
-
-        if (pddrive_nf_s3[0] != 0 )
-                rtkemmc_set_pad_driving(emmc_port, pddrive_nf_s3[1], pddrive_nf_s3[2], pddrive_nf_s3[3], pddrive_nf_s3[4]);
-        else
-                rtkemmc_set_pad_driving(emmc_port,0xff, 0x99, 0xaa, 0x33);
-
-        rtkemmc_phase_tuning(emmc_port,mode,1);
-	//mmc_flush_cache(emmc_port->mmc->card);
-        sync(emmc_port);
-        mdelay(10);
-        up_write(&cr_rw_sem);
-        printk(KERN_ERR "HS400 first stage: final phase=0x%x\n", readl(emmc_port->crt_membase + SYS_PLL_EMMC1));
-        return 0;
 }
 	
 static int mmc_Tuning_DDR50(struct rtkemmc_host *emmc_port){
@@ -2985,7 +2862,7 @@ int error_handling(struct rtkemmc_host *emmc_port, unsigned int cmd_idx, unsigne
     host_card_stop(emmc_port);
 	if (cmd_idx > MMC_SET_RELATIVE_ADDR)
 	{
-		polling_to_tran_state(emmc_port, cmd_idx, bIgnore);
+    		polling_to_tran_state(emmc_port,bIgnore);
 	}
 
     printk(KERN_INFO "%s : status1 val=%02x, cmd_idx=0x%02x, gCurrentBootMode=0x%02x\n", __func__, sts1_val,cmd_idx,gCurrentBootMode);
@@ -2994,26 +2871,28 @@ int error_handling(struct rtkemmc_host *emmc_port, unsigned int cmd_idx, unsigne
     return err;
 }
 
-int polling_to_tran_state(struct rtkemmc_host *emmc_port, int cmd_idx, int bIgnore)
+int polling_to_tran_state(struct rtkemmc_host *emmc_port,int bIgnore)
 {
-        int err=1, retry_cnt=5;
-        u8 ret_state=0;
-        struct mmc_host *host = emmc_port->mmc;
-
-        MMCPRINTF("%s : \n", __func__);
-        sync(emmc_port);
-        while(retry_cnt-- && err)
-                err = rtkemmc_send_status(host->card,&ret_state,0,bIgnore);
-
-        sync(emmc_port);
-
-        if ((err)||(ret_state != STATE_TRAN)) {
-                printk("--- cmd13 fail or ret_state not tran : 0x%08x---\n", ret_state);
+	u32 iobase = emmc_port->emmc_membase;
+	int err=1, retry_cnt=3;
+	int ret_state=0;
+	struct mmc_host *host = emmc_port->mmc;
+    	
+	MMCPRINTF("%s : \n", __func__);
+	sync(emmc_port);
+    while(retry_cnt-- && err)
+    {
+    	err = rtkemmc_send_status(host->card,&ret_state,0,bIgnore);
+    }
+	sync(emmc_port);
+    if ((err)||(ret_state != STATE_TRAN))
+    {
+		printk("--- cmd13 fail or ret_state not tran : 0x%08x---\n", ret_state);
 		rtkemmc_stop_transmission(host->card,1);
-                err = rtkemmc_wait_status(host->card,STATE_TRAN,0,bIgnore);
-        }
-        sync(emmc_port);
-        return err;
+		err = rtkemmc_wait_status(host->card,STATE_TRAN,0,bIgnore);
+    }
+	sync(emmc_port);
+	return err;
 }
 
 int rtkemmc_send_cmd8(struct rtkemmc_host *emmc_port, unsigned int bIgnore)
@@ -3071,7 +2950,7 @@ int rtkemmc_send_cmd8(struct rtkemmc_host *emmc_port, unsigned int bIgnore)
 		}
 		MMCPRINTF("[LY] status1 val=%02x\n", sts1_val);
 		host_card_stop(emmc_port);
-		polling_to_tran_state(emmc_port,MMC_SEND_EXT_CSD,1);
+		polling_to_tran_state(emmc_port,1);
         }
 err8:
 	if (cmd)
@@ -3089,7 +2968,7 @@ err8:
 	sync(emmc_port);
 	return ret_err;
 }
-int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port,int size, unsigned long addr, int flag)
+int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port)
 {
 	int ret_err=0;
     struct sd_cmd_pkt cmd_info;
@@ -3129,11 +3008,11 @@ int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port,int size, unsigned long ad
 		cmd_info.cmd  = (struct mmc_command*) cmd;
 	}
 	cmd_info.emmc_port = emmc_port;
-	cmd_info.cmd->arg = addr;
+	cmd_info.cmd->arg = 0x100;
 	cmd_info.cmd->opcode = MMC_READ_MULTIPLE_BLOCK;
 	cmd_info.rsp_len	 = 6;
 	cmd_info.byte_count  = 0x200;
-	cmd_info.block_count = size/cmd_info.byte_count;
+	cmd_info.block_count = 2;
 	cmd_info.dma_buffer = crd_tmp_buffer;
 	if (cmd_info.cmd->data == NULL)
 	{
@@ -3146,15 +3025,7 @@ int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port,int size, unsigned long ad
 		cmd_info.cmd->data->flags = MMC_DATA_READ;
 	MMCPRINTF("\n*** %s %s %d, cmdidx=0x%02x(%d), resp_type=0x%08x, host=0x%08x, card=0x%08x -------\n", __FILE__, __func__, __LINE__, cmd_info.cmd->opcode, cmd_info.cmd->opcode, cmd_info.cmd->flags, host, host->card);
 	ret_err = SD_Stream_Cmd(EMMC_AUTOREAD1, &cmd_info, 1);
-	if(flag==1) {
-                memcpy(compare2,gddr_dma_org,size);
-                //cp_sha256(gddr_dma_org, size, compare4);
-        }
 
-	rtk_lockapi_lock2(flags2, _at_("rtkemmc_send_cmd18"));
-        if (readl(emmc_port->emmc_membase+EMMC_ISR) & ISR_DMA_DONE_INT)
-                writel(0x2,emmc_port->emmc_membase+EMMC_ISR);
-        rtk_lockapi_unlock2(flags2, _at_("rtkemmc_send_cmd18"));
 	if (ret_err)
 	{
 		MMCPRINTF("[LY] status1 val=%02x\n", sts1_val);
@@ -3162,7 +3033,7 @@ int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port,int size, unsigned long ad
 
 		rtkemmc_stop_transmission(host->card, 1);
 		
-	/*	wait_done_timeout(emmc_port, (u32*)(emmc_port->emmc_membase + EMMC_STATUS), 0x200, 0x0);          //card is not busy
+		wait_done_timeout(emmc_port, (u32*)(emmc_port->emmc_membase + EMMC_STATUS), 0x200, 0x0);          //card is not busy
 		isb();
 		sync(emmc_port);
 
@@ -3178,10 +3049,10 @@ int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port,int size, unsigned long ad
 
 		}else{
 			rtk_lockapi_unlock2(flags2, _at_("rtkemmc_send_cmd18"));
-		}*/
+		}
 
-		host_card_stop(emmc_port);
-		polling_to_tran_state(emmc_port,MMC_READ_MULTIPLE_BLOCK,1);
+		host_card_stop2(emmc_port);
+		polling_to_tran_state(emmc_port,1);
 	}
 err18:
 	if (cmd)
@@ -3259,7 +3130,7 @@ int rtkemmc_send_cmd17(struct rtkemmc_host *emmc_port)
 		MMCPRINTF("[LY] status1 val=%02x\n", sts1_val);
 		rtkemmc_stop_transmission(host->card, 1);
 		host_card_stop(emmc_port);
-		polling_to_tran_state(emmc_port,MMC_READ_SINGLE_BLOCK,1);
+		polling_to_tran_state(emmc_port,1);
 	}
 err17:
 	if (cmd)
@@ -3277,7 +3148,7 @@ err17:
 	return ret_err;
 }
 
-int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int size, unsigned long addr, int flag)
+int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port)
 {
 	int ret_err=0,i=0;
     	struct sd_cmd_pkt cmd_info;
@@ -3300,10 +3171,7 @@ int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int size, unsigned long ad
 
 	for(i=0;i<(2*0x200/4);i++)
 	{
-		if(GLOBAL==0x80000000) GLOBAL=0;
-                else GLOBAL++;
-                *(u32 *)(gddr_dma_org+(i*4)) = GLOBAL;
-		//*(u32 *)(gddr_dma_org+(i*4)) = (u32)((i+0x78*0x80)*0x13579bdf);
+		*(u32 *)(gddr_dma_org+(i*4)) = (u32)((i+0x78*0x80)*0x13579bdf);
 		//isb();
 		//sync(emmc_port);
 	}
@@ -3319,32 +3187,28 @@ int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int size, unsigned long ad
 		cmd_info.cmd  = (struct mmc_command*) cmd;
 	}
 	cmd_info.emmc_port = emmc_port;
-	cmd_info.cmd->arg = addr;
+	cmd_info.cmd->arg = 0xfe;
 	cmd_info.cmd->opcode = MMC_WRITE_MULTIPLE_BLOCK;
 	cmd_info.rsp_len	 = 6;
 	cmd_info.byte_count  = 0x200;
-	cmd_info.block_count = size/cmd_info.byte_count;
+	cmd_info.block_count = 2;
 	cmd_info.dma_buffer = crd_tmp_buffer;
 	if (cmd_info.cmd->data == NULL)
 	{
 		data  = (struct mmc_data*) kmalloc(sizeof(struct mmc_data),GFP_KERNEL);
 		memset(data, 0x00, sizeof(struct mmc_data));
 		cmd_info.cmd->data = data;
-		data->flags = MMC_DATA_WRITE;
+		data->flags = MMC_DATA_READ;
 	}
 	else
 		cmd_info.cmd->data->flags = MMC_DATA_WRITE;
 	MMCPRINTF("\n*** %s %s %d, cmdidx=0x%02x(%d), resp_type=0x%08x, host=0x%08x, card=0x%08x , cmd=0x%08x, data=0x%08x-------\n", __FILE__, __func__, __LINE__, cmd_info.cmd->opcode, cmd_info.cmd->opcode, cmd_info.cmd->flags, host, host->card,cmd,data);
 	ret_err = SD_Stream_Cmd(EMMC_AUTOWRITE1, &cmd_info, 1);
-	if(flag==1) {
-                memcpy(compare1,gddr_dma_org,size);
-                //cp_sha256(gddr_dma_org, size, compare3);
-        }
 	if (ret_err)
 	{
 		MMCPRINTF("[LY] status1 val=%02x\n", sts1_val);
 		host_card_stop(emmc_port);
-		polling_to_tran_state(emmc_port,MMC_WRITE_MULTIPLE_BLOCK,1);
+		polling_to_tran_state(emmc_port,1);
 	}
 err25:
 	MMCPRINTF("\n*** %s %s %d, cmdidx=0x%02x(%d), resp_type=0x%08x, host=0x%08x, card=0x%08x , cmd=0x%08x, data=0x%08x-------\n", __FILE__, __func__, __LINE__, cmd_info.cmd->opcode, cmd_info.cmd->opcode, cmd_info.cmd->flags, host, host->card,cmd,data);
@@ -3426,7 +3290,7 @@ int rtkemmc_send_cmd24(struct rtkemmc_host *emmc_port)
 	{
 		MMCPRINTF("[LY] status1 val=%02x\n", sts1_val);
 		host_card_stop(emmc_port);
-		polling_to_tran_state(emmc_port,MMC_WRITE_BLOCK,1);
+		polling_to_tran_state(emmc_port,1);
 	}
 err24:
 	MMCPRINTF("\n*** %s %s %d, cmdidx=0x%02x(%d), resp_type=0x%08x, host=0x%08x, card=0x%08x , cmd=0x%08x, data=0x%08x-------\n", __FILE__, __func__, __LINE__, cmd_info.cmd->opcode, cmd_info.cmd->opcode, cmd_info.cmd->flags, host, host->card,cmd,data);
@@ -3448,124 +3312,6 @@ err24:
 	return ret_err;
 }
 
-static int rw_test_tuning(struct rtkemmc_host *emmc_port,unsigned long emmc_blk_addr)
-{
-        int i,loop;
-        rtkemmc_send_cmd25(emmc_port,DMA_ALLOC_LENGTH,/*0x26880*/emmc_blk_addr,1);
-        rtkemmc_send_cmd18(emmc_port,DMA_ALLOC_LENGTH,/*0x26880*/emmc_blk_addr,1);
-
-        for(i=0;i<DMA_ALLOC_LENGTH;i++) {
-                if(compare1[i]!=compare2[i]) {
-                        return 1;
-                }
-        }
-        /*      for(i=0;i<16;i++) {
-                        if(compare3[i]!=compare4[i]) {
-                                return 1;
-                        }
-                }*/
-        return 0;
-}
-
-static void rtkemmc_dqs_tuning(struct mmc_host *host)
-{
-        int i=0, j=0;
-        struct rtkemmc_host *emmc_port;
-        unsigned long emmc_real_size=0;
-        unsigned long emmc_set_size=0;
-        unsigned long dqs_tuning_blk_addr=0;
-        unsigned long flags2;
-
-        emmc_port = mmc_priv(host);
-        mdelay(2);
-	if(suspend == 1)
-	{
-		rtk_lockapi_lock2(flags2, _at_("rtkemmc_dqs_tuning"));
-		if(emmc_port->dqs_tuning == 1) {
-			writel(0x80 | suspend_dqs,emmc_port->emmc_membase + EMMC_DQS_CTRL1); //dqs dly tap
-		}
-		else {
-			writel(0x80 | dqs_saved, emmc_port->emmc_membase + EMMC_DQS_CTRL1); //dqs dly tap
-		}
-		printk(KERN_ERR "suspend/resume: restore DQS=0x%x\n", readl(emmc_port->emmc_membase + EMMC_DQS_CTRL1));
-		rtk_lockapi_unlock2(flags2, _at_("rtkemmc_dqs_tuning"));
-		suspend = 0;
-		return;
-	}
-
-#ifdef DQS_INHERITED
-	if(emmc_port->dqs_tuning == 0) {
-		rtk_lockapi_lock2(flags2, _at_("rtkemmc_dqs_tuning"));
-		writel(0x80 | dqs_saved, emmc_port->emmc_membase + EMMC_DQS_CTRL1); //dqs dly tap
-		printk(KERN_ERR "Inherit bootcode dqs: DQS=0x%x\n", readl(emmc_port->emmc_membase + EMMC_DQS_CTRL1));
-		rtk_lockapi_unlock2(flags2, _at_("rtkemmc_dqs_tuning"));
-		set_RTK_initial_flag(1);
-		return;
-	}
-#endif
-        down_write(&cr_rw_sem);
-        g_bTuning = 1;
-
-        emmc_real_size = host->card->ext_csd.sectors;
-        if(emmc_real_size > 0x2200000 )    //32gb
-                emmc_set_size = 0x3900000;
-        else if( (emmc_real_size > 0x1200000) && (emmc_real_size < 0x2200000) ) //16gb
-                emmc_set_size = 0x1c80000;
-        else if( (emmc_real_size > 0xb40000) && (emmc_real_size < 0x1200000) )  //8gb
-                emmc_set_size = 0xe40000;
-        else
-                emmc_set_size = 0x720000;     //4gb
-
-        if(emmc_real_size-emmc_set_size>0x800) {
-                dqs_tuning_blk_addr = emmc_set_size;    //non-used emmc space
-        }
-        else {
-                dqs_tuning_blk_addr = 0x26880;  //evaluated free space
-        }
-        printk(KERN_ERR "emmc_real_blk_size=0x%llx, emmc_set_blk_size=0x%llx, dqs_tuning_blk_addr=0x%llx\n",emmc_real_size,emmc_set_size,dqs_tuning_blk_addr);
-
-	for(i=0; i<0x20; i++) {
-                if(j==9) break;
-                rtk_lockapi_lock2(flags2, _at_("rtkemmc_dqs_tuning"));
-                writel(0x80|(i<<1),emmc_port->emmc_membase + EMMC_DQS_CTRL1);
-		printk(KERN_INFO "DQS windows tuning: i=0x%x, EMMC_DQS_CTRL1=0x%x ",i<<1,readl(emmc_port->emmc_membase + EMMC_DQS_CTRL1));
-                rtk_lockapi_unlock2(flags2, _at_("rtkemmc_dqs_tuning"));
-                rtkemmc_phase_tuning(emmc_port,MODE_HS400,0);
-                if( rw_test_tuning(emmc_port, dqs_tuning_blk_addr)==0) {
-                        j++;
-                }
-                else {
-                        j=0;
-                }
-        }
-
-        if(j!=9) {
-                printk(KERN_ERR "Cannot find a proper dqs window...\n");
-                rtk_lockapi_lock2(flags2, _at_("rtkemmc_dqs_tuning"));
-                writel(0x88,emmc_port->emmc_membase + EMMC_DQS_CTRL1);
-                rtk_lockapi_unlock2(flags2, _at_("rtkemmc_dqs_tuning"));
-        }
-        else {
-                rtk_lockapi_lock2(flags2, _at_("rtkemmc_dqs_tuning"));
-                writel(0x80|(readl(emmc_port->emmc_membase + EMMC_DQS_CTRL1)-8),emmc_port->emmc_membase + EMMC_DQS_CTRL1); //dqs dly tap
-		suspend_dqs = readl(emmc_port->emmc_membase + EMMC_DQS_CTRL1);
-                printk(KERN_ERR "DQS=0x%x\n", readl(emmc_port->emmc_membase + EMMC_DQS_CTRL1));
-                rtk_lockapi_unlock2(flags2, _at_("rtkemmc_dqs_tuning"));
-                rtkemmc_phase_tuning(emmc_port,MODE_HS400,1);
-                printk(KERN_ERR "HS400: final phase=0x%x\n", readl(emmc_port->crt_membase + SYS_PLL_EMMC1));
-        }
-	//mmc_flush_cache(host->card);
-        sync(emmc_port);
-        mdelay(10);
-        g_bTuning = 0;
-        rtk_lockapi_lock2(flags2, _at_("rtkemmc_dqs_tuning"));
-        printk(KERN_ERR "rtkemmc_dqs_tuning end EMMC_UHSREG=%x\n",readl(emmc_port->emmc_membase + EMMC_UHSREG));
-        rtk_lockapi_unlock2(flags2, _at_("rtkemmc_dqs_tuning"));
-        up_write(&cr_rw_sem);
-
-        set_RTK_initial_flag(1);        //this flag is to use for sd card check for rcu install
-}
-
 void host_card_stop2(struct rtkemmc_host *emmc_port){
 	printk(KERN_INFO "host_card_stop2 - start\n");
 	volatile u32 reg;
@@ -3582,16 +3328,16 @@ void host_card_stop2(struct rtkemmc_host *emmc_port){
 	rtkemmc_writel(reg&0xfffff7ff, emmc_port->crt_membase + SYS_SOFT_RESET2);
 	isb();
 	sync(emmc_port);
-//=========jim: modify the emmc reset flow from only 980000004 bit 11 to 98000004 bit 11 and 98000000c(common clk framework) bit 24 28 =========
+
+//=========jim: modify the emmc reset flow from only 980000004 bit 11 to 98000004 bit 11 and 98000000c bit 24 28 =========
 	//reg = readl(emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
-        //isb();
-        //sync(emmc_port);
-        //rtkemmc_writel(reg&0xeeffffff, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
-        //isb();
+	//isb();
+	//sync(emmc_port);
+	//rtkemmc_writel(reg&0xeeffffff, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
+	//isb();
 	clk_disable_unprepare(clk_en_emmc);
         clk_disable_unprepare(clk_en_emmc_ip);
-
-        sync(emmc_port);
+	sync(emmc_port);
 
 	//release CRT eMMC reset
 	reg = readl(emmc_port->crt_membase + SYS_SOFT_RESET2);
@@ -3601,21 +3347,21 @@ void host_card_stop2(struct rtkemmc_host *emmc_port){
 	isb();
 	sync(emmc_port);
 	
-//===========jim modify the emmc reset flow from only 980000004 bit 11 to 98000004 bit 11 and 98000000c (common clk framework) bit 24 28 =========
+//===========jim modify the emmc reset flow from only 980000004 bit 11 to 98000004 bit 11 and 98000000c bit 24 28 =========
 	//reg = readl(emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
-        //isb();
-        //sync(emmc_port);
-        //rtkemmc_writel(reg|0x11000000, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
-        //isb();
+	//isb();
+	//sync(emmc_port);
+	//rtkemmc_writel(reg|0x11000000, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
+	//isb();
 	clk_prepare_enable(clk_en_emmc);
         clk_prepare_enable(clk_en_emmc_ip);
-        sync(emmc_port);
+	sync(emmc_port);
 
 	if (get_rtd129x_cpu_revision() >= RTD129x_CHIP_REVISION_A01 ) {
                 rtkemmc_writel( readl(emmc_port->emmc_membase + EMMC_DUMMY_SYS) ^ 0x40000000, emmc_port->emmc_membase + EMMC_DUMMY_SYS);
                 isb();
                 sync(emmc_port);
-                udelay(200);
+		udelay(200);
         }
 
 	//DBG port
@@ -3629,7 +3375,6 @@ void host_card_stop2(struct rtkemmc_host *emmc_port){
 
 	rtkemmc_writel(gRegTbl.emmc_mux_pad0, emmc_port->emmc_membase + EMMC_muxpad0);
 	rtkemmc_writel(gRegTbl.emmc_mux_pad1, emmc_port->emmc_membase + EMMC_muxpad1);
-	rtkemmc_writel(gRegTbl.emmc_mux_pad2, emmc_port->emmc_membase + EMMC_muxpad2);
 	rtkemmc_writel(gRegTbl.emmc_pfunc_nf1, emmc_port->emmc_membase + EMMC_PFUNC_NF1);
 	rtkemmc_writel(gRegTbl.emmc_pfunc_cr, emmc_port->emmc_membase + EMMC_PFUNC_CR);
 	rtkemmc_writel(gRegTbl.emmc_pdrive_nf1, emmc_port->emmc_membase + EMMC_PDRIVE_NF1);
@@ -3645,13 +3390,7 @@ void host_card_stop2(struct rtkemmc_host *emmc_port){
 	rtkemmc_writel(gRegTbl.emmc_uhsreg, emmc_port->emmc_membase + EMMC_UHSREG);
 	rtkemmc_writel(gRegTbl.emmc_ddr_reg, emmc_port->emmc_membase + EMMC_DDR_REG);
 	rtkemmc_writel(gRegTbl.emmc_card_thr_ctl, emmc_port->emmc_membase + EMMC_CARD_THR_CTL);
-	if(gCurrentBootMode == MODE_HS400)
-	{
-		rtkemmc_writel(gRegTbl.emmc_dqs_ctrl1 | 0x80, emmc_port->emmc_membase + EMMC_DQS_CTRL1);
-	}
-	else {
-		rtkemmc_writel(gRegTbl.emmc_dqs_ctrl1, emmc_port->emmc_membase + EMMC_DQS_CTRL1);
-	}
+	rtkemmc_writel(gRegTbl.emmc_dqs_ctrl1, emmc_port->emmc_membase + EMMC_DQS_CTRL1);
 	rtkemmc_writel(0, emmc_port->emmc_membase+EMMC_PAD_CTL); //PAD to 1.8v
 	isb();
 	sync(emmc_port);
@@ -3719,15 +3458,15 @@ void host_card_stop(struct rtkemmc_host *emmc_port){
 	isb();
 	sync(emmc_port);
 
-//=========jim: modify the emmc reset flow from only 980000004 bit 11 to 98000004 bit 11 and 98000000c(common clk framework) bit 24 28 =========
-        //reg = readl(emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
-        //isb();
-        //sync(emmc_port);
-        //rtkemmc_writel(reg&0xeeffffff, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
-        //isb();
+//=========jim: modify the emmc reset flow from only 980000004 bit 11 to 98000004 bit 11 and 98000000c bit 24 28 =========
+	//reg = readl(emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
+	//isb();
+	//sync(emmc_port);
+	//rtkemmc_writel(reg&0xeeffffff, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
+	//isb();
 	clk_disable_unprepare(clk_en_emmc);
         clk_disable_unprepare(clk_en_emmc_ip);
-        sync(emmc_port);
+	sync(emmc_port);
 
 	//A01 98000450[1]: reset test_mux_main2 soft reset
 	if (get_rtd129x_cpu_revision() >= RTD129x_CHIP_REVISION_A01 ) {
@@ -3738,7 +3477,7 @@ void host_card_stop(struct rtkemmc_host *emmc_port){
 		isb();
 		sync(emmc_port);
 	}
-
+	
 	//release CRT eMMC reset
 	reg = readl(emmc_port->crt_membase + SYS_SOFT_RESET2);
 	isb();
@@ -3747,15 +3486,15 @@ void host_card_stop(struct rtkemmc_host *emmc_port){
 	isb();
 	sync(emmc_port);
 	
-//===========jim modify the emmc reset flow from only 980000004 bit 11 to 98000004 bit 11 and 98000000c(common clk framework) bit 24 28 =========
-        //reg = readl(emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
-        //isb();
-        //sync(emmc_port);
-        //rtkemmc_writel(reg|0x11000000, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
-        //isb();
+//===========jim modify the emmc reset flow from only 980000004 bit 11 to 98000004 bit 11 and 98000000c bit 24 28 =========
+	//reg = readl(emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
+	//isb();
+	//sync(emmc_port);
+	//rtkemmc_writel(reg|0x11000000, emmc_port->crt_membase + SYS_CLOCK_ENABLE1);
+	//isb();
 	clk_prepare_enable(clk_en_emmc);
         clk_prepare_enable(clk_en_emmc_ip);
-        sync(emmc_port);
+	sync(emmc_port);
 
 	//A01 98000450[1]: release test_mux_main2 soft reset
 	if (get_rtd129x_cpu_revision() >= RTD129x_CHIP_REVISION_A01 ) {
@@ -3771,7 +3510,7 @@ void host_card_stop(struct rtkemmc_host *emmc_port){
                 rtkemmc_writel( readl(emmc_port->emmc_membase + EMMC_DUMMY_SYS) ^ 0x40000000, emmc_port->emmc_membase + EMMC_DUMMY_SYS);
                 isb();
                 sync(emmc_port);
-		udelay(200);
+                udelay(200);
         }
 
 	//DBG port
@@ -3785,7 +3524,6 @@ void host_card_stop(struct rtkemmc_host *emmc_port){
 
 	rtkemmc_writel(gRegTbl.emmc_mux_pad0, emmc_port->emmc_membase + EMMC_muxpad0);
 	rtkemmc_writel(gRegTbl.emmc_mux_pad1, emmc_port->emmc_membase + EMMC_muxpad1);
-	rtkemmc_writel(gRegTbl.emmc_mux_pad2, emmc_port->emmc_membase + EMMC_muxpad2);
 	rtkemmc_writel(gRegTbl.emmc_pfunc_nf1, emmc_port->emmc_membase + EMMC_PFUNC_NF1);
 	rtkemmc_writel(gRegTbl.emmc_pfunc_cr, emmc_port->emmc_membase + EMMC_PFUNC_CR);
 	rtkemmc_writel(gRegTbl.emmc_pdrive_nf1, emmc_port->emmc_membase + EMMC_PDRIVE_NF1);
@@ -3806,13 +3544,7 @@ void host_card_stop(struct rtkemmc_host *emmc_port){
 	rtkemmc_writel(gRegTbl.emmc_uhsreg, emmc_port->emmc_membase + EMMC_UHSREG);
 	rtkemmc_writel(gRegTbl.emmc_ddr_reg, emmc_port->emmc_membase + EMMC_DDR_REG);
 	rtkemmc_writel(gRegTbl.emmc_card_thr_ctl, emmc_port->emmc_membase + EMMC_CARD_THR_CTL);
-	if(gCurrentBootMode == MODE_HS400)
-	{
-		rtkemmc_writel(gRegTbl.emmc_dqs_ctrl1|0x80, emmc_port->emmc_membase + EMMC_DQS_CTRL1);
-	}
-	else {
-		rtkemmc_writel(gRegTbl.emmc_dqs_ctrl1, emmc_port->emmc_membase + EMMC_DQS_CTRL1);
-	}
+	rtkemmc_writel(gRegTbl.emmc_dqs_ctrl1, emmc_port->emmc_membase + EMMC_DQS_CTRL1);
 	rtkemmc_writel(0, emmc_port->emmc_membase+EMMC_PAD_CTL); //PAD to 1.8v
 	isb();
 	sync(emmc_port);
@@ -4601,7 +4333,7 @@ ERR_OUT:
  * blk_addr    : eMMC read/write target address, block base.
  * data_size   : tarnsfer data size, block base.
  * buffer      : DMA address
- * rw_mode     : fast read or ast write
+ * rw_mode     : fast read or fast write
  ========================================================== */
 #define FAST_READ   0x1278
 #define FAST_WRITE  0x3478
@@ -5256,20 +4988,6 @@ static int rtkemmc_probe(struct platform_device *pdev)
     {
         	printk(KERN_INFO "[%s] no driving nf_s2 warning !! \n",__func__);
     }	
-
-	prop = of_get_property(pdev->dev.of_node, "pddrive_nf_s3", &size);
-        if (prop) {
-                if (size)
-                        counter = size / sizeof(u32);
-
-                for (i=0; i<counter; i+=1) {
-                        pddrive_nf_s3[i]= of_read_number(prop, 1 + i);
-                        /* KERN_ERR to let be happy */
-                        printk(KERN_ERR "[%s] get driving s3 : 0x%x\n",__func__,pddrive_nf_s3[i]);
-                }
-        } else {
-                printk(KERN_INFO "[%s] no driving nf_s3 warning !! \n",__func__);
-        }
 	
 	prop = of_get_property(pdev->dev.of_node, "phase_tuning", &size);
 
@@ -5283,27 +5001,17 @@ static int rtkemmc_probe(struct platform_device *pdev)
    	}
 	else 
    	{
-		emmc_port->tx_tuning = 1;
-		emmc_port->rx_tuning = 1;
+   		emmc_port->tx_tuning = 0;
+		emmc_port->rx_tuning = 0;
 		printk(KERN_INFO "[%s] no phase_tuning switch node !! \n",__func__);
    	}
-
-	prop = of_get_property(pdev->dev.of_node, "dqs_tuning", &size);
-	if (prop) {
-		emmc_port->dqs_tuning = of_read_number(prop, 1);
-		printk(KERN_ERR "[%s] get dqs tuning switch : %u\n",__func__, emmc_port->dqs_tuning);
-	} else {
-		emmc_port->dqs_tuning = 1;      //if we do not get this node, we should tune dqs value by kernel
-		printk(KERN_INFO "[%s] no dqs_tuning switch node !! \n",__func__);
-	}
+	
 	//rtkemmc_init(emmc_port);
 
 	clk_en_emmc = clk_get(NULL, "clk_en_emmc");
-	clk_en_emmc_ip = clk_get(NULL, "clk_en_emmc_ip");
-	clk_cr = clk_get(NULL, "clk_en_cr");
-	clk_prepare_enable(clk_en_emmc);
+        clk_en_emmc_ip = clk_get(NULL, "clk_en_emmc_ip");
+        clk_prepare_enable(clk_en_emmc);
         clk_prepare_enable(clk_en_emmc_ip);
-	clk_prepare_enable(clk_cr);
 
     mmc->caps = MMC_CAP_4_BIT_DATA
               | MMC_CAP_8_BIT_DATA
@@ -5407,13 +5115,19 @@ static int rtkemmc_probe(struct platform_device *pdev)
     g_bResuming=0;
     g_bTuning=0;
 
-#ifdef RTK_EMMC_HEALTH_REPORT
-	mmc->wr_emmc_size_cnt = 0;
-        mmc->remainder = 0;
-#endif
-
     printk(KERN_NOTICE "%s: %s driver initialized\n",
                mmc_hostname(mmc), DRIVER_NAME);
+
+	#ifdef BL31_TSP_TEST
+	proc_file = proc_create("tsp_trigger", 0x0644, NULL, &proc_fops);
+	
+	if(!proc_file){
+		printk(KERN_ERR "/proc/tsp_trigger can't be created! \n");
+	}
+	else{
+		printk(KERN_ERR "/proc/tsp_trigger is created. \n");
+	}	
+#endif
     return 0;
 
 out:
@@ -5437,6 +5151,7 @@ static int __exit rtkemmc_remove(struct platform_device *pdev)
 {
     struct mmc_host *mmc = platform_get_drvdata(pdev);
     MMCPRINTF("\n");
+
     device_remove_file(&pdev->dev, &dev_attr_cr_send_cmd0);
     device_remove_file(&pdev->dev, &dev_attr_cr_fast_RW);
     device_remove_file(&pdev->dev, &dev_attr_em_open_log);
@@ -5476,13 +5191,11 @@ static int __exit rtkemmc_remove(struct platform_device *pdev)
 
 
 #ifdef CONFIG_PM
-static int rtkemmc_suspend(struct platform_device *dev, pm_message_t state)
+static int rtkemmc_suspend(struct device *dev)
 {
-    struct platform_device *pdev = to_platform_device(dev);
     int ret = 0;
     struct rtkemmc_host *emmc_port=NULL;
     struct mmc_host *mmc = NULL;
-    suspend = 1;
     mmc = mmc_host_local;
     emmc_port = mmc_priv(mmc);
     if(RTK_PM_STATE == PM_SUSPEND_STANDBY){
@@ -5499,9 +5212,8 @@ static int rtkemmc_suspend(struct platform_device *dev, pm_message_t state)
     return ret;
 }
 
-static int rtkemmc_resume(struct platform_device *dev)
+static int rtkemmc_resume(struct device *dev)
 {
-    struct platform_device *pdev = to_platform_device(dev);
     int ret = 0;
     struct mmc_host *mmc = NULL;
     struct rtkemmc_host *emmc_port=NULL;

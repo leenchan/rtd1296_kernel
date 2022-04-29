@@ -1,13 +1,4 @@
-/*
- * hdcp_top.h - RTK hdcp tx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+/* Copyright (C) 2007-2014 Realtek Semiconductor Corporation. */
 
 #ifndef _HDCP_TOP_H_
 #define _HDCP_TOP_H_
@@ -30,7 +21,6 @@ irqreturn_t HDCP_interrupt_handler(int irq, void *dev_id);
 #endif
 
 #if(USED_TA_CMD)
-extern int ta_hdcp_check_r0(uint8_t *ro);//for kylin B walk around
 extern int ta_hdcp_lib_generate_an(uint8_t *an);
 extern int ta_hdcp_lib_write_bksv(uint8_t *ksv_data, uint8_t *pk);
 extern void ta_hdcp_lib_set_repeater_bit_in_tx(enum hdcp_repeater rx_mode);

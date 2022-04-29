@@ -51,7 +51,7 @@
 #define RNG_MISCDEV_MINOR	183 /* official */
 
 
-static struct hwrng *current_rng = NULL;
+static struct hwrng *current_rng;
 static struct task_struct *hwrng_fill;
 static LIST_HEAD(rng_list);
 /* Protects rng_list and current_rng */
@@ -323,7 +323,7 @@ static ssize_t hwrng_attr_current_store(struct device *dev,
 		return -ERESTARTSYS;
 	err = -ENODEV;
 	list_for_each_entry(rng, &rng_list, list) {
-		if (strcmp(rng->name, buf) == 0) {
+		if (sysfs_streq(rng->name, buf)) {
 			err = 0;
 			if (rng != current_rng)
 				err = set_current_rng(rng);

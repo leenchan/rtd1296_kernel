@@ -314,8 +314,6 @@ int reboot_pid_ns(struct pid_namespace *pid_ns, int cmd)
 	case LINUX_REBOOT_CMD_RESTART2:
 	case LINUX_REBOOT_CMD_RESTART:
 		pid_ns->reboot = SIGHUP;
-		/* Allow child PID namespace to trigger system reboot */
-		return 0;
 		break;
 
 	case LINUX_REBOOT_CMD_POWER_OFF:

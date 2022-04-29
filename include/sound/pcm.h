@@ -121,21 +121,20 @@ struct snd_pcm_ops {
 #define SNDRV_PCM_RATE_11025		(1<<2)		/* 11025Hz */
 #define SNDRV_PCM_RATE_16000		(1<<3)		/* 16000Hz */
 #define SNDRV_PCM_RATE_22050		(1<<4)		/* 22050Hz */
-#define SNDRV_PCM_RATE_24000		(1<<5)		/* 24000Hz */
-#define SNDRV_PCM_RATE_32000		(1<<6)		/* 32000Hz */
-#define SNDRV_PCM_RATE_44100		(1<<7)		/* 44100Hz */
-#define SNDRV_PCM_RATE_48000		(1<<8)		/* 48000Hz */
-#define SNDRV_PCM_RATE_64000		(1<<9)		/* 64000Hz */
-#define SNDRV_PCM_RATE_88200		(1<<10)		/* 88200Hz */
-#define SNDRV_PCM_RATE_96000		(1<<11)		/* 96000Hz */
-#define SNDRV_PCM_RATE_176400		(1<<12)		/* 176400Hz */
-#define SNDRV_PCM_RATE_192000		(1<<13)		/* 192000Hz */
+#define SNDRV_PCM_RATE_32000		(1<<5)		/* 32000Hz */
+#define SNDRV_PCM_RATE_44100		(1<<6)		/* 44100Hz */
+#define SNDRV_PCM_RATE_48000		(1<<7)		/* 48000Hz */
+#define SNDRV_PCM_RATE_64000		(1<<8)		/* 64000Hz */
+#define SNDRV_PCM_RATE_88200		(1<<9)		/* 88200Hz */
+#define SNDRV_PCM_RATE_96000		(1<<10)		/* 96000Hz */
+#define SNDRV_PCM_RATE_176400		(1<<11)		/* 176400Hz */
+#define SNDRV_PCM_RATE_192000		(1<<12)		/* 192000Hz */
 
 #define SNDRV_PCM_RATE_CONTINUOUS	(1<<30)		/* continuous range */
 #define SNDRV_PCM_RATE_KNOT		(1<<31)		/* supports more non-continuos rates */
 
 #define SNDRV_PCM_RATE_8000_44100	(SNDRV_PCM_RATE_8000|SNDRV_PCM_RATE_11025|\
-					 SNDRV_PCM_RATE_16000|SNDRV_PCM_RATE_24000|SNDRV_PCM_RATE_22050|\
+					 SNDRV_PCM_RATE_16000|SNDRV_PCM_RATE_22050|\
 					 SNDRV_PCM_RATE_32000|SNDRV_PCM_RATE_44100)
 #define SNDRV_PCM_RATE_8000_48000	(SNDRV_PCM_RATE_8000_44100|SNDRV_PCM_RATE_48000)
 #define SNDRV_PCM_RATE_8000_96000	(SNDRV_PCM_RATE_8000_48000|SNDRV_PCM_RATE_64000|\
@@ -225,9 +224,10 @@ typedef int (*snd_pcm_hw_rule_func_t)(struct snd_pcm_hw_params *params,
 
 struct snd_pcm_hw_rule {
 	unsigned int cond;
-	snd_pcm_hw_rule_func_t func;
 	int var;
 	int deps[4];
+
+	snd_pcm_hw_rule_func_t func;
 	void *private;
 };
 
@@ -265,17 +265,17 @@ struct snd_ratden {
 
 struct snd_pcm_hw_constraint_ratnums {
 	int nrats;
-	struct snd_ratnum *rats;
+	const struct snd_ratnum *rats;
 };
 
 struct snd_pcm_hw_constraint_ratdens {
 	int nrats;
-	struct snd_ratden *rats;
+	const struct snd_ratden *rats;
 };
 
 struct snd_pcm_hw_constraint_list {
-	unsigned int count;
 	const unsigned int *list;
+	unsigned int count;
 	unsigned int mask;
 };
 
@@ -284,8 +284,6 @@ struct snd_pcm_hw_constraint_ranges {
 	const struct snd_interval *ranges;
 	unsigned int mask;
 };
-
-struct snd_pcm_hwptr_log;
 
 /*
  * userspace-provided audio timestamp config to kernel,
@@ -404,10 +402,6 @@ struct snd_pcm_runtime {
 	struct snd_pcm_hardware hw;
 	struct snd_pcm_hw_constraints hw_constraints;
 
-	/* -- interrupt callbacks -- */
-	void (*transfer_ack_begin)(struct snd_pcm_substream *substream);
-	void (*transfer_ack_end)(struct snd_pcm_substream *substream);
-
 	/* -- timer -- */
 	unsigned int timer_resolution;	/* timer resolution */
 	int tstamp_type;		/* timestamp type */
@@ -427,10 +421,6 @@ struct snd_pcm_runtime {
 #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
 	/* -- OSS things -- */
 	struct snd_pcm_oss_runtime oss;
-#endif
-
-#ifdef CONFIG_SND_PCM_XRUN_DEBUG
-	struct snd_pcm_hwptr_log *hwptr_log;
 #endif
 };
 
@@ -980,7 +970,7 @@ int snd_interval_list(struct snd_interval *i, unsigned int count,
 int snd_interval_ranges(struct snd_interval *i, unsigned int count,
 			const struct snd_interval *list, unsigned int mask);
 int snd_interval_ratnum(struct snd_interval *i,
-			unsigned int rats_count, struct snd_ratnum *rats,
+			unsigned int rats_count, const struct snd_ratnum *rats,
 			unsigned int *nump, unsigned int *denp);
 
 void _snd_pcm_hw_params_any(struct snd_pcm_hw_params *params);
@@ -1010,11 +1000,11 @@ int snd_pcm_hw_constraint_ranges(struct snd_pcm_runtime *runtime,
 int snd_pcm_hw_constraint_ratnums(struct snd_pcm_runtime *runtime, 
 				  unsigned int cond,
 				  snd_pcm_hw_param_t var,
-				  struct snd_pcm_hw_constraint_ratnums *r);
+				  const struct snd_pcm_hw_constraint_ratnums *r);
 int snd_pcm_hw_constraint_ratdens(struct snd_pcm_runtime *runtime, 
 				  unsigned int cond,
 				  snd_pcm_hw_param_t var,
-				  struct snd_pcm_hw_constraint_ratdens *r);
+				  const struct snd_pcm_hw_constraint_ratdens *r);
 int snd_pcm_hw_constraint_msbits(struct snd_pcm_runtime *runtime, 
 				 unsigned int cond,
 				 unsigned int width,
@@ -1033,6 +1023,22 @@ int snd_pcm_hw_rule_add(struct snd_pcm_runtime *runtime,
 			int var,
 			snd_pcm_hw_rule_func_t func, void *private,
 			int dep, ...);
+
+/**
+ * snd_pcm_hw_constraint_single() - Constrain parameter to a single value
+ * @runtime: PCM runtime instance
+ * @var: The hw_params variable to constrain
+ * @val: The value to constrain to
+ *
+ * Return: Positive if the value is changed, zero if it's not changed, or a
+ * negative error code.
+ */
+static inline int snd_pcm_hw_constraint_single(
+	struct snd_pcm_runtime *runtime, snd_pcm_hw_param_t var,
+	unsigned int val)
+{
+	return snd_pcm_hw_constraint_minmax(runtime, var, val, val);
+}
 
 int snd_pcm_format_signed(snd_pcm_format_t format);
 int snd_pcm_format_unsigned(snd_pcm_format_t format);
@@ -1117,10 +1123,16 @@ static inline void snd_pcm_set_runtime_buffer(struct snd_pcm_substream *substrea
  *  Timer interface
  */
 
+#ifdef CONFIG_SND_PCM_TIMER
 void snd_pcm_timer_resolution_change(struct snd_pcm_substream *substream);
 void snd_pcm_timer_init(struct snd_pcm_substream *substream);
 void snd_pcm_timer_done(struct snd_pcm_substream *substream);
-
+#else
+static inline void
+snd_pcm_timer_resolution_change(struct snd_pcm_substream *substream) {}
+static inline void snd_pcm_timer_init(struct snd_pcm_substream *substream) {}
+static inline void snd_pcm_timer_done(struct snd_pcm_substream *substream) {}
+#endif
 /**
  * snd_pcm_gettime - Fill the timespec depending on the timestamp mode
  * @runtime: PCM runtime instance

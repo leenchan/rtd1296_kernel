@@ -1,3 +1,4 @@
+#define pr_fmt(fmt) "kasan: " fmt
 #include <linux/bootmem.h>
 #include <linux/kasan.h>
 #include <linux/kdebug.h>

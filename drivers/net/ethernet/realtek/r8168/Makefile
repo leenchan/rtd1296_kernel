@@ -61,6 +61,9 @@ ifneq ($(KERNELRELEASE),)
 	ifeq ($(ENABLE_EEE), y)
 		EXTRA_CFLAGS += -DENABLE_EEE
 	endif
+	ifeq ($(CONFIG_SOC_RTL8117), y)
+		EXTRA_CFLAGS += -DCONFIG_SOC_LAN
+	endif
 else
 	BASEDIR := /lib/modules/$(shell uname -r)
 	KERNELDIR ?= $(BASEDIR)/build

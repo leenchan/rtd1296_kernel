@@ -45,7 +45,6 @@
 #include <linux/usb/audio.h>
 #include <linux/usb/audio-v2.h>
 #include <linux/module.h>
-#include <linux/switch.h>
 
 #include <sound/control.h>
 #include <sound/core.h>
@@ -83,8 +82,6 @@ static int pid[SNDRV_CARDS] = { [0 ... (SNDRV_CARDS-1)] = -1 };
 static int device_setup[SNDRV_CARDS]; /* device parameter for this card */
 static bool ignore_ctl_error;
 static bool autoclock = true;
-struct switch_dev *usbaudiosdev = NULL;
-int num_playback_device = 0;
 
 module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for the USB audio adapter.");
@@ -129,13 +126,6 @@ static void snd_usb_stream_disconnect(struct snd_usb_stream *as)
 		subs->interface = -1;
 		subs->data_endpoint = NULL;
 		subs->sync_endpoint = NULL;
-
-            if (subs->direction == SNDRV_PCM_STREAM_PLAYBACK && usbaudiosdev != NULL && num_playback_device != 0) {
-                num_playback_device--;
-                // up plug case --  multi cards is handled by HAL audio_hw.c
-                if (num_playback_device == 0)
-                    switch_set_state(usbaudiosdev, 0);
-            }
 	}
 }
 
@@ -381,7 +371,7 @@ static int snd_usb_audio_create(struct usb_interface *intf,
 	chip->card = card;
 	chip->setup = device_setup[idx];
 	chip->autoclock = autoclock;
-	chip->probing = 1;
+	atomic_set(&chip->active, 1); /* avoid autopm during probing */
 	atomic_set(&chip->usage_count, 0);
 	atomic_set(&chip->shutdown, 0);
 
@@ -460,7 +450,6 @@ static int snd_usb_audio_create(struct usb_interface *intf,
 	}
 
 	snd_usb_audio_create_proc(chip);
-    //switch_set_state(usbaudiosdev, 1);
 
 	*rchip = chip;
 	return 0;
@@ -488,11 +477,6 @@ static int usb_audio_probe(struct usb_interface *intf,
 	int ifnum;
 	u32 id;
 
-	int card_num;
-
-        //record number to detect the cards
-        card_num = num_playback_device;
-
 	alts = &intf->altsetting[0];
 	ifnum = get_iface_desc(alts)->bInterfaceNumber;
 	id = USB_ID(le16_to_cpu(dev->descriptor.idVendor),
@@ -519,7 +503,7 @@ static int usb_audio_probe(struct usb_interface *intf,
 				goto __error;
 			}
 			chip = usb_chip[i];
-			chip->probing = 1;
+			atomic_inc(&chip->active); /* avoid autopm */
 			break;
 		}
 	}
@@ -577,15 +561,10 @@ static int usb_audio_probe(struct usb_interface *intf,
 	if (err < 0)
 		goto __error;
 
-        // if card number is changed , to change the state
-        if (num_playback_device != card_num)
-            //switch_set_state(usbaudiosdev, 1);
-            switch_set_state(usbaudiosdev, num_playback_device);
-
 	usb_chip[chip->index] = chip;
 	chip->num_interfaces++;
-	chip->probing = 0;
 	usb_set_intfdata(intf, chip);
+	atomic_dec(&chip->active);
 	mutex_unlock(&register_mutex);
 	return 0;
 
@@ -593,7 +572,7 @@ static int usb_audio_probe(struct usb_interface *intf,
 	if (chip) {
 		if (!chip->num_interfaces)
 			snd_card_free(chip->card);
-		chip->probing = 0;
+		atomic_dec(&chip->active);
 	}
 	mutex_unlock(&register_mutex);
 	return err;
@@ -652,7 +631,6 @@ static void usb_audio_disconnect(struct usb_interface *intf)
 	} else {
 		mutex_unlock(&register_mutex);
 	}
- //switch_set_state(usbaudiosdev, 0);
 }
 
 /* lock the shutdown (disconnect) task and autoresume */
@@ -690,8 +668,6 @@ int snd_usb_autoresume(struct snd_usb_audio *chip)
 {
 	if (atomic_read(&chip->shutdown))
 		return -EIO;
-	if (chip->probing)
-		return 0;
 	if (atomic_inc_return(&chip->active) == 1)
 		return usb_autopm_get_interface(chip->pm_intf);
 	return 0;
@@ -699,8 +675,6 @@ int snd_usb_autoresume(struct snd_usb_audio *chip)
 
 void snd_usb_autosuspend(struct snd_usb_audio *chip)
 {
-	if (chip->probing)
-		return;
 	if (atomic_read(&chip->shutdown))
 		return;
 	if (atomic_dec_and_test(&chip->active))
@@ -717,30 +691,20 @@ static int usb_audio_suspend(struct usb_interface *intf, pm_message_t message)
 	if (chip == (void *)-1L)
 		return 0;
 
-	if (!PMSG_IS_AUTO(message)) {
+	chip->autosuspended = !!PMSG_IS_AUTO(message);
+	if (!chip->autosuspended)
 		snd_power_change_state(chip->card, SNDRV_CTL_POWER_D3hot);
-		if (!chip->num_suspended_intf++) {
-			list_for_each_entry(as, &chip->pcm_list, list) {
-				snd_pcm_suspend_all(as->pcm);
-				as->substream[0].need_setup_ep =
-					as->substream[1].need_setup_ep = true;
-			}
-			list_for_each(p, &chip->midi_list) {
-				snd_usbmidi_suspend(p);
-			}
+	if (!chip->num_suspended_intf++) {
+		list_for_each_entry(as, &chip->pcm_list, list) {
+			snd_pcm_suspend_all(as->pcm);
+			as->substream[0].need_setup_ep =
+				as->substream[1].need_setup_ep = true;
 		}
-	} else {
-		/*
-		 * otherwise we keep the rest of the system in the dark
-		 * to keep this transparent
-		 */
-		if (!chip->num_suspended_intf++)
-			chip->autosuspended = 1;
-	}
-
-	if (chip->num_suspended_intf == 1)
+		list_for_each(p, &chip->midi_list)
+			snd_usbmidi_suspend(p);
 		list_for_each_entry(mixer, &chip->mixer_list, list)
 			snd_usb_mixer_suspend(mixer);
+	}
 
 	return 0;
 }
@@ -820,31 +784,4 @@ static struct usb_driver usb_audio_driver = {
 	.supports_autosuspend = 1,
 };
 
-//rtk_begin
-
-//module_usb_driver(usb_audio_driver);
-static int __init snd_usb_audio_init(void)
-{
-
-    int err = 0;
-    usbaudiosdev = kzalloc(sizeof(usbaudiosdev), GFP_KERNEL);
-    usbaudiosdev->name = "usb_audio";
-
-    err = switch_dev_register(usbaudiosdev);
-    if (err)
-        pr_err("Usb-audio switch registration failed\n");
-    else
-        pr_debug("usb hs_detected\n");
-
-	return usb_register(&usb_audio_driver);
-}
-
-static void __exit snd_usb_audio_cleanup(void)
-{
-	usb_deregister(&usb_audio_driver);
-    switch_dev_unregister(usbaudiosdev);
-}
-
-module_init(snd_usb_audio_init);
-module_exit(snd_usb_audio_cleanup);
-//rtk_end
+module_usb_driver(usb_audio_driver);

@@ -1,12 +1,6 @@
-/*
- * hdcp_top.c - RTK hdcp tx driver
+/*  Copyright (C) 2007-2014 Realtek Semiconductor Corporation.
+ *  hdcp_top.c
  *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/module.h>
@@ -542,7 +536,7 @@ static long hdcp_enable_ctl(void __user *argp)
 {
         //HDCP_DEBUG("[%s] %s  %d :%u\n", __FILE__,__FUNCTION__,__LINE__,jiffies_to_msecs(jiffies));
 	
-		hdcp.hdcp_enabled = 1;
+		hdcp.hdcp_enabled=1;
 		
         if (hdcp.en_ctrl == 0) {			
                 hdcp.en_ctrl = kmalloc(sizeof(struct hdcp_enable_control),GFP_KERNEL);
@@ -575,6 +569,8 @@ static long hdcp_enable_ctl(void __user *argp)
 static long hdcp_disable_ctl(void)
 {
         HDCP_DEBUG("[%s] %s  %d :%u\n", __FILE__,__FUNCTION__,__LINE__,jiffies_to_msecs(jiffies));
+        
+		hdcp.hdcp_enabled=0;
 		
 		hdcp_cancel_work(&hdcp.pending_start);
         hdcp_cancel_work(&hdcp.pending_wq_event);
@@ -600,7 +596,6 @@ static long hdcp_disable_ctl(void)
         hdcp_wait_re_entrance = 0;
         hdcp.hpd_low = 0;  
 		hdcp.hdmi_state = HDMI_STARTED;
-		hdcp.hdcp_enabled = 0;
 
         return 0;
 }
@@ -653,13 +648,11 @@ static long hdcp_get_downstream_KSVlist_ctl(void __user *argp)
 
 static long hdcp_set_22_cipher_ctl(void __user *argp)
 {	
-	HDCP_22_CIPHER_INFO *cipher_info = argp;
-
-	HDCP_DEBUG("[%s] %s  %d :%u\n", __FILE__,__FUNCTION__,__LINE__,jiffies_to_msecs(jiffies));
-
-	hdcp_lib_set_22_cipher(cipher_info);
-	hdcp.hdcp2p2_enabled = cipher_info->hdcp_22_en;
-	return 0;
+        HDCP_DEBUG("[%s] %s  %d :%u\n", __FILE__,__FUNCTION__,__LINE__,jiffies_to_msecs(jiffies));
+		
+		hdcp_lib_set_22_cipher((HDCP_22_CIPHER_INFO *)argp);
+		        
+		return 0;        
 }
 
 static long hdcp_control_22_cipher_ctl(void __user *argp)
@@ -674,6 +667,8 @@ static long hdcp_control_22_cipher_ctl(void __user *argp)
 		}
 				
 		hdcp_lib_control_22_cipher(flag);
+
+		hdcp.hdcp2p2_enabled=flag;
 
 		return 0;        
 }
@@ -801,7 +796,7 @@ static ssize_t hdcp_hdcp1x_en_show(struct device *device, struct device_attribut
 	ssize_t ret_count=0;
 	HDCP_DEBUG("%s\n",__FUNCTION__);
 
-	ret_count = sprintf(buffer, "%s\n", (hdcp.hdcp_enabled == 1)?"Enable":"Disable");
+	ret_count = sprintf(buffer, "%s\n", (hdcp.hdcp_enabled==1)?"Enable":"Disable");
 
 	return ret_count;
 }
@@ -811,7 +806,7 @@ static ssize_t hdcp_hdcp2p2_en_show(struct device *device, struct device_attribu
 	ssize_t ret_count=0;
 	HDCP_DEBUG("%s\n",__FUNCTION__);
 
-	ret_count = sprintf(buffer, "%s\n", (hdcp.hdcp2p2_enabled == 1)?"Enable":"Disable");
+	ret_count = sprintf(buffer, "%s\n", (hdcp.hdcp2p2_enabled==HDCP_22_CIPHER_RESUME)?"Enable":"Disable");
 
 	return ret_count;
 }
@@ -918,8 +913,7 @@ static int __init hdcp_init(void)
         hdcp.hdcp_down_event = 0;
         hdcp_wait_re_entrance = 0;
         hdcp.hpd_low = 0;
-		hdcp.hdcp_enabled = 0;
-		hdcp.hdcp2p2_enabled = 0;
+		hdcp.hdcp_enabled=-1;
 
 		/* Init sysfs */
 		ret = device_create_file(mdev.this_device, &dev_attr_state);

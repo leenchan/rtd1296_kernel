@@ -1,14 +1,3 @@
-/*
- * v4l2_hdmi_dev.h - RTK hdmi rx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #ifndef V4L2_HDMI_DEV_H
 #define V4L2_HDMI_DEV_H
 
@@ -53,9 +42,6 @@
 #include <asm/page.h>
 #include <asm/memory.h>
 
-#include "ion/ion.h"
-#include "uapi/ion.h"
-#include "uapi/rtk_phoenix_ion.h"
 
 
 #define __RTK_HDMI_RX_DEBUG__	0
@@ -69,6 +55,8 @@
 #define HDMIRX_ERROR(format, ...) printk(KERN_ERR "[HDMI RX ERR]" format "\n", ## __VA_ARGS__)
 #define HDMIRX_INFO(format, ...) printk(KERN_WARNING "[HDMI RX]" format "\n", ## __VA_ARGS__)
 
+
+#define HDMI_SW_BUF_NUM 20
 
 #define roundup16(x)	roundup(x, 16)
 
@@ -85,10 +73,23 @@ typedef enum {
 	CTL_ENABLE	= 1
 } HDMI_CLK_CTL;
 
+typedef struct
+{
+	atomic_t read_index;
+	atomic_t write_index;
+	atomic_t fill_index;
+	int use_v4l2_buffer;
+	int pre_frame_done;
+	int ISR_FLIP;
+}HDMI_SW_BUF_CTL;
+
+
 /* buffer for one video frame */
 struct hdmi_buffer {
 	/* common v4l buffer stuff -- must be first */
 	struct vb2_buffer	vb;
+	//unsigned long		phys;
+	// TODO: type
 	u32		phys;
 	struct list_head	list;
 };
@@ -98,13 +99,6 @@ struct hdmi_dmaqueue {
 	atomic_t			qcnt;	//number of buffers waiting for hw process
 	struct list_head	active;
 	struct hdmi_buffer	*hwbuf[2];
-	unsigned char skip_frame[2];
-};
-
-struct mipi_ion_buf {
-	struct ion_client *client;
-	struct ion_handle *handle;
-	ion_phys_addr_t phys_addr;
 };
 
 struct v4l2_hdmi_dev {
@@ -125,8 +119,6 @@ struct v4l2_hdmi_dev {
 	unsigned int		   outfmt;
 	unsigned int		   bpp;
 	struct vb2_queue	   vb_hdmidq;
-
-	struct mipi_ion_buf ion_buf;
 };
 
 int hdmi_queue_setup(struct vb2_queue *vq, const struct v4l2_format *fmt,
@@ -156,6 +148,8 @@ struct mipi_vb2_vmalloc_buf {
 	   struct page					   **pages;
 	   struct vm_area_struct		   *vma;
 	   int							   write;
+	   //unsigned long				   size;
+	   // TODO: type
 	   u32				   size;
 	   unsigned int 				   n_pages;
 	   atomic_t 					   refcount;
@@ -166,7 +160,7 @@ struct mipi_vb2_vmalloc_buf {
 int hdmirx_queue_init(struct v4l2_hdmi_dev *dev, struct vb2_queue *q, enum v4l2_memory memory);
 int hdmirx_rtk_drv_probe(struct platform_device *pdev);
 int hdmirx_rtk_drv_remove(struct platform_device *pdev);
-
-void set_top_voltage(int level);
+int hdmirx_rtk_drv_suspend(struct platform_device *pdev, pm_message_t state);
+int hdmirx_rtk_drv_resume(struct platform_device *);
 
 #endif // V4L2_HDMI_DEV_H

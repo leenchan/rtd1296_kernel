@@ -1,14 +1,3 @@
-/*
- * hdmiPhy.c - RTK hdmi rx driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include "hdmiInternal.h"
 
 #define HDMI_B_TEST_COUNT_MAX			1
@@ -53,7 +42,7 @@ const HDMI_PHY_PARAM_T hdmi_phy_param[] = //QC 2016/1/18
 //             B_lower             N_code           DEMUX                   *CK_LDOD                      CK_RS                     *CDR_bias                       *CDR_KP2                  CDR_KD                *EQ_bias                   PR			vsel_ldo
 	{5860, 2844,    16,     0,     0,     1,      0x0,      0x3,      0x4,      0x2,      0x2,      0x1,    (0x08<<0),      0x0,      0x1,      0x0,    0x0,    0x1,    0x3,    0x0, 0x0,      7,   "300M~6000M half rate"},  // 300~600 M
 	{2844, 1422,    36,     2,     1,     2,      0x1,      0x3,      0x4,      0x2,      0x4,      0x1,    (0x20<<0),      0x4,      0x1,      0x0,    0x1,    0x1,    0x7,    0x0, 0x0,      7,   "150M~300M full rate"},	   // 150~300 M
-	{1422,  711,    36,     1,     2,     3,      0x2,      0x3,      0x4,      0x2,      0x9,      0x1,    (0x28<<0),      0x0,      0x0,      0x0,    0x1,    0x1,    0x7,    0x1, 0x0,      7,   "75M~150M full rate+DS1"},	// 75~150 M
+	{1422,  711,    36,     1,     2,     3,      0x2,      0x3,      0x4,      0x2,      0x9,      0x1,    (0x20<<0),      0x0,      0x0,      0x0,    0x1,    0x1,    0x7,    0x1, 0x0,      7,   "75M~150M full rate+DS1"},	// 75~150 M
 	{ 711,  355,    36,     0,     3,     3,      0x2,      0x3,      0x4,      0x2,      0x4,      0x1,    (0x10<<0),      0x0,      0x0,      0x0,    0x1,    0x1,    0x7,    0x2, 0x0,      7,   "37.5M~75M full rate+DS2"},	//37.5~75M
 	{ 355,  128,    76,     0,     4,     3,      0x2,      0x3,      0x4,      0x7,      0x4,      0x1,    (0x10<<0),      0x0,      0x0,      0x0,    0x1,    0x1,    0x3,    0x3, 0x0,      7,   "13.5M~37M full rate+DS3"}, // 13.5M~ 37.5M
 };
@@ -64,9 +53,6 @@ void hdmi_z0_set(unsigned char port, unsigned char lane, unsigned char enable)
 {
 	unsigned int bmask = 0;
 
-	if (lane&LN_Z300POW) {
-		bmask |= Z0POW_reg_z0_z300pow(1<<port);
-	}
 	if (lane&LN_CK) {
 		bmask |= Z0POW_reg_z0_z0pow_ck(1<<port);
 	}
@@ -961,9 +947,9 @@ void HDMI_MAG2_SetDFE(int b, int dfe_mode)
 	hdmi_rx_reg_mask32(REG_DFE_MODE, ~(REG_DFE_MODE_adapt_mode_mask|REG_DFE_MODE_edge_det_mode_mask|REG_DFE_MODE_transition_only_mask|REG_DFE_MODE_tap1_delay_mask|REG_DFE_MODE_tap24_delay_mask|REG_DFE_MODE_le_delay_mask|REG_DFE_MODE_servo_delay_mask|REG_DFE_MODE_gray_en_mask|REG_DFE_MODE_dfe_adapt_rstb_mask|REG_DFE_MODE_tap0_notrans_mask|REG_DFE_MODE_servo_notrans_mask),
 										(REG_DFE_MODE_adapt_mode(dfe_mode)|REG_DFE_MODE_edge_det_mode(0)|REG_DFE_MODE_transition_only_mask|REG_DFE_MODE_tap1_delay(1)|REG_DFE_MODE_tap24_delay(1)|REG_DFE_MODE_le_delay(1)|REG_DFE_MODE_gray_en_mask|REG_DFE_MODE_tap0_notrans_mask|REG_DFE_MODE_servo_notrans_mask|_BIT16), HDMI_RX_DEF);
 
-	hdmi_rx_reg_mask32(REG_DFE_EN_L0, ~(REG_DFE_EN_L0_clk_inv_lane0_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2_mask|REG_DFE_EN_L2_rl_det_en_lane2_mask|REG_DFE_EN_L2_rl_threshold_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask|REG_DFE_EN_L2_le_min_lane2_mask|REG_DFE_EN_L2_le_init_lane2_mask|REG_DFE_EN_L2_tap4_init_lane2_mask),(REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(22), HDMI_RX_DEF);
-	hdmi_rx_reg_mask32(REG_DFE_EN_L1, ~(REG_DFE_EN_L1_clk_inv_lane1_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2_mask|REG_DFE_EN_L2_rl_det_en_lane2_mask|REG_DFE_EN_L2_rl_threshold_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask|REG_DFE_EN_L2_le_min_lane2_mask|REG_DFE_EN_L2_le_init_lane2_mask|REG_DFE_EN_L2_tap4_init_lane2_mask),(REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(22), HDMI_RX_DEF);
-	hdmi_rx_reg_mask32(REG_DFE_EN_L2, ~(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2_mask|REG_DFE_EN_L2_rl_det_en_lane2_mask|REG_DFE_EN_L2_rl_threshold_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask|REG_DFE_EN_L2_le_min_lane2_mask|REG_DFE_EN_L2_le_init_lane2_mask|REG_DFE_EN_L2_tap4_init_lane2_mask),(REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(22), HDMI_RX_DEF);
+	hdmi_rx_reg_mask32(REG_DFE_EN_L0, ~(REG_DFE_EN_L0_clk_inv_lane0_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2_mask|REG_DFE_EN_L2_rl_det_en_lane2_mask|REG_DFE_EN_L2_rl_threshold_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask|REG_DFE_EN_L2_le_min_lane2_mask|REG_DFE_EN_L2_le_init_lane2_mask|REG_DFE_EN_L2_tap4_init_lane2_mask),(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(22), HDMI_RX_DEF);
+	hdmi_rx_reg_mask32(REG_DFE_EN_L1, ~(REG_DFE_EN_L1_clk_inv_lane1_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2_mask|REG_DFE_EN_L2_rl_det_en_lane2_mask|REG_DFE_EN_L2_rl_threshold_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask|REG_DFE_EN_L2_le_min_lane2_mask|REG_DFE_EN_L2_le_init_lane2_mask|REG_DFE_EN_L2_tap4_init_lane2_mask),(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(22), HDMI_RX_DEF);
+	hdmi_rx_reg_mask32(REG_DFE_EN_L2, ~(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2_mask|REG_DFE_EN_L2_rl_det_en_lane2_mask|REG_DFE_EN_L2_rl_threshold_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask|REG_DFE_EN_L2_le_min_lane2_mask|REG_DFE_EN_L2_le_init_lane2_mask|REG_DFE_EN_L2_tap4_init_lane2_mask),(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(22), HDMI_RX_DEF);
 
 	//set initial value  TAP0 TAP1 TAP2 TAP3
 	// Tap1 =0xc Tap0 =0xc servo =0xf
@@ -1062,11 +1048,11 @@ void HDMI_MAG2_SetDFE_MS_speed(int b, int dfe_mode)
 									(REG_DFE_MODE_adapt_mode(dfe_mode)|REG_DFE_MODE_edge_det_mode(0)|REG_DFE_MODE_transition_only_mask|REG_DFE_MODE_tap1_delay(1)|REG_DFE_MODE_tap24_delay(1)|REG_DFE_MODE_le_delay(1)|REG_DFE_MODE_gray_en_mask|REG_DFE_MODE_tap0_notrans_mask|REG_DFE_MODE_servo_notrans_mask|_BIT16), HDMI_RX_DEF);
 
 	hdmi_rx_reg_mask32(REG_DFE_EN_L0, ~(REG_DFE_EN_L0_clk_inv_lane0_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2_mask|REG_DFE_EN_L2_rl_det_en_lane2_mask|REG_DFE_EN_L2_rl_threshold_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask|REG_DFE_EN_L2_le_min_lane2_mask|REG_DFE_EN_L2_le_init_lane2_mask|REG_DFE_EN_L2_tap4_init_lane2_mask),
-									(REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(0x3), HDMI_RX_DEF);
+									(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(0x3), HDMI_RX_DEF);
 	hdmi_rx_reg_mask32(REG_DFE_EN_L1, ~(REG_DFE_EN_L1_clk_inv_lane1_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2_mask|REG_DFE_EN_L2_rl_det_en_lane2_mask|REG_DFE_EN_L2_rl_threshold_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask|REG_DFE_EN_L2_le_min_lane2_mask|REG_DFE_EN_L2_le_init_lane2_mask|REG_DFE_EN_L2_tap4_init_lane2_mask),
-									(REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(0x3), HDMI_RX_DEF);
+									(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(0x3), HDMI_RX_DEF);
 	hdmi_rx_reg_mask32(REG_DFE_EN_L2, ~(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2_mask|REG_DFE_EN_L2_rl_det_en_lane2_mask|REG_DFE_EN_L2_rl_threshold_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask|REG_DFE_EN_L2_le_min_lane2_mask|REG_DFE_EN_L2_le_init_lane2_mask|REG_DFE_EN_L2_tap4_init_lane2_mask),
-									(REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(0x3), HDMI_RX_DEF);
+									(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_timer_ctrl_en_lane2_mask|REG_DFE_EN_L2_reduce_adapt_gain_lane2(2))|REG_DFE_EN_L2_rl_threshold_lane2(1)|REG_DFE_EN_L2_le_min_lane2(0x18)|REG_DFE_EN_L2_le_init_lane2(0x3), HDMI_RX_DEF);
 
 	//set initial value	TAP0 TAP1 TAP2 TAP3
 	// Tap1 =0xc Tap0 =0xc servo =0xf
@@ -1136,9 +1122,9 @@ void DFE_Manual_Set(void)
 	hdmi_rx_reg_mask32(RST, ~RST_dfe_rstn_n_mask, RST_dfe_rstn_n_mask, HDMI_RX_PHY);	//DFE register release
 
 	//disable dfe
-	hdmi_rx_reg_mask32(REG_DFE_EN_L0, ~(REG_DFE_EN_L0_clk_inv_lane0_mask|REG_DFE_EN_L0_dfe_adapt_en_lane0_mask), 0, HDMI_RX_DEF);
-	hdmi_rx_reg_mask32(REG_DFE_EN_L1, ~(REG_DFE_EN_L1_clk_inv_lane1_mask|REG_DFE_EN_L1_dfe_adapt_en_lane1_mask), 0, HDMI_RX_DEF);
-	hdmi_rx_reg_mask32(REG_DFE_EN_L2, ~(REG_DFE_EN_L2_clk_inv_lane2_mask|REG_DFE_EN_L2_dfe_adapt_en_lane2_mask), 0, HDMI_RX_DEF);
+	hdmi_rx_reg_mask32(REG_DFE_EN_L0, ~REG_DFE_EN_L0_dfe_adapt_en_lane0_mask, 0, HDMI_RX_DEF);
+	hdmi_rx_reg_mask32(REG_DFE_EN_L1, ~REG_DFE_EN_L1_dfe_adapt_en_lane1_mask, 0, HDMI_RX_DEF);
+	hdmi_rx_reg_mask32(REG_DFE_EN_L2, ~REG_DFE_EN_L2_dfe_adapt_en_lane2_mask, 0, HDMI_RX_DEF);
 
 	hdmi_rx_reg_mask32(REG_DFE_MODE, ~REG_DFE_MODE_adapt_mode_mask, REG_DFE_MODE_adapt_mode(3), HDMI_RX_DEF);//adaptive mode sel
 

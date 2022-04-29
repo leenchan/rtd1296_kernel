@@ -1,78 +1,78 @@
-/*
- * Copyright (C) 2015-2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-
+#include <linux/device.h>
+#include <linux/file.h>
+#include <linux/fs.h>
+#include <linux/err.h>
 #include <linux/module.h>
-#include <linux/of_address.h>
+#include <linux/moduleparam.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
+
+#include <linux/miscdevice.h>
+
+#include <linux/interrupt.h>
+#include <linux/io.h>
+#include <linux/uaccess.h>
 #include <linux/uio_driver.h>
 
 static int rtk_rbus_probe(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
 	int ret;
 	struct resource res;
 	struct uio_info *info;
 
-	dev_info(dev, "[RBUS] %s\n", __func__);
+	printk("%s:%d\n", __func__, __LINE__);
 
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
-	if (!info)
-		return -ENOMEM;
+    if(pdev == NULL)
+        return -ENODEV;
 
-	ret = of_address_to_resource(pdev->dev.of_node, 0, &res);
-	if (ret) {
-		dev_err(dev, "failed to get resource\n");
-		goto free_mem;
-	}
+	info = kzalloc(sizeof(struct uio_info), GFP_KERNEL);
+    if(info == NULL)
+        return -ENOMEM;
 
-
-	info->mem[0].addr = res.start;
-	info->mem[0].size = ALIGN(resource_size(&res), PAGE_SIZE);
-	info->mem[0].memtype = UIO_MEM_PHYS;
-
-	info->version = "0.0.1";
-	info->name = "rtk-rbus";
+    ret = of_address_to_resource(pdev->dev.of_node, 0, &res);
+    info->mem[0].addr = res.start;
+    info->mem[0].size = ALIGN(res.end - res.start + 1, PAGE_SIZE);
+    //info->mem[0].internal_addr = ioremap(info->mem[0].addr, info->mem[0].size);
+    info->mem[0].memtype = UIO_MEM_PHYS;
+    info->version = "0.0.1";
+    info->name = "rtk-rbus";
 #ifdef CONFIG_UIO_ASSIGN_MINOR
-	info->minor = 250;
+    info->minor = 250;
 #endif
 
-	ret = uio_register_device(dev, info);
-	if (ret) {
-		dev_err(dev, "failed to register uio device\n");
-		goto free_mem;
-	}
+    ret = uio_register_device(&pdev->dev, info);
+    if(ret != 0){
+        iounmap(info->mem[0].internal_addr);
+        printk("%s: failed to register uio device\n", __func__);
+        return ret;
+    }
 
-	platform_set_drvdata(pdev, info);
-	return 0;
-free_mem:
-	kfree(info);
-	return ret;
-
+    platform_set_drvdata(pdev, info);
+    return 0;
 }
 
 static int rtk_rbus_remove(struct platform_device *pdev)
 {
 	struct uio_info *info = platform_get_drvdata(pdev);
-	struct device *dev = &pdev->dev;
 
-	dev_info(dev, "[RBUS] %s\n", __func__);
+	printk("%s:%d\n", __func__, __LINE__);
 
 	uio_unregister_device(info);
 	platform_set_drvdata(pdev, NULL);
+	//iounmap(info->mem[0].internal_addr);
 	kfree(info);
 
 	return 0;
 }
 
 static const struct of_device_id rtk_rbus_ids[] = {
-	{ .compatible = "realtek,rbus" },
-	{}
+	{ .compatible = "Realtek,rtk1195-rbus" },
+	{ .compatible = "Realtek,rtk1295-rbus" },
+	{ /* Sentinel */ },
 };
 
 static struct platform_driver rtk_rbus_driver = {
@@ -81,7 +81,22 @@ static struct platform_driver rtk_rbus_driver = {
 	.driver		= {
 		.name	= "rtk-rbus",
 		.owner	= THIS_MODULE,
-		.of_match_table = rtk_rbus_ids,
+        .of_match_table = rtk_rbus_ids,
 	},
 };
-module_platform_driver_probe(rtk_rbus_driver, rtk_rbus_probe);
+
+static int __init rtk_rbus_init(void)
+{
+	printk("%s:%d\n", __func__, __LINE__);
+	return platform_driver_register(&rtk_rbus_driver);
+}
+
+static void __exit rtk_rbus_exit(void)
+{
+	printk("%s:%d\n", __func__, __LINE__);
+	platform_driver_unregister(&rtk_rbus_driver);
+}
+
+module_init(rtk_rbus_init);
+module_exit(rtk_rbus_exit);
+

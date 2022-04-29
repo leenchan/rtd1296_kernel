@@ -23,22 +23,6 @@
 #include <linux/compat.h>
 #include <linux/slab.h>
 
-#ifdef RTK_TRACE_ALSA_EN
-#define RTK_TRACE_ALSA(format, ...) printk(KERN_ALERT format, ##__VA_ARGS__);
-#define RTK_TRACE_ALSA_SEC(sec, format, ...)    \
-{\
-    static long count = 0;\
-    if((jiffies - count) > HZ * sec)\
-    {\
-        count = jiffies;\
-        printk(KERN_ALERT format, ##__VA_ARGS__);\
-    }\
-}
-#else
-#define RTK_TRACE_ALSA(format, ...)
-#define RTK_TRACE_ALSA_SEC(sec, format, ...)
-#endif
-
 static int snd_pcm_ioctl_delay_compat(struct snd_pcm_substream *substream,
 				      s32 __user *src)
 {
@@ -88,29 +72,6 @@ static int snd_pcm_ioctl_forward_compat(struct snd_pcm_substream *substream,
 	if (put_user(err, src))
 		return -EFAULT;
 	return err < 0 ? err : 0;
-}
-
-static int snd_pcm_ioctl_get_fw_delay_compat(struct snd_pcm_substream *substream,
-				      s32 __user *src)
-{
-	snd_pcm_sframes_t fw_delay;
-	mm_segment_t fs;
-	int err = -ENOTTY;
-
-	fs = snd_enter_user();
-	if ((strcmp(substream->pcm->card->driver, "RTK") == 0)) {
-		err = substream->ops->ioctl(substream, SNDRV_PCM_IOCTL_GET_FW_DELAY, &fw_delay);
-	} else {
-		// for other sound card, it has no additional delay
-		fw_delay = 0;
-		err = 0;
-	}
-	snd_leave_user(fs);
-	if (err < 0)
-		return err;
-	if (put_user(fw_delay, src))
-		return -EFAULT;
-	return err;
 }
 
 struct snd_pcm_hw_params32 {
@@ -429,10 +390,7 @@ static int snd_pcm_ioctl_xferi_compat(struct snd_pcm_substream *substream,
 	if (dir == SNDRV_PCM_STREAM_PLAYBACK)
 		err = snd_pcm_lib_write(substream, compat_ptr(buf), frames);
 	else
-	{
-        RTK_TRACE_ALSA_SEC(3, "%x @ %s %d\n", frames, __func__, __LINE__);
 		err = snd_pcm_lib_read(substream, compat_ptr(buf), frames);
-	}
 	if (err < 0)
 		return err;
 	/* copy the result */
@@ -689,8 +647,6 @@ enum {
 	SNDRV_PCM_IOCTL_WRITEN_FRAMES32 = _IOW('A', 0x52, struct snd_xfern32),
 	SNDRV_PCM_IOCTL_READN_FRAMES32 = _IOR('A', 0x53, struct snd_xfern32),
 	SNDRV_PCM_IOCTL_SYNC_PTR32 = _IOWR('A', 0x23, struct snd_pcm_sync_ptr32),
-	SNDRV_PCM_IOCTL_GET_FW_DELAY32 = _IOR('A', 0xF1, s32),
-
 #ifdef CONFIG_X86_X32
 	SNDRV_PCM_IOCTL_CHANNEL_INFO_X32 = _IOR('A', 0x32, struct snd_pcm_channel_info),
 	SNDRV_PCM_IOCTL_STATUS_X32 = _IOR('A', 0x20, struct snd_pcm_status_x32),
@@ -705,19 +661,12 @@ static long snd_pcm_ioctl_compat(struct file *file, unsigned int cmd, unsigned l
 	struct snd_pcm_substream *substream;
 	void __user *argp = compat_ptr(arg);
 
-//    RTK_TRACE_ALSA_SEC(2, " %x @ %s %d\n", cmd, __func__, __LINE__);
 	pcm_file = file->private_data;
 	if (! pcm_file)
-	{
-//        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -ENOTTY;
-	}
 	substream = pcm_file->substream;
 	if (! substream)
-	{
-//        RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 		return -ENOTTY;
-	}
 
 	/*
 	 * When PCM is used on 32bit mode, we need to disable
@@ -743,20 +692,10 @@ static long snd_pcm_ioctl_compat(struct file *file, unsigned int cmd, unsigned l
 	case SNDRV_PCM_IOCTL_XRUN:
 	case SNDRV_PCM_IOCTL_LINK:
 	case SNDRV_PCM_IOCTL_UNLINK:
-	case SNDRV_PCM_IOCTL_VOLUME_SET:
-	case SNDRV_PCM_IOCTL_VOLUME_GET:
-	case SNDRV_PCM_IOCTL_GET_LATENCY:
-//	case SNDRV_PCM_IOCTL_GET_FW_DELAY:
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		{
-//            RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 			return snd_pcm_playback_ioctl1(file, substream, cmd, argp);
-		}
 		else
-		{
-//            RTK_TRACE_ALSA("[-] @ %s %d\n", __func__, __LINE__);
 			return snd_pcm_capture_ioctl1(file, substream, cmd, argp);
-		}
 	case SNDRV_PCM_IOCTL_HW_REFINE32:
 		return snd_pcm_ioctl_hw_params_compat(substream, 1, argp);
 	case SNDRV_PCM_IOCTL_HW_PARAMS32:
@@ -774,12 +713,7 @@ static long snd_pcm_ioctl_compat(struct file *file, unsigned int cmd, unsigned l
 	case SNDRV_PCM_IOCTL_WRITEI_FRAMES32:
 		return snd_pcm_ioctl_xferi_compat(substream, SNDRV_PCM_STREAM_PLAYBACK, argp);
 	case SNDRV_PCM_IOCTL_READI_FRAMES32:
-    {
-        long ret;
-        RTK_TRACE_ALSA_SEC(2, " @ %s %d\n", __func__, __LINE__);
-		ret = snd_pcm_ioctl_xferi_compat(substream, SNDRV_PCM_STREAM_CAPTURE, argp);
-        return ret;
-	}
+		return snd_pcm_ioctl_xferi_compat(substream, SNDRV_PCM_STREAM_CAPTURE, argp);
 	case SNDRV_PCM_IOCTL_WRITEN_FRAMES32:
 		return snd_pcm_ioctl_xfern_compat(substream, SNDRV_PCM_STREAM_PLAYBACK, argp);
 	case SNDRV_PCM_IOCTL_READN_FRAMES32:
@@ -790,8 +724,6 @@ static long snd_pcm_ioctl_compat(struct file *file, unsigned int cmd, unsigned l
 		return snd_pcm_ioctl_rewind_compat(substream, argp);
 	case SNDRV_PCM_IOCTL_FORWARD32:
 		return snd_pcm_ioctl_forward_compat(substream, argp);
-	case SNDRV_PCM_IOCTL_GET_FW_DELAY32:
-		return snd_pcm_ioctl_get_fw_delay_compat(substream, argp);
 #ifdef CONFIG_X86_X32
 	case SNDRV_PCM_IOCTL_STATUS_X32:
 		return snd_pcm_status_user_x32(substream, argp, false);

@@ -237,7 +237,7 @@ static struct htb_class *htb_classify(struct sk_buff *skb, struct Qdisc *sch,
 	}
 
 	*qerr = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
-	while (tcf && (result = tc_classify(skb, tcf, &res)) >= 0) {
+	while (tcf && (result = tc_classify(skb, tcf, &res, false)) >= 0) {
 #ifdef CONFIG_NET_CLS_ACT
 		switch (result) {
 		case TC_ACT_QUEUED:
@@ -1059,11 +1059,9 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt)
 
 	if (tb[TCA_HTB_DIRECT_QLEN])
 		q->direct_qlen = nla_get_u32(tb[TCA_HTB_DIRECT_QLEN]);
-	else {
+	else
 		q->direct_qlen = qdisc_dev(sch)->tx_queue_len;
-		if (q->direct_qlen < 2)	/* some devices have zero tx_queue_len */
-			q->direct_qlen = 2;
-	}
+
 	if ((q->rate2quantum = gopt->rate2quantum) < 1)
 		q->rate2quantum = 1;
 	q->defcls = gopt->defcls;
@@ -1573,17 +1571,15 @@ static void htb_unbind_filter(struct Qdisc *sch, unsigned long arg)
 #if defined(CONFIG_RTD_1295_HWNAT)
 #define FULL_SPEED	1000000000
 #else /* CONFIG_RTD_1295_HWNAT */
-#if defined(CONFIG_RTL_8196C) ||defined(CONFIG_RTL_819XD) ||defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_8197F)
+#if defined(CONFIG_RTL_8197F)
 #if defined(CONFIG_RTL_8367_QOS_SUPPORT)
 #define FULL_SPEED	1000000000
 #else
 #define FULL_SPEED	100000000
 #endif /* CONFIG_RTL_8367_QOS_SUPPORT */
-#elif defined(CONFIG_RTL_8198)||defined(CONFIG_RTL_8198C)
-#define FULL_SPEED	1000000000
 #else
 #error "Please select the correct chip model."
-#endif
+#endif /* CONFIG_RTL_8197F */
 #endif /* CONFIG_RTD_1295_HWNAT */
 
 static int htb_syncHwQueue(struct net_device *dev)
@@ -1638,8 +1634,6 @@ static int htb_syncHwQueue(struct net_device *dev)
 					queueInfo[queueNum].handle = queueInfo[queueNum].queueId = cl->common.classid;
 					memcpy(queueInfo[queueNum].ifname,
 						dev->name, sizeof(dev->name));
-					//printk("queueInfo[%d]:prio:%d,bw:%d,ceil:%d,handle:%x[%s]:[%d].\n",queueNum,queueInfo[queueNum].prio,
-					//	queueInfo[queueNum].bandwidth,queueInfo[queueNum].ceil,queueInfo[queueNum].handle,__FUNCTION__,__LINE__);
 					if (cl->common.classid == defClassId)
 						queueInfo[queueNum].flags |= QOS_DEF_QUEUE;
 					else
@@ -1714,15 +1708,6 @@ static int htb_syncHwQueue(struct net_device *dev)
 
 		/*	Do port bandwidth adjust here		*/
 		tmpPortBandwidth = portBandwidth + (BANDWIDTH_GAP_FOR_PORT);
-#if 0
-		tmpPortBandwidth = portBandwidth << 3;
-		tmpPortBandwidth += tmpPortBandwidth >> 3;
-		tmpPortBandwidth -= tmpPortBandwidth >> 5;
-		if (tmpPortBandwidth > 0x200000)
-			tmpPortBandwidth = ((tmpPortBandwidth / 1000) << 10);
-		else
-			tmpPortBandwidth = ((tmpPortBandwidth << 10) / 1000);
-#endif
 
 		/////////////////////////////////////////////////////////////////////////////
 		//Patch for qos: to improve no-match rule throughput especially for low speed(~500kbps)
@@ -1734,17 +1719,15 @@ static int htb_syncHwQueue(struct net_device *dev)
 		totalGbandwidth = totalRbandwidth = totalRnum = 0;
 
 		/*	Check for G type queue's total bandwidth	*/
-		for(i=0; i<queueNum; i++)
+		for (i = 0; i < queueNum; i++)
 		{
-			if((queueInfo[i].ceil==portBandwidth)
-				&& queueInfo[i].bandwidth<queueInfo[i].ceil)	/* change bandwidth granulity from bps(bit/sec) to Bps(byte/sec) */
+			if ((queueInfo[i].ceil == portBandwidth)
+				&& queueInfo[i].bandwidth < queueInfo[i].ceil)	/* change bandwidth granulity from bps(bit/sec) to Bps(byte/sec) */
 			{
-				/*totalGbandwidth += ((queueInfo[i].bandwidth<<3)/1000)<<7;*/
 				totalGbandwidth += ((queueInfo[i].bandwidth));
 			}
 			else if (queueInfo[i].ceil < portBandwidth)
 			{
-				/*totalRbandwidth += ((queueInfo[i].ceil<<3)/1000)<<7;*/
 				totalRbandwidth += ((queueInfo[i].ceil));
 				totalRnum++;
 
@@ -1765,30 +1748,12 @@ static int htb_syncHwQueue(struct net_device *dev)
 				if (queueInfo[i].bandwidth < EGRESS_BANDWIDTH_GRANULARITY)	/* 8K bytes == 64K bits	*/
 					queueInfo[i].bandwidth = queueInfo[i].ceil = EGRESS_BANDWIDTH_GRANULARITY;
 			}
-			/*
-			else
-			{
-				printk("Set output queue error: Queue bandwidth[%d]bps > Port bandwidth[%d]bps\n",
-					queueInfo[i].ceil, portBandwidth);
-			}
-			*/
 		}
 
 		if (totalRbandwidth != 0 && ((totalGbandwidth + totalRbandwidth) > portBandwidth))
 		{
 			/*	Should reduce the R type bandwidth	*/
 			calcRbandwidth = portBandwidth - totalGbandwidth;
-
-#if 0
-			for(i = 0; i < queueNum; i++)
-			{
-				if (queueInfo[i].bandwidth == queueInfo[i].ceil)
-				{
-					queueInfo[i].ceil = queueInfo[i].bandwidth
-						= queueInfo[i].bandwidth - (totalRbandwidth - calcRbandwidth) / totalRnum;
-				}
-			}
-#endif
 		}
 
 		for (i = 0; i < queueNum; i++)
@@ -1797,24 +1762,11 @@ static int htb_syncHwQueue(struct net_device *dev)
 			{
 				/*	Do queue bandwidth adjust here		*/
 				queueInfo[i].ceil += queueInfo[i].ceil >> 3;
-				#if 0
-				if (queueInfo[i].ceil > 0x200000)
-					queueInfo[i].ceil = ((queueInfo[i].ceil / 1000) << 10);
-				else
-					queueInfo[i].ceil = ((queueInfo[i].ceil << 10) / 1000);
-				#endif
 				if (queueInfo[i].ceil > FULL_SPEED)
 					queueInfo[i].ceil = FULL_SPEED;
 			}
 			else
 			{
-				/*	str	*/
-				#if 0
-				if (queueInfo[i].ceil > 1000000)
-					queueInfo[i].ceil = queueInfo[i].bandwidth = (queueInfo[i].ceil / 1000000) << 20;
-				else if (queueInfo[i].ceil>1000)
-					queueInfo[i].ceil = queueInfo[i].bandwidth = (queueInfo[i].ceil / 1000) << 10;
-				#endif
 				if (queueInfo[i].ceil > FULL_SPEED)
 					queueInfo[i].ceil = queueInfo[i].bandwidth = FULL_SPEED;
 			}

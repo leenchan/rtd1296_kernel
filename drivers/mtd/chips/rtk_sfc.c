@@ -10,7 +10,9 @@
 //#define CONFIG_MTD_RTK_MD_READ_COMPARE
 //#define CONFIG_MTD_RTK_MD_WRITE_COMPARE
 //#define DEV_DEBUG
+#ifdef CONFIG_ARCH_RTD129X
 #define EMMC_ISSUE_LOCK
+#endif
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -1309,97 +1311,12 @@ inline size_t sfc_memcpy(void *dst, void *src, size_t len) {
     return len; 
 }
 
-static void  _sfc_enable_4B_addr_mode(void)
-{
-	unsigned char tmp;
-	/*Just can read 1 byte*/
-
-#ifdef DEV_DEBUG
-	printk(KERN_WARNING "EN4B\n");
-#endif
-    SFC_SYNC;
-    REG_WRITE_U32(0x000000b7, SFC_OPCODE);
-    REG_WRITE_U32(0x00000000, SFC_CTL);
-    SFC_SYNC;
-	tmp = *(volatile unsigned char*)(FLASH_BASE);
-}
-
-static void  _sfc_disable_4B_addr_mode(void)
-{
-	unsigned char tmp;
-	/*Just can read 1 byte*/
-
-#ifdef DEV_DEBUG
-	printk(KERN_WARNING "EX4B\n");
-#endif
-    SFC_SYNC;
-    REG_WRITE_U32(0x000000e9, SFC_OPCODE);
-    REG_WRITE_U32(0x00000000, SFC_CTL);
-    SFC_SYNC;
-    tmp = *(volatile unsigned char*)(FLASH_BASE);
-}
-
-static void  _sfc_enable_host_4B_addr(void)
-{
-#ifdef DEV_DEBUG
-    printk(KERN_WARNING "enable host 4B addr\n");
-#endif
-    SFC_SYNC;
-    REG_WRITE_U32(0x00000001, 0x9801a828);
-    SFC_SYNC;
-}
-
-static void  _sfc_disable_host_4B_addr(void)
-{
-#ifdef DEV_DEBUG
-    printk(KERN_WARNING "disable host 4B addr\n");
-#endif
-    SFC_SYNC;
-    REG_WRITE_U32(0x00000000, 0x9801a828);
-    SFC_SYNC;
-}
-
 static int _sfc_read_bytes(struct mtd_info *mtd, loff_t from, size_t len,
         size_t *retlen, const u_char *buf) {
-			
-	unsigned int curr_nor_addr = (unsigned long long)FLASH_BASE + from;
-	unsigned int nor_boundary_addr = (unsigned long long)FLASH_BASE + (16 * 1024 * 1024);
-	unsigned int byte_len_before_16MB, byte_len_after_16MB;
-	
-	if (curr_nor_addr < nor_boundary_addr) {
-        if ((curr_nor_addr + len) > nor_boundary_addr) {
-            byte_len_before_16MB = nor_boundary_addr - curr_nor_addr;
-            byte_len_after_16MB = len - byte_len_before_16MB;
-        }
-        else {
-            byte_len_before_16MB = len;
-            byte_len_after_16MB = 0;
-        }
-    }
-    else {
-        byte_len_before_16MB = 0;
-        byte_len_after_16MB = len;
-    }
 
-	/* read berfore 16MB */
-    if (byte_len_before_16MB) {
-        _switch_to_read_mode((rtk_sfc_info_t*)mtd->priv, eREAD_MODE_SINGLE_FAST_READ);
+    _switch_to_read_mode((rtk_sfc_info_t*)mtd->priv, eREAD_MODE_SINGLE_FAST_READ);
 
-        *retlen = sfc_memcpy((void *)buf, (void *)(FLASH_BASE + from), byte_len_before_16MB); 
-    }
-
-    /* read after 16MB */
-    if (byte_len_after_16MB) {
-        _sfc_enable_4B_addr_mode();
-        _sfc_enable_host_4B_addr();
-        _switch_to_read_mode((rtk_sfc_info_t*)mtd->priv, eREAD_MODE_SINGLE_FAST_READ);
-
-        *retlen = sfc_memcpy((void *)(buf + byte_len_before_16MB),
-			(void *)(FLASH_BASE + from + byte_len_before_16MB), byte_len_after_16MB); 
-
-        _sfc_disable_4B_addr_mode();
-        _sfc_disable_host_4B_addr();
-    }  
+    *retlen = sfc_memcpy((void *)buf, (void *)(FLASH_BASE + from), len);    
 
     return 0;
 }
@@ -1418,10 +1335,6 @@ static int _sfc_read_md(struct mtd_info *mtd, loff_t from, size_t len,
 
     u8 *p_data_buf;
     int i;
-	
-	unsigned int curr_nor_addr = (unsigned long long)FLASH_BASE + from;
-	unsigned int nor_boundary_addr = (unsigned long long)FLASH_BASE + (16 * 1024 * 1024);
-	unsigned int byte_len_before_16MB, byte_len_after_16MB;
     
 #ifdef CONFIG_MTD_RTK_MD_READ_COMPARE
 	u8 *org_src = (u8*)buf;
@@ -1436,111 +1349,45 @@ retry_mdread:
 
 	if(unlikely((len <= RTK_SFC_SMALL_PAGE_WRITE_MASK) || (len & RTK_SFC_SMALL_PAGE_WRITE_MASK)))
 		BUG();
-	
-	if (curr_nor_addr < nor_boundary_addr) {
-		if ((curr_nor_addr + len) > nor_boundary_addr) {
-			byte_len_before_16MB = nor_boundary_addr - curr_nor_addr;
-			byte_len_after_16MB = len - byte_len_before_16MB;
-		}
-		else {
-			byte_len_before_16MB = len;
-			byte_len_after_16MB = 0;
+
+    while(len > 0) {
+		size_t dma_length;
+        
+		if(len >= MD_PP_DATA_SIZE)
+			dma_length = MD_PP_DATA_SIZE;
+		else
+			dma_length = len;
+
+        p_data_buf = (u8 *)read_dma_buf;
+
+		_switch_to_read_mode((rtk_sfc_info_t*)mtd->priv, eREAD_MODE_DUAL_FAST_READ);
+
+		//setup MD DDR addr and flash addr
+		//REG_WRITE_U32(((unsigned int)dest), MD_FDMA_DDR_SADDR);
+        REG_WRITE_U32(((unsigned long)read_dma_handle), MD_FDMA_DDR_SADDR);
+		REG_WRITE_U32(((unsigned long)src), MD_FDMA_FL_SADDR);
+
+        //setup MD direction and move data length
+		val = (0x2C000000 | dma_length);        //do swap
+		REG_WRITE_U32(val, MD_FDMA_CTRL2);		//for dma_length bytes.
+
+		mb();
+		SFC_SYNC;
+
+        //go 
+		REG_WRITE_U32(0x03, MD_FDMA_CTRL1);
+
+		/* wait for MD done its operation */
+		while((ret = REG_READ_U32(MD_FDMA_CTRL1)) & 0x1);
+
+        for (i = 0; i < dma_length; i++) {
+            dest[i] = p_data_buf[i];
         }
-    }
-	else {
-		byte_len_before_16MB = 0;
-		byte_len_after_16MB = len;
-	}
 
-	if (byte_len_before_16MB) {
-		len = byte_len_before_16MB;
-		while(len > 0) {
-			size_t dma_length;
-			
-			if(len >= MD_PP_DATA_SIZE)
-				dma_length = MD_PP_DATA_SIZE;
-			else
-				dma_length = len;
-
-			p_data_buf = (u8 *)read_dma_buf;
-
-			_switch_to_read_mode((rtk_sfc_info_t*)mtd->priv, eREAD_MODE_DUAL_FAST_READ);
-
-			//setup MD DDR addr and flash addr
-			//REG_WRITE_U32(((unsigned int)dest), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)read_dma_handle), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)src), MD_FDMA_FL_SADDR);
-
-			//setup MD direction and move data length
-			val = (0x2C000000 | dma_length);        //do swap
-			REG_WRITE_U32(val, MD_FDMA_CTRL2);		//for dma_length bytes.
-
-			mb();
-			SFC_SYNC;
-
-			//go 
-			REG_WRITE_U32(0x03, MD_FDMA_CTRL1);
-
-			/* wait for MD done its operation */
-			while((ret = REG_READ_U32(MD_FDMA_CTRL1)) & 0x1);
-
-			for (i = 0; i < dma_length; i++) {
-				dest[i] = p_data_buf[i];
-			}
-
-			src += dma_length;
-			dest += dma_length;
-			read_count += dma_length;
-			len -= dma_length;
-		}
-	}
-	
-	if (byte_len_after_16MB) {
-		_sfc_enable_4B_addr_mode();
-        _sfc_enable_host_4B_addr();	
-	
-		len = byte_len_after_16MB;
-		while(len > 0) {
-			size_t dma_length;
-			
-			if(len >= MD_PP_DATA_SIZE)
-				dma_length = MD_PP_DATA_SIZE;
-			else
-				dma_length = len;
-
-			p_data_buf = (u8 *)read_dma_buf;
-
-			_switch_to_read_mode((rtk_sfc_info_t*)mtd->priv, eREAD_MODE_DUAL_FAST_READ);
-
-			//setup MD DDR addr and flash addr
-			//REG_WRITE_U32(((unsigned int)dest), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)read_dma_handle), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)src), MD_FDMA_FL_SADDR);
-
-			//setup MD direction and move data length
-			val = (0x2C000000 | dma_length);        //do swap
-			REG_WRITE_U32(val, MD_FDMA_CTRL2);		//for dma_length bytes.
-
-			mb();
-			SFC_SYNC;
-
-			//go 
-			REG_WRITE_U32(0x03, MD_FDMA_CTRL1);
-
-			/* wait for MD done its operation */
-			while((ret = REG_READ_U32(MD_FDMA_CTRL1)) & 0x1);
-
-			for (i = 0; i < dma_length; i++) {
-				dest[i] = p_data_buf[i];
-			}
-
-			src += dma_length;
-			dest += dma_length;
-			read_count += dma_length;
-			len -= dma_length;
-		}
-		_sfc_disable_4B_addr_mode();
-        _sfc_disable_host_4B_addr();
+        src += dma_length;
+		dest += dma_length;
+		read_count += dma_length;
+		len -= dma_length;
 	}
 
     *retlen = read_count;
@@ -1742,25 +1589,6 @@ static int _sfc_write_bytes(struct mtd_info *mtd, loff_t to, size_t len,
     u8 *src = (u8*)buf;
     volatile u8 *dest = (volatile u8*)(FLASH_BASE + to);
     u32 written_count = 0;
-	
-	unsigned int curr_nor_addr = (unsigned long long)FLASH_BASE + to;
-	unsigned int nor_boundary_addr = (unsigned long long)FLASH_BASE + (16 * 1024 * 1024);
-	unsigned int byte_len_before_16MB, byte_len_after_16MB;
-	
-	if (curr_nor_addr < nor_boundary_addr) {
-        if ((curr_nor_addr + len) > nor_boundary_addr) {
-            byte_len_before_16MB = nor_boundary_addr - curr_nor_addr;
-            byte_len_after_16MB = len - byte_len_before_16MB;
-        }
-        else {
-            byte_len_before_16MB = len;
-            byte_len_after_16MB = 0;
-        }
-    }
-    else {
-        byte_len_before_16MB = 0;
-        byte_len_after_16MB = len;
-    }
 
     //rtk_sfc_info_t *sfc_info = (rtk_sfc_info_t*)mtd->priv;    
 
@@ -1785,122 +1613,59 @@ static int _sfc_write_bytes(struct mtd_info *mtd, loff_t to, size_t len,
     REG_WRITE_U32(0x00000106,SFC_EN_WR);
     REG_WRITE_U32(0x00000105,SFC_WAIT_WR);
     REG_WRITE_U32(0x00ffffff,SFC_CE);
-	
-	if (byte_len_before_16MB) {
-		SFC_SYNC;
-		SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-		REG_WRITE_U32(0x00000002, SFC_OPCODE);  /* Byte Programming */
+
+    SFC_SYNC;
+    SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
+    REG_WRITE_U32(0x00000002, SFC_OPCODE);  /* Byte Programming */
 #if SFC_USE_DELAY
-		sfc_delay();
+    sfc_delay();
 #endif
 
-		REG_WRITE_U32(0x00000018, SFC_CTL); /* dataen = 1, adren = 1, dmycnt = 0 */
-		SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-		SFC_SYNC;
+    REG_WRITE_U32(0x00000018, SFC_CTL); /* dataen = 1, adren = 1, dmycnt = 0 */
+    SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
+    SFC_SYNC;
 
-		len = byte_len_before_16MB;
-		while(len--) {
-			/* send write enable first */
-			SFC_SYNC;
-			SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-			REG_WRITE_U32(0x00000006, SFC_OPCODE);  /* Write enable */
+    while(len--) {
+        /* send write enable first */
+        SFC_SYNC;
+        SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
+        REG_WRITE_U32(0x00000006, SFC_OPCODE);  /* Write enable */
 #if SFC_USE_DELAY
-			sfc_delay();
+        sfc_delay();
 #endif
-			REG_WRITE_U32(0x00180000, SFC_CTL); /* dataen = 0, adren = 0, dmycnt = 0 */
-			SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-			SFC_SYNC;
+        REG_WRITE_U32(0x00180000, SFC_CTL); /* dataen = 0, adren = 0, dmycnt = 0 */
+        SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
+        SFC_SYNC;
 
-			SFC_SYNC;
-			SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-			REG_WRITE_U32(0x00000002, SFC_OPCODE);  /* Byte Programming */
+        SFC_SYNC;
+        SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
+        REG_WRITE_U32(0x00000002, SFC_OPCODE);  /* Byte Programming */
 #if SFC_USE_DELAY
-			sfc_delay();
+        sfc_delay();
 #endif
-			REG_WRITE_U32(0x00000018, SFC_CTL); /* dataen = 1, adren = 1, dmycnt = 0 */
-			SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-			SFC_SYNC;
+        REG_WRITE_U32(0x00000018, SFC_CTL); /* dataen = 1, adren = 1, dmycnt = 0 */
+        SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
+        SFC_SYNC;
 
-			*dest++ = *src++;
-			mb();
+        *dest++ = *src++;
+        mb();
 #if !SFC_HW_POLL
-			/* using RDSR to make sure the operation is completed. */
-			do {
-				SFC_SYNC;
-				SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-				REG_WRITE_U32(0x00000005, SFC_OPCODE);  /* RDSR */
+        /* using RDSR to make sure the operation is completed. */
+        do {
+            SFC_SYNC;
+            SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
+            REG_WRITE_U32(0x00000005, SFC_OPCODE);  /* RDSR */
 #if SFC_USE_DELAY 
-				sfc_delay();
-#endif
-				REG_WRITE_U32(0x00000010, SFC_CTL); /* dataen = 1, adren = 0, dmycnt = 0 */
-				SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-				SFC_SYNC;
-			} while((*(volatile unsigned char *)FLASH_POLL_ADDR) & 0x1);
-#endif
-			written_count++;
-		}
-	}
-	
-	if (byte_len_after_16MB) {
-		_sfc_enable_4B_addr_mode();
-        _sfc_enable_host_4B_addr();
-		
-		SFC_SYNC;
-		SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-		REG_WRITE_U32(0x00000002, SFC_OPCODE);  /* Byte Programming */
-#if SFC_USE_DELAY
-		sfc_delay();
+            sfc_delay();
 #endif
 
-		REG_WRITE_U32(0x00000018, SFC_CTL); /* dataen = 1, adren = 1, dmycnt = 0 */
-		SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-		SFC_SYNC;
-
-		len = byte_len_after_16MB;
-		while(len--) {
-			/* send write enable first */
-			SFC_SYNC;
-			SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-			REG_WRITE_U32(0x00000006, SFC_OPCODE);  /* Write enable */
-#if SFC_USE_DELAY
-			sfc_delay();
+            REG_WRITE_U32(0x00000010, SFC_CTL); /* dataen = 1, adren = 0, dmycnt = 0 */
+            SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
+            SFC_SYNC;
+        } while((*(volatile unsigned char *)FLASH_POLL_ADDR) & 0x1);
 #endif
-			REG_WRITE_U32(0x00180000, SFC_CTL); /* dataen = 0, adren = 0, dmycnt = 0 */
-			SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-			SFC_SYNC;
-
-			SFC_SYNC;
-			SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-			REG_WRITE_U32(0x00000002, SFC_OPCODE);  /* Byte Programming */
-#if SFC_USE_DELAY
-			sfc_delay();
-#endif
-			REG_WRITE_U32(0x00000018, SFC_CTL); /* dataen = 1, adren = 1, dmycnt = 0 */
-			SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-			SFC_SYNC;
-
-			*dest++ = *src++;
-			mb();
-#if !SFC_HW_POLL
-			/* using RDSR to make sure the operation is completed. */
-			do {
-				SFC_SYNC;
-				SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-				REG_WRITE_U32(0x00000005, SFC_OPCODE);  /* RDSR */
-#if SFC_USE_DELAY 
-				sfc_delay();
-#endif
-				REG_WRITE_U32(0x00000010, SFC_CTL); /* dataen = 1, adren = 0, dmycnt = 0 */
-				SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-				SFC_SYNC;
-			} while((*(volatile unsigned char *)FLASH_POLL_ADDR) & 0x1);
-#endif
-			written_count++;
-		}
-		
-		_sfc_disable_4B_addr_mode();
-        _sfc_disable_host_4B_addr();
-	}
+        written_count++;
+    }
 
     /* send write disable then */
     SFC_SYNC;
@@ -1910,6 +1675,7 @@ static int _sfc_write_bytes(struct mtd_info *mtd, loff_t to, size_t len,
     REG_WRITE_U32(0x00000000, SFC_CTL); /* dataen = 0, adren = 0, dmycnt = 0 */
     SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
     SFC_SYNC;
+
 
     *retlen = written_count;
 
@@ -1941,13 +1707,10 @@ static int _sfc_write_small_pages(struct mtd_info *mtd, loff_t to, size_t len,
 #endif
 
     u8 *p_data_buf;
-	
-	unsigned int curr_nor_addr = (unsigned long long)FLASH_BASE + to;
-	unsigned int nor_boundary_addr = (unsigned long long)FLASH_BASE + (16 * 1024 * 1024);
-	unsigned int byte_len_before_16MB, byte_len_after_16MB;
     
 	rtk_sfc_info_t *sfc_info = (rtk_sfc_info_t*)mtd->priv;
     (void)sfc_info;
+
 
 	// support write fewer than 256 bytes and size must be multiples of 4-bytes
 	if(unlikely((len >= MD_PP_DATA_SIZE) || (len & RTK_SFC_SMALL_PAGE_WRITE_MASK)))
@@ -1955,21 +1718,6 @@ static int _sfc_write_small_pages(struct mtd_info *mtd, loff_t to, size_t len,
 
 	if((to & RTK_SFC_SMALL_PAGE_WRITE_MASK)) // only support write onto 4-bytes aligned area
 		BUG();
-		
-	if (curr_nor_addr < nor_boundary_addr) {
-        if ((curr_nor_addr + len) > nor_boundary_addr) {
-            byte_len_before_16MB = nor_boundary_addr - curr_nor_addr;
-            byte_len_after_16MB = len - byte_len_before_16MB;
-        }
-        else {
-            byte_len_before_16MB = len;
-            byte_len_after_16MB = 0;
-        }
-    }
-    else {
-        byte_len_before_16MB = 0;
-        byte_len_after_16MB = len;
-    }
 
 #ifdef EMMC_ISSUE_LOCK
     rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
@@ -1997,227 +1745,111 @@ static int _sfc_write_small_pages(struct mtd_info *mtd, loff_t to, size_t len,
     REG_WRITE_U32(0x00000105,SFC_WAIT_WR);
     REG_WRITE_U32(0x00ffffff,SFC_CE);
 
-	if (byte_len_before_16MB) {
-		SFC_SYNC;
+    SFC_SYNC;
+    SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
+    REG_WRITE_U32(0x00000002, SFC_OPCODE);	/* Byte Programming */
+#if SFC_USE_DELAY
+	sfc_delay();
+#endif
+
+	REG_WRITE_U32(0x00000018, SFC_CTL);	/* dataen = 1, adren = 1, dmycnt = 0 */
+	SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
+    SFC_SYNC;
+
+#ifdef EMMC_ISSUE_LOCK
+    rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
+#endif
+
+	while(len > 0) {
+        p_data_buf = (u8 *)write_dma_buf;
+        
+		for(i = 0; i < len ; i += 4) { /* endian convert */
+#if 0
+			val = *((u32*)(src + i));
+			*((u32*)(data_buf + i)) = 
+#if 0
+						((val >> 24) |
+						((val >> 8 ) & 0x0000ff00) |
+						((val << 8 ) & 0x00ff0000) |
+						(val << 24));
+#else
+						val;
+#endif
+#endif
+            *((u32*)(p_data_buf + i)) = *((u32*)(src + i));
+		}
+
+#ifdef EMMC_ISSUE_LOCK
+        rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
+#endif
+
+		//issue write command
+        SFC_SYNC;
 		SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-		REG_WRITE_U32(0x00000002, SFC_OPCODE);	/* Byte Programming */
+		REG_WRITE_U32(0x00000002, SFC_OPCODE);
+		
 #if SFC_USE_DELAY
 		sfc_delay();
 #endif
 
-		REG_WRITE_U32(0x00000018, SFC_CTL);	/* dataen = 1, adren = 1, dmycnt = 0 */
+		REG_WRITE_U32(0x00000018, SFC_CTL);
 		SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
+        SFC_SYNC;
+
+#ifdef EMMC_ISSUE_LOCK
+        rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
+#endif
+
+        //setup MD DDR addr and flash addr
+		//REG_WRITE_U32(((unsigned long)virt_to_phys(data_buf)), MD_FDMA_DDR_SADDR);
+        REG_WRITE_U32(((unsigned long)write_dma_handle), MD_FDMA_DDR_SADDR);
+		REG_WRITE_U32(((unsigned long)dest), MD_FDMA_FL_SADDR);
+
+
+ 		//setup MD direction and move data length
+		val = (0x2E000000 | len);               // do swap
+		REG_WRITE_U32(val, MD_FDMA_CTRL2);		//for dma_length bytes.
+
+        //dma_cache_sync(NULL,data_buf, len, DMA_TO_DEVICE);
+
+		mb();
 		SFC_SYNC;
 
-#ifdef EMMC_ISSUE_LOCK
-		rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif
-		len = byte_len_before_16MB;
-		while(len > 0) {
-			p_data_buf = (u8 *)write_dma_buf;
-        
-			for(i = 0; i < len ; i += 4) { /* endian convert */
-#if 0
-				val = *((u32*)(src + i));
-				*((u32*)(data_buf + i)) = 
-#if 0
-							((val >> 24) |
-							((val >> 8 ) & 0x0000ff00) |
-							((val << 8 ) & 0x00ff0000) |
-							(val << 24));
-#else
-							val;
-#endif
-#endif
-				*((u32*)(p_data_buf + i)) = *((u32*)(src + i));
-			}
+		//go 
+		REG_WRITE_U32(0x03, MD_FDMA_CTRL1);
 
+		/* wait for MD done its operation */
+		while((ret = REG_READ_U32(MD_FDMA_CTRL1)) & 0x1);
+
+#if !SFC_HW_POLL
+		/* wait for flash controller done its operation */
+		do {
 #ifdef EMMC_ISSUE_LOCK
-			rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
+            rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
 #endif
 
-			//issue write command
-			SFC_SYNC;
+            SFC_SYNC;
+
 			SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-			REG_WRITE_U32(0x00000002, SFC_OPCODE);
-		
+			REG_WRITE_U32(0x00000005, SFC_OPCODE); 
 #if SFC_USE_DELAY
 			sfc_delay();
 #endif
-
-			REG_WRITE_U32(0x00000018, SFC_CTL);
+			REG_WRITE_U32(0x00000010, SFC_CTL);
 			SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-			SFC_SYNC;
+	        SFC_SYNC;
 
 #ifdef EMMC_ISSUE_LOCK
-			rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
+            rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
 #endif
-
-			//setup MD DDR addr and flash addr
-			//REG_WRITE_U32(((unsigned long)virt_to_phys(data_buf)), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)write_dma_handle), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)dest), MD_FDMA_FL_SADDR);
-
-
-			//setup MD direction and move data length
-			val = (0x2E000000 | len);               // do swap
-			REG_WRITE_U32(val, MD_FDMA_CTRL2);		//for dma_length bytes.
-
-			//dma_cache_sync(NULL,data_buf, len, DMA_TO_DEVICE);
-
-			mb();
-			SFC_SYNC;
-
-			//go 
-			REG_WRITE_U32(0x03, MD_FDMA_CTRL1);
-
-			/* wait for MD done its operation */
-			while((ret = REG_READ_U32(MD_FDMA_CTRL1)) & 0x1);
-
-#if !SFC_HW_POLL
-			/* wait for flash controller done its operation */
-			do {
-#ifdef EMMC_ISSUE_LOCK
-				rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
-#endif
-
-				SFC_SYNC;
-
-				SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-				REG_WRITE_U32(0x00000005, SFC_OPCODE); 
-#if SFC_USE_DELAY
-				sfc_delay();
-#endif
-				REG_WRITE_U32(0x00000010, SFC_CTL);
-				SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-				SFC_SYNC;
-
-#ifdef EMMC_ISSUE_LOCK
-				rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif
-			} while((*(volatile unsigned char *)FLASH_POLL_ADDR) & 0x1);
+		} while((*(volatile unsigned char *)FLASH_POLL_ADDR) & 0x1);
 #endif     	    
-			/* shift to next page to writing */
-			src += len;
-			dest += len;
-			written_count += len;
-			len -= len;
-		} //end of page program
-	}
-	
-	if (byte_len_after_16MB) {
-		_sfc_enable_4B_addr_mode();
-        _sfc_enable_host_4B_addr();
-		
-		SFC_SYNC;
-		SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-		REG_WRITE_U32(0x00000002, SFC_OPCODE);	/* Byte Programming */
-#if SFC_USE_DELAY
-		sfc_delay();
-#endif
-
-		REG_WRITE_U32(0x00000018, SFC_CTL);	/* dataen = 1, adren = 1, dmycnt = 0 */
-		SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-		SFC_SYNC;
-
-#ifdef EMMC_ISSUE_LOCK
-		rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif
-		len = byte_len_after_16MB;
-		while(len > 0) {
-			p_data_buf = (u8 *)write_dma_buf;
-        
-			for(i = 0; i < len ; i += 4) { /* endian convert */
-#if 0
-				val = *((u32*)(src + i));
-				*((u32*)(data_buf + i)) = 
-#if 0
-							((val >> 24) |
-							((val >> 8 ) & 0x0000ff00) |
-							((val << 8 ) & 0x00ff0000) |
-							(val << 24));
-#else
-							val;
-#endif
-#endif
-				*((u32*)(p_data_buf + i)) = *((u32*)(src + i));
-			}
-
-#ifdef EMMC_ISSUE_LOCK
-			rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
-#endif
-
-			//issue write command
-			SFC_SYNC;
-			SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-			REG_WRITE_U32(0x00000002, SFC_OPCODE);
-		
-#if SFC_USE_DELAY
-			sfc_delay();
-#endif
-
-			REG_WRITE_U32(0x00000018, SFC_CTL);
-			SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-			SFC_SYNC;
-
-#ifdef EMMC_ISSUE_LOCK
-			rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif
-
-			//setup MD DDR addr and flash addr
-			//REG_WRITE_U32(((unsigned long)virt_to_phys(data_buf)), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)write_dma_handle), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)dest), MD_FDMA_FL_SADDR);
-
-
-			//setup MD direction and move data length
-			val = (0x2E000000 | len);               // do swap
-			REG_WRITE_U32(val, MD_FDMA_CTRL2);		//for dma_length bytes.
-
-			//dma_cache_sync(NULL,data_buf, len, DMA_TO_DEVICE);
-
-			mb();
-			SFC_SYNC;
-
-			//go 
-			REG_WRITE_U32(0x03, MD_FDMA_CTRL1);
-
-			/* wait for MD done its operation */
-			while((ret = REG_READ_U32(MD_FDMA_CTRL1)) & 0x1);
-
-#if !SFC_HW_POLL
-			/* wait for flash controller done its operation */
-			do {
-#ifdef EMMC_ISSUE_LOCK
-				rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
-#endif
-
-				SFC_SYNC;
-
-				SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-				REG_WRITE_U32(0x00000005, SFC_OPCODE); 
-#if SFC_USE_DELAY
-				sfc_delay();
-#endif
-				REG_WRITE_U32(0x00000010, SFC_CTL);
-				SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-				SFC_SYNC;
-
-#ifdef EMMC_ISSUE_LOCK
-				rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif
-			} while((*(volatile unsigned char *)FLASH_POLL_ADDR) & 0x1);
-#endif     	    
-			/* shift to next page to writing */
-			src += len;
-			dest += len;
-			written_count += len;
-			len -= len;
-		} //end of page program
-		
-		_sfc_disable_4B_addr_mode();
-        _sfc_disable_host_4B_addr();
-	}
+		/* shift to next page to writing */
+		src += len;
+		dest += len;
+		written_count += len;
+		len -= len;
+	} //end of page program
 
 #ifdef EMMC_ISSUE_LOCK
     rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
@@ -2260,10 +1892,6 @@ static int _sfc_write_pages(struct mtd_info *mtd, loff_t to, size_t len,
 #endif
 
     u8 *p_data_buf;
-	
-	unsigned int curr_nor_addr = (unsigned long long)FLASH_BASE + to;
-	unsigned int nor_boundary_addr = (unsigned long long)FLASH_BASE + (16 * 1024 * 1024);
-	unsigned int byte_len_before_16MB, byte_len_after_16MB;
 
 	rtk_sfc_info_t *sfc_info = (rtk_sfc_info_t*)mtd->priv;
     (void)sfc_info;
@@ -2276,21 +1904,6 @@ static int _sfc_write_pages(struct mtd_info *mtd, loff_t to, size_t len,
 	if(unlikely(((u64)dest&(MD_PP_DATA_SIZE-1)))) {
 		BUG();
 	}
-	
-	if (curr_nor_addr < nor_boundary_addr) {
-        if ((curr_nor_addr + len) > nor_boundary_addr) {
-            byte_len_before_16MB = nor_boundary_addr - curr_nor_addr;
-            byte_len_after_16MB = len - byte_len_before_16MB;
-        }
-        else {
-            byte_len_before_16MB = len;
-            byte_len_after_16MB = 0;
-        }
-    }
-    else {
-        byte_len_before_16MB = 0;
-        byte_len_after_16MB = len;
-    }
 
 #ifdef EMMC_ISSUE_LOCK
     rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
@@ -2318,233 +1931,114 @@ static int _sfc_write_pages(struct mtd_info *mtd, loff_t to, size_t len,
     REG_WRITE_U32(0x00000105,SFC_WAIT_WR);
     REG_WRITE_U32(0x00ffffff,SFC_CE);
 
-	if (byte_len_before_16MB) {
-		SFC_SYNC;
+    SFC_SYNC;
+	SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
+	REG_WRITE_U32(0x00000002, SFC_OPCODE);	/* Byte Programming */
+#if SFC_USE_DELAY
+	sfc_delay();
+#endif
+
+	REG_WRITE_U32(0x00000018, SFC_CTL);	/* dataen = 1, adren = 1, dmycnt = 0 */
+	SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
+    SFC_SYNC;
+
+#ifdef EMMC_ISSUE_LOCK
+    rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
+#endif 
+
+	while(len >= MD_PP_DATA_SIZE) {
+        p_data_buf = (u8 *)write_dma_buf;
+        
+		/* data moved by MD module is endian inverted.
+					revert it before moved to flash */
+		for(i = 0; i < MD_PP_DATA_SIZE; i += 4) {
+#if 0
+			val = *((u32*)(src + i));
+			*((u32*)(data_buf + i)) = 
+#if 0
+						((val >> 24) |
+						((val >> 8 ) & 0x0000ff00) |
+						((val << 8 ) & 0x00ff0000) |
+						(val << 24));
+#else
+						val;
+#endif
+#endif
+            *((u32*)(p_data_buf + i)) = *((u32*)(src + i));
+		}
+
+#ifdef EMMC_ISSUE_LOCK
+        rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
+#endif
+
+        SFC_SYNC; 
 		SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-		REG_WRITE_U32(0x00000002, SFC_OPCODE);	/* Byte Programming */
+		REG_WRITE_U32(0x00000002, SFC_OPCODE);
+		
 #if SFC_USE_DELAY
 		sfc_delay();
 #endif
 
-		REG_WRITE_U32(0x00000018, SFC_CTL);	/* dataen = 1, adren = 1, dmycnt = 0 */
+		REG_WRITE_U32(0x00000018, SFC_CTL);
 		SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
+	    SFC_SYNC; 
+
+#ifdef EMMC_ISSUE_LOCK
+        rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
+#endif 
+
+		//setup MD DDR addr and flash addr
+		//REG_WRITE_U32(((unsigned long)virt_to_phys(data_buf)), MD_FDMA_DDR_SADDR);
+        REG_WRITE_U32(((unsigned long)write_dma_handle), MD_FDMA_DDR_SADDR);
+		REG_WRITE_U32(((unsigned long)dest), MD_FDMA_FL_SADDR);
+
+   		//setup MD direction and move data length
+    	val = (0x26000000 | MD_PP_DATA_SIZE);   // do swap
+		REG_WRITE_U32(val, MD_FDMA_CTRL2);		//for dma_length bytes.
+        
+		//dma_cache_sync(NULL, data_buf, MD_PP_DATA_SIZE, DMA_TO_DEVICE);
+
+		mb();
 		SFC_SYNC;
 
-#ifdef EMMC_ISSUE_LOCK
-		rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif 
-		len = byte_len_before_16MB;
-		while(len >= MD_PP_DATA_SIZE) {
-			p_data_buf = (u8 *)write_dma_buf;
-			
-			/* data moved by MD module is endian inverted.
-						revert it before moved to flash */
-			for(i = 0; i < MD_PP_DATA_SIZE; i += 4) {
-#if 0
-				val = *((u32*)(src + i));
-				*((u32*)(data_buf + i)) = 
-#if 0
-							((val >> 24) |
-							((val >> 8 ) & 0x0000ff00) |
-							((val << 8 ) & 0x00ff0000) |
-							(val << 24));
-#else
-							val;
-#endif
-#endif
-				*((u32*)(p_data_buf + i)) = *((u32*)(src + i));
-			}
+		//go 
+		REG_WRITE_U32(0x03, MD_FDMA_CTRL1);
 
+		/* wait for MD done its operation */
+		while((ret = REG_READ_U32(MD_FDMA_CTRL1)) & 0x1);
+
+#if !SFC_HW_POLL
+		/* wait for flash controller done its operation */
+		do {
 #ifdef EMMC_ISSUE_LOCK
-			rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
+            rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
 #endif
 
-			SFC_SYNC; 
+            SFC_SYNC;
+ 
 			SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-			REG_WRITE_U32(0x00000002, SFC_OPCODE);
-		
+			REG_WRITE_U32(0x00000005, SFC_OPCODE);
+			
 #if SFC_USE_DELAY
 			sfc_delay();
 #endif
 
-			REG_WRITE_U32(0x00000018, SFC_CTL);
+			REG_WRITE_U32(0x00000010, SFC_CTL);
 			SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-			SFC_SYNC; 
+		    SFC_SYNC;
 
 #ifdef EMMC_ISSUE_LOCK
-			rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
+            rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
 #endif 
-
-			//setup MD DDR addr and flash addr
-			//REG_WRITE_U32(((unsigned long)virt_to_phys(data_buf)), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)write_dma_handle), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)dest), MD_FDMA_FL_SADDR);
-
-			//setup MD direction and move data length
-			val = (0x26000000 | MD_PP_DATA_SIZE);   // do swap
-			REG_WRITE_U32(val, MD_FDMA_CTRL2);		//for dma_length bytes.
-			
-			//dma_cache_sync(NULL, data_buf, MD_PP_DATA_SIZE, DMA_TO_DEVICE);
-
-			mb();
-			SFC_SYNC;
-
-			//go 
-			REG_WRITE_U32(0x03, MD_FDMA_CTRL1);
-
-			/* wait for MD done its operation */
-			while((ret = REG_READ_U32(MD_FDMA_CTRL1)) & 0x1);
-
-#if !SFC_HW_POLL
-			/* wait for flash controller done its operation */
-			do {
-#ifdef EMMC_ISSUE_LOCK
-				rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
+		} while((*(volatile unsigned char *)FLASH_POLL_ADDR) & 0x1);
 #endif
 
-				SFC_SYNC;
-	 
-				SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-				REG_WRITE_U32(0x00000005, SFC_OPCODE);
-			
-#if SFC_USE_DELAY
-				sfc_delay();
-#endif
-
-				REG_WRITE_U32(0x00000010, SFC_CTL);
-				SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-				SFC_SYNC;
-
-#ifdef EMMC_ISSUE_LOCK
-				rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif 
-			} while((*(volatile unsigned char *)FLASH_POLL_ADDR) & 0x1);
-#endif
-
-			/* shift to next page to writing */
-			src += MD_PP_DATA_SIZE;
-			dest += MD_PP_DATA_SIZE;
-			written_count += MD_PP_DATA_SIZE;
-			len -= MD_PP_DATA_SIZE;
-		}//end of page program
-	}
-	
-	if (byte_len_after_16MB) {
-		_sfc_enable_4B_addr_mode();
-        _sfc_enable_host_4B_addr();
-		
-		SFC_SYNC;
-		SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-		REG_WRITE_U32(0x00000002, SFC_OPCODE);	/* Byte Programming */
-#if SFC_USE_DELAY
-		sfc_delay();
-#endif
-
-		REG_WRITE_U32(0x00000018, SFC_CTL);	/* dataen = 1, adren = 1, dmycnt = 0 */
-		SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-		SFC_SYNC;
-
-#ifdef EMMC_ISSUE_LOCK
-		rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif 
-		len = byte_len_after_16MB;
-		while(len >= MD_PP_DATA_SIZE) {
-			p_data_buf = (u8 *)write_dma_buf;
-			
-			/* data moved by MD module is endian inverted.
-						revert it before moved to flash */
-			for(i = 0; i < MD_PP_DATA_SIZE; i += 4) {
-#if 0
-				val = *((u32*)(src + i));
-				*((u32*)(data_buf + i)) = 
-#if 0
-							((val >> 24) |
-							((val >> 8 ) & 0x0000ff00) |
-							((val << 8 ) & 0x00ff0000) |
-							(val << 24));
-#else
-							val;
-#endif
-#endif
-				*((u32*)(p_data_buf + i)) = *((u32*)(src + i));
-			}
-
-#ifdef EMMC_ISSUE_LOCK
-			rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
-#endif
-
-			SFC_SYNC; 
-			SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-			REG_WRITE_U32(0x00000002, SFC_OPCODE);
-		
-#if SFC_USE_DELAY
-			sfc_delay();
-#endif
-
-			REG_WRITE_U32(0x00000018, SFC_CTL);
-			SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-			SFC_SYNC; 
-
-#ifdef EMMC_ISSUE_LOCK
-			rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif 
-
-			//setup MD DDR addr and flash addr
-			//REG_WRITE_U32(((unsigned long)virt_to_phys(data_buf)), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)write_dma_handle), MD_FDMA_DDR_SADDR);
-			REG_WRITE_U32(((unsigned long)dest), MD_FDMA_FL_SADDR);
-
-			//setup MD direction and move data length
-			val = (0x26000000 | MD_PP_DATA_SIZE);   // do swap
-			REG_WRITE_U32(val, MD_FDMA_CTRL2);		//for dma_length bytes.
-			
-			//dma_cache_sync(NULL, data_buf, MD_PP_DATA_SIZE, DMA_TO_DEVICE);
-
-			mb();
-			SFC_SYNC;
-
-			//go 
-			REG_WRITE_U32(0x03, MD_FDMA_CTRL1);
-
-			/* wait for MD done its operation */
-			while((ret = REG_READ_U32(MD_FDMA_CTRL1)) & 0x1);
-
-#if !SFC_HW_POLL
-			/* wait for flash controller done its operation */
-			do {
-#ifdef EMMC_ISSUE_LOCK
-				rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
-#endif
-
-				SFC_SYNC;
-	 
-				SYS_REG_TRY_LOCK(0);//add by alexchang 0722-2010
-				REG_WRITE_U32(0x00000005, SFC_OPCODE);
-			
-#if SFC_USE_DELAY
-				sfc_delay();
-#endif
-
-				REG_WRITE_U32(0x00000010, SFC_CTL);
-				SYS_REG_TRY_UNLOCK;//add by alexchang 0722-2010
-				SFC_SYNC;
-
-#ifdef EMMC_ISSUE_LOCK
-				rtk_lockapi_unlock(lock_flag, (char *)__FUNCTION__);
-#endif 
-			} while((*(volatile unsigned char *)FLASH_POLL_ADDR) & 0x1);
-#endif
-
-			/* shift to next page to writing */
-			src += MD_PP_DATA_SIZE;
-			dest += MD_PP_DATA_SIZE;
-			written_count += MD_PP_DATA_SIZE;
-			len -= MD_PP_DATA_SIZE;
-		}//end of page program
-		
-		_sfc_disable_4B_addr_mode();
-        _sfc_disable_host_4B_addr();
-	}
+		/* shift to next page to writing */
+		src += MD_PP_DATA_SIZE;
+		dest += MD_PP_DATA_SIZE;
+		written_count += MD_PP_DATA_SIZE;
+		len -= MD_PP_DATA_SIZE;
+	}//end of page program
 
 #ifdef EMMC_ISSUE_LOCK
     rtk_lockapi_lock(lock_flag, (char *)__FUNCTION__);
@@ -3112,8 +2606,6 @@ static int rtk_sfc_erase(struct mtd_info *mtd, struct erase_info *instr)
     unsigned int erase_addr;
     unsigned int erase_opcode;
     unsigned int erase_size;
-	unsigned int curr_address;
-	unsigned char en4B_flag = 0;
 
 #ifdef EMMC_ISSUE_LOCK
     unsigned long lock_flag;
@@ -3156,14 +2648,6 @@ static int rtk_sfc_erase(struct mtd_info *mtd, struct erase_info *instr)
     erase_size = mtd->erasesize;
 
     for(size = instr->len ; size > 0 ; size -= erase_size) {
-		
-		if (en4B_flag == 0) {
-            if ((addr - (unsigned long long)FLASH_BASE) >= (16 * 1024 *1024)) {
-                _sfc_enable_4B_addr_mode();
-				_sfc_enable_host_4B_addr();
-                en4B_flag = 1;
-            }
-        }
 
         /* choose erase sector size */
         if (((erase_addr&(0x10000-1)) == 0) && (size >= 0x10000) && (sfc_info->sec_64k_en == SUPPORTED))
@@ -3257,10 +2741,6 @@ static int rtk_sfc_erase(struct mtd_info *mtd, struct erase_info *instr)
         addr += erase_size;
         erase_addr += erase_size;
 
-		if (en4B_flag == 1) {
-			_sfc_disable_4B_addr_mode();
-			_sfc_disable_host_4B_addr();
-        }
     }
 
 #ifdef EMMC_ISSUE_LOCK

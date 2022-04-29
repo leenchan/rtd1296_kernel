@@ -5,11 +5,11 @@
 / {
 	irda@98007400 {
 		Realtek,irrx-protocol = <1>;	//NEC = 1, RC5 = 2, SHARP = 3, SONY = 4, C03 = 5, RC6 = 6, RAW_NEC = 7, RCA = 8, PANASONIC = 9, KONKA=10, RAW_RC6 = 11, RC6_MODE_6 = 12, TOSHIBA = 13
-		Realtek,irtx-protocol = <1>;	//NEC_TX = 1, RC5_TX = 2, SHARP_TX = 3, SONY_TX = 4,	C03_TX = 5, RC6_TX = 6, RCA_TX = 7, PANASONIC_TX = 8, KONKA_TX=9, 
+		Realtek,irtx-protocol = <1>;	//NEC_TX = 1, RC5_TX = 2, SHARP_TX = 3, SONY_TX = 4,	C03_TX = 5, RC6_TX = 6, RCA_TX = 7, PANASONIC_TX = 8, KONKA_TX=9,
 
 		Realtek,cust-code = <0x7F80>;
-		Realtek,scancode-msk = <0x00FF0000>;  
-		Realtek,custcode-msk = <0x0000FFFF>;  
+		Realtek,scancode-msk = <0x00FF0000>;
+		Realtek,custcode-msk = <0x0000FFFF>;
 		Realtek,keymap-tbl = <
 		// scancode	keycode
 			0x18 	116		//KEY_POWER			//POWER
@@ -40,8 +40,8 @@
 			0xEEEE	0		//REL_X				//mouse X-axi	0xEEEE : REL event type
 			0xEEEE	1		//REL_Y				//mouse Y-axi	0xEEEE : REL event type
 			0xFFFF	272		//BTN_LEFT			//mouse left key	0xFFFF : KEY event type
-			0xFFFF	113     	//KEY_MUTE 			//mute key in AirFunAPP	0xFFFF : KEY event type	
-           	>; 
+			0xFFFF	113	//KEY_MUTE			//mute key in AirFunAPP	0xFFFF : KEY event type
+		>;
 		Realtek,reg-ir-dpir = <50>;	/*IR detect interval, NEC default=50ms, should less than 100ms, and bigger than 9ms*/
 	};
 

@@ -24,13 +24,9 @@
 #include <linux/slab.h>
 #include <net/sock.h>
 #include <linux/if_vlan.h>
+#include <net/switchdev.h>
 
 #include "br_private.h"
-
-#if defined(CONFIG_RTL_STP) || defined(CONFIG_RTL_HW_STP)
-#include <net/rtl/rtk_stp.h>
-#include "br_private_stp.h"
-#endif
 
 #if defined(CONFIG_RTL_IGMP_SNOOPING)
 #include <net/rtl/rtl865x_igmpsnooping_glue.h>
@@ -41,20 +37,10 @@ struct net_bridge *bridge0 = NULL;
 unsigned int brIgmpModuleIndex = 0xFFFFFFFF;
 unsigned int br0SwFwdPortMask = 0xFFFFFFFF;
 extern void br_mCastQueryTimerExpired(unsigned long arg);
-#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-struct net_bridge *bridge1 = NULL;
-unsigned int brIgmpModuleIndex_2 = 0xFFFFFFFF;
-unsigned int br1SwFwdPortMask = 0xFFFFFFFF;
-#endif
 
 #if defined(CONFIG_RT_MULTIPLE_BR_SUPPORT)
-//#if defined(CONFIG_RTL_ISP_MULTIPLE_BR_SUPPORT)
 struct igmg_register_info igmpRegInfo[RTL_IMGP_MAX_BRMODULE];
 #endif /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
-#ifdef CONFIG_RTK_MESH
-unsigned int mesh_port_no = 0xFFFFFFFF;
-#endif
-
 #endif /* CONFIG_RTL_IGMP_SNOOPING */
 
 
@@ -110,7 +96,7 @@ void br_port_carrier_check(struct net_bridge_port *p)
 	struct net_bridge *br = p->br;
 
 	if (!(p->flags & BR_ADMIN_COST) &&
-		netif_running(dev) && netif_oper_up(dev))
+	    netif_running(dev) && netif_oper_up(dev))
 		p->path_cost = port_cost(dev);
 
 	if (!netif_running(br->dev))
@@ -196,7 +182,7 @@ void br_manage_promisc(struct net_bridge *br)
 			 * this config to hw.
 			 */
 			if (br->auto_cnt == 0 ||
-				(br->auto_cnt == 1 && br_auto_port(p)))
+			    (br->auto_cnt == 1 && br_auto_port(p)))
 				br_port_clear_promisc(p);
 			else
 				br_port_set_promisc(p);
@@ -291,7 +277,9 @@ static void del_nbp(struct net_bridge_port *p)
 	list_del_rcu(&p->list);
 
 	nbp_vlan_flush(p);
-	br_fdb_delete_by_port(br, p, 1);
+	br_fdb_delete_by_port(br, p, 0, 1);
+	switchdev_deferred_process();
+
 	nbp_update_port_count(br);
 
 	netdev_upper_dev_unlink(dev, br->dev);
@@ -320,9 +308,10 @@ void br_dev_delete(struct net_device *dev, struct list_head *head)
 		del_nbp(p);
 	}
 
-	br_fdb_delete_by_port(br, NULL, 1);
+	br_fdb_delete_by_port(br, NULL, 0, 1);
 
 	br_vlan_flush(br);
+	br_multicast_dev_del(br);
 	del_timer_sync(&br->gc_timer);
 
 	br_sysfs_delbr(br->dev);
@@ -352,7 +341,7 @@ static int find_portno(struct net_bridge *br)
 }
 
 
-#if defined(CONFIG_RTK_MESH) || defined(CONFIG_RTL_IGMP_SNOOPING)
+#if defined(CONFIG_RTL_IGMP_SNOOPING)
 struct net_bridge *find_br_by_name(char *name)
 {
 	struct net_bridge *br;
@@ -374,11 +363,11 @@ struct net_bridge *find_br_by_name(char *name)
 	}
 	return br;
 }
-#endif
+#endif /* CONFIG_RTL_IGMP_SNOOPING */
 
 /* called with RTNL but without bridge lock */
 static struct net_bridge_port *new_nbp(struct net_bridge *br,
-					   struct net_device *dev)
+				       struct net_device *dev)
 {
 	int index;
 	struct net_bridge_port *p;
@@ -400,14 +389,6 @@ static struct net_bridge_port *new_nbp(struct net_bridge *br,
 	p->flags = BR_LEARNING | BR_FLOOD;
 	br_init_port(p);
 	br_set_state(p, BR_STATE_DISABLED);
-
-	#if defined(CONFIG_RTL_STP)
-	rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_DISABLED);
-	#endif
-	#if defined(CONFIG_RTL_HW_STP)
-	rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_DISABLED);
-	#endif
-
 	br_stp_port_timer_init(p);
 	br_multicast_add_port(p);
 
@@ -528,7 +509,6 @@ int rtl_get_brIgmpModuleIndexbyName(char *name, int *index)
 
 	i = rtl_check_brIgmpModuleName(name);
 	*index = i;
-//	printk("index:%x,[%s]:[%d].\n",index,__FUNCTION__,__LINE__);
 	if ((i != -1) && (i < RTL_IMGP_MAX_BRMODULE))
 	{
 		return igmpRegInfo[i].moduleIndex;
@@ -541,7 +521,6 @@ int rtl_get_brIgmpModuleIndexbyId(int idx, char *name)
 	int moduleIndex = 0xFFFFFFFF;
 	struct net_bridge *br = NULL;
 
-//	printk("index:%x,[%s]:[%d].\n",index,__FUNCTION__,__LINE__);
 	if ((idx != -1) && idx < RTL_IMGP_MAX_BRMODULE)
 	{
 		if (igmpRegInfo[idx].valid) {
@@ -599,7 +578,6 @@ int rtl_get_brqueryCntByName(char *name)
 	int i = -1;
 
 	i = rtl_check_brIgmpModuleName(name);
-	//	printk("index:%x,[%s]:[%d].\n",index,__FUNCTION__,__LINE__);
 	if ((i != -1) && (i < RTL_IMGP_MAX_BRMODULE))
 	{
 		return igmpRegInfo[i].mCastQueryTimerCnt;
@@ -612,7 +590,6 @@ int rtl_set_brqueryCntByName(char *name, int cnt)
 	int i = -1;
 
 	i = rtl_check_brIgmpModuleName(name);
-	//	printk("index:%x,[%s]:[%d].\n",index,__FUNCTION__,__LINE__);
 	if ((i != -1) && (i < RTL_IMGP_MAX_BRMODULE))
 	{
 		igmpRegInfo[i].mCastQueryTimerCnt = cnt;
@@ -656,7 +633,6 @@ int br_register_igmpsnoopingmodule_process(struct net_bridge *br,int igmpEnable,
 			return ret;
 		igmpRegInfo[index].valid = 1;
 		igmpRegInfo[index].br = br;
-		//strcpy(igmpRegInfo[index].name,br->dev->name);
 		memset(&brDevInfo, 0, sizeof(rtl_multicastDeviceInfo_t ));
 		strcpy(brDevInfo.devName, br->dev->name);
 
@@ -688,7 +664,6 @@ int br_register_igmpsnoopingmodule_process(struct net_bridge *br,int igmpEnable,
 		{
 			init_timer(&br->mCastQuerytimer);
 			br->mCastQuerytimer.data = br;
-			//br->mCastQuerytimer.expires=jiffies+MCAST_QUERY_INTERVAL*HZ;
 
 			br->mCastQuerytimer.expires = jiffies + 1 * HZ;
 			br->mCastQuerytimer.function = (void*)br_mCastQueryTimerExpired;
@@ -733,6 +708,7 @@ int br_add_bridge(struct net *net, const char *name)
 
 	if (!dev)
 		return -ENOMEM;
+
 	dev_net_set(dev, net);
 	dev->rtnl_link_ops = &br_link_ops;
 
@@ -755,9 +731,9 @@ int br_add_bridge(struct net *net, const char *name)
 		memset(&devInfo, 0, sizeof(rtl_multicastDeviceInfo_t ));
 		strcpy(devInfo.devName, RTL_PS_BR0_DEV_NAME);
 
-		res=rtl_registerIgmpSnoopingModule(&brIgmpModuleIndex);
+		res = rtl_registerIgmpSnoopingModule(&brIgmpModuleIndex);
 #if defined(CONFIG_RTL_HARDWARE_MULTICAST)
-		if (res==0)
+		if (res == 0)
 		{
 				rtl_setIgmpSnoopingModuleDevInfo(brIgmpModuleIndex, &devInfo);
 		}
@@ -776,31 +752,6 @@ int br_add_bridge(struct net *net, const char *name)
 		rtl_setIpv6UnknownMCastFloodMap(brIgmpModuleIndex, 0xFFFFFFFF);
 #endif
 	}
-#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-	if (strcmp(name,RTL_PS_BR1_DEV_NAME) == 0)
-	{
-		rtl_multicastDeviceInfo_t devInfo2;
-		memset(&devInfo2, 0, sizeof(rtl_multicastDeviceInfo_t ));
-		strcpy(devInfo2.devName, RTL_PS_BR1_DEV_NAME);
-
-		res = rtl_registerIgmpSnoopingModule(&brIgmpModuleIndex_2);
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST)
-		if (res == 0)
-		{
-			 rtl_setIgmpSnoopingModuleDevInfo(brIgmpModuleIndex_2,&devInfo2);
-		}
-#endif
-		bridge1 = netdev_priv(dev);
-		if (bridge1 != NULL)
-		{
-			init_timer(&bridge1->mCastQuerytimer);
-			bridge1->mCastQuerytimer.data = bridge1;
-			bridge1->mCastQuerytimer.expires = jiffies + MCAST_QUERY_INTERVAL * HZ;
-			bridge1->mCastQuerytimer.function = (void*)br_mCastQueryTimerExpired;
-			add_timer(&bridge1->mCastQuerytimer);
-		}
-	}
-#endif
 #else /* !CONFIG_RT_MULTIPLE_BR_SUPPORT */
 	br_register_igmpsnoopingmodule_process(netdev_priv(dev), 1, 1);
 #endif /* !CONFIG_RT_MULTIPLE_BR_SUPPORT */
@@ -836,7 +787,7 @@ int br_del_bridge(struct net *net, const char *name)
 #endif
 		br_dev_delete(dev, NULL);
 	}
-#if defined(CONFIG_BRIDGE_IGMP_SNOOPING)&&defined(CONFIG_RTL_HARDWARE_MULTICAST)
+#if defined(CONFIG_BRIDGE_IGMP_SNOOPING) && defined(CONFIG_RTL_HARDWARE_MULTICAST)
 	bridge0 = NULL;
 #endif
 #if defined(CONFIG_RTL_IGMP_SNOOPING)
@@ -844,7 +795,7 @@ int br_del_bridge(struct net *net, const char *name)
 
 	if (ret)
 		goto outfree;
-	if (strcmp(name,RTL_PS_BR0_DEV_NAME) == 0)
+	if (strcmp(name, RTL_PS_BR0_DEV_NAME) == 0)
 	{
 		rtl_unregisterIgmpSnoopingModule(brIgmpModuleIndex);
 #if defined(CONFIG_RTL_MLD_SNOOPING)
@@ -855,19 +806,6 @@ int br_del_bridge(struct net *net, const char *name)
 #endif /* CONFIG_RTL_MLD_SNOOPING */
 		bridge0 = NULL;
 	}
-#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-	if (strcmp(name,RTL_PS_BR1_DEV_NAME) == 0)
-	{
-		rtl_unregisterIgmpSnoopingModule(brIgmpModuleIndex_2);
-#if defined(CONFIG_RTL_MLD_SNOOPING)
-		if (bridge1 && timer_pending(&bridge1->mCastQuerytimer))
-		{
-			del_timer(&bridge1->mCastQuerytimer);
-		}
-#endif
-		bridge1=NULL;
-	}
-#endif
 outfree:
 #endif /* !CONFIG_RT_MULTIPLE_BR_SUPPORT */
 #endif /* CONFIG_RTL_IGMP_SNOOPING */
@@ -912,7 +850,7 @@ netdev_features_t br_features_recompute(struct net_bridge *br,
 
 	list_for_each_entry(p, &br->port_list, list) {
 		features = netdev_increment_features(features,
-							 p->dev->features, mask);
+						     p->dev->features, mask);
 	}
 	features = netdev_add_tso_features(features, mask);
 
@@ -938,9 +876,9 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	 * RX_HANDLER_CONSUMED, stopping RX processing for these frames.
 	 */
 	if ((dev->flags & IFF_LOOPBACK) ||
-		dev->type != ARPHRD_ETHER || dev->addr_len != ETH_ALEN ||
-		!is_valid_ether_addr(dev->dev_addr) ||
-		netdev_uses_dsa(dev))
+	    dev->type != ARPHRD_ETHER || dev->addr_len != ETH_ALEN ||
+	    !is_valid_ether_addr(dev->dev_addr) ||
+	    netdev_uses_dsa(dev))
 		return -EINVAL;
 
 	/* No bridging of bridges */
@@ -1009,7 +947,7 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	changed_addr = br_stp_recalculate_bridge_id(br);
 
 	if (netif_running(dev) && netif_oper_up(dev) &&
-		(br->dev->flags & IFF_UP))
+	    (br->dev->flags & IFF_UP))
 		br_stp_enable_port(p);
 	spin_unlock_bh(&br->lock);
 
@@ -1035,18 +973,6 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 		}
 		br0SwFwdPortMask = brDevInfo.swPortMask;
 	}
-#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-	if (strcmp(br->dev->name, RTL_PS_BR1_DEV_NAME) == 0)
-	{
-		rtl_multicastDeviceInfo_t brDevInfo;
-		rtl865x_generateBridgeDeviceInfo(br, &brDevInfo);
-		if (brIgmpModuleIndex != 0xFFFFFFFF)
-		{
-			rtl_setIgmpSnoopingModuleDevInfo(brIgmpModuleIndex_2, &brDevInfo);
-		}
-		br1SwFwdPortMask = brDevInfo.swPortMask;
-	}
-#endif/*CONFIG_RTK_VLAN_WAN_TAG_SUPPORT*/
 #else /* !CONFIG_RT_MULTIPLE_BR_SUPPORT */
 //update swPortMask
 	igmpModuleIndex = rtl_get_brIgmpModueIndx(br);
@@ -1063,12 +989,6 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 #if defined(CONFIG_RT_MULTIPLE_BR_SUPPORT)
 extern int rtk_dev_name_netif_mapping(char *br_name, char *br_port_name, int flag);
 rtk_dev_name_netif_mapping(br->dev->name, dev->name, 1);
-#endif
-
-#ifdef CONFIG_RTK_MESH
-	if (strcmp(dev->name, "wlan-msh") == 0) {
-		mesh_port_no = p->port_no;
-	}
 #endif
 
 	return 0;
@@ -1105,16 +1025,6 @@ int br_del_if(struct net_bridge *br, struct net_device *dev)
 	if (!p || p->br != br)
 		return -EINVAL;
 
-
-
-#if defined(CONFIG_RTK_MESH)
-	if (strcmp(dev->name, "wlan-msh") == 0) {
-		mesh_port_no = 0xFFFFFFFF;
-	}
-#endif
-
-
-
 	/* Since more than one interface can be attached to a bridge,
 	 * there still maybe an alternate path for netconsole to use;
 	 * therefore there is no reason for a NETDEV_RELEASE event.
@@ -1145,18 +1055,6 @@ int br_del_if(struct net_bridge *br, struct net_device *dev)
 		}
 		br0SwFwdPortMask = brDevInfo.swPortMask;
 	}
-#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-		if (strcmp(br->dev->name, RTL_PS_BR1_DEV_NAME)==0)
-		{
-			rtl_multicastDeviceInfo_t brDevInfo;
-			rtl865x_generateBridgeDeviceInfo(br, &brDevInfo);
-			if (brIgmpModuleIndex != 0xFFFFFFFF)
-			{
-				rtl_setIgmpSnoopingModuleDevInfo(brIgmpModuleIndex_2, &brDevInfo);
-			}
-			br1SwFwdPortMask = brDevInfo.swPortMask;
-		}
-#endif/*CONFIG_RTK_VLAN_WAN_TAG_SUPPORT*/
 #else /* !CONFIG_RT_MULTIPLE_BR_SUPPORT */
 	igmpModuleIndex = rtl_get_brIgmpModueIndx(br);
 	if (igmpModuleIndex != 0xFFFFFFFF)
@@ -1197,14 +1095,9 @@ int rtl865x_generateBridgeDeviceInfo(struct net_bridge *br, rtl_multicastDeviceI
 #if defined(CONFIG_RT_MULTIPLE_BR_SUPPORT)
 	int index = -1;
 	index = rtl_check_br_igmpmodule(br);
-	//printk("br:%s,index:%x,[%s]:[%d].\n",br->dev->name,index,__FUNCTION__,__LINE__);
 	if ((index == -1) || (index >= RTL_IMGP_MAX_BRMODULE))
 #else /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
-#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-	if (strcmp(br->dev->name,RTL_PS_BR0_DEV_NAME) != 0 && strcmp(br->dev->name,RTL_PS_BR1_DEV_NAME) != 0 )
-#else
 	if (strcmp(br->dev->name,RTL_PS_BR0_DEV_NAME) != 0)
-#endif
 #endif /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
 	{
 		return -1;
@@ -1226,89 +1119,4 @@ int rtl865x_generateBridgeDeviceInfo(struct net_bridge *br, rtl_multicastDeviceI
 }
 #endif /* CONFIG_RTL_IGMP_SNOOPING */
 #endif /* CONFIG_RTL_HARDWARE_MULTICAST */
-
-#if defined(CONFIG_RTK_MESH)
-int br_set_meshpathsel_pid(int pid)
-{
-	struct net_device *dev = NULL;
-	struct net_bridge *br = NULL;
-
-	int ret = 0;
-
-	dev = __dev_get_by_name(&init_net, RTL_PS_BR0_DEV_NAME);
-	if (dev == NULL)
-	{
-		ret = -ENXIO; 	/* Could not find device */
-
-	}
-	else if (!(dev->priv_flags & IFF_EBRIDGE)) {
-
-		ret = -EPERM;
-	}
-	else
-	{
-		br = netdev_priv(dev);
-	}
-
-	if (br != NULL)
-		br->mesh_pathsel_pid = pid;
-
-	printk("Receive Pathsel daemon pid:%d\n", br->mesh_pathsel_pid);
-	return ret;
-}
-
-int br_get_mesh_portstat(void)
-{
-	struct net_device *dev = NULL;
-	struct net_bridge *br = NULL;
-	struct net_bridge_port *p;
-
-	int ret = 0;
-
-	dev = __dev_get_by_name(&init_net, RTL_PS_BR0_DEV_NAME);
-	if (dev == NULL)
-	{
-		ret =  -ENXIO; 	/* Could not find device */
-
-	}
-	else if (!(dev->priv_flags & IFF_EBRIDGE)) {
-
-		ret = -EPERM;
-	}
-	else
-	{
-		br = netdev_priv(dev);
-	}
-
-	if (br != NULL) {
-		list_for_each_entry(p, &br->port_list, list){
-			if (strstr(p->dev->name, "msh")) {
-				return p->state;
-			}
-		}
-	}
-	return -1;
-}
-
-
-void br_signal_pathsel(struct net_bridge *br)
-{
-	struct task_struct *task;
-	if (br == NULL || br->mesh_pathsel_pid == 0)
-	{
-		return;
-	}
-
-	read_lock(&tasklist_lock);
-	task = find_task_by_vpid(br->mesh_pathsel_pid);
-	read_unlock(&tasklist_lock);
-	if (task) {
-		printk("Send SIGUSR2 signal from kernel to pathsel\n");
-		send_sig(SIGUSR2, task, 0);
-	} else {
-		printk("Path selection daemon pid: %d does not exist\n", br->mesh_pathsel_pid);
-	}
-}
-
-#endif
 

@@ -45,12 +45,12 @@
 #ifdef MMC_DBG
 static unsigned sd_reg = 0;
 #endif
-extern volatile int g_bTuning;
+volatile int g_bTuning;
 extern u32 rtkemmc_global_blkcnt;
-extern u32 rtkemmc_global_blksize;
-extern u32 rtkemmc_global_bytecnt;
-extern u32 rtkemmc_global_dbaddr;
-extern int cmd_resend;
+u32 rtkemmc_global_blksize;
+u32 rtkemmc_global_bytecnt;
+u32 rtkemmc_global_dbaddr;
+int cmd_resend;
 DECLARE_COMPLETION(rtk_emmc_wait);
 
 void sync(struct rtkemmc_host *emmc_port)
@@ -255,7 +255,7 @@ int rtk_int_waitfor(struct rtkemmc_host *emmc_port, u8 cmdcode, u32 cmd_idx, uns
 					if((emmc_port->rintsts & INT_STS_DCRC) && (CMD_IDX_MASK(cmd_idx)==18 || CMD_IDX_MASK(cmd_idx)==25) ) {
                                                 cmd_resend=1;
                                         }
-					else if((emmc_port->rintsts & INT_STS_RTO_BAR) && CMD_IDX_MASK(cmd_idx)==6)
+                                        else if((emmc_port->rintsts & INT_STS_RTO_BAR) && CMD_IDX_MASK(cmd_idx)==6)
                                                 cmd_resend=1;
 				}
 			}
@@ -378,16 +378,13 @@ int rtk_int_waitfor(struct rtkemmc_host *emmc_port, u8 cmdcode, u32 cmd_idx, uns
 				}
 				MMCPRINTF("[%s:%d] End polling ACD........\n", __FILE__, __LINE__);
 #ifndef CONFIG_MMC_RTKEMMC_JIFFY_NOT_WORK_ON_1_LAYER_FPGA
-				rtk_lockapi_lock2(flags2, _at_("rtk_int_waitfor"));
-				if (!(readl(emmc_port->emmc_membase+EMMC_RINTSTS) & INT_STS_ACD) && time_after_eq(jiffies, timeend)) {
-                                        if (!ignore_log)
-                                                printk(KERN_ERR "[%s:%d] ACD Timeout!!!........, EMMC_RINTSTS=0x%x\n", __FILE__, __LINE__,readl(emmc_port->emmc_membase+EMMC_RINTSTS));
-                                        rtk_lockapi_unlock2(flags2, _at_("rtk_int_waitfor"));
+				if (time_after_eq(jiffies, timeend))
+				{
+					if (!ignore_log)
+						printk(KERN_ERR "[%s:%d] Timeout !!!........\n", __FILE__, __LINE__);
 					err = RTK_TOUT;
-                                        goto chk_status;
-                                }
-				else rtk_lockapi_unlock2(flags2, _at_("rtk_int_waitfor"));
-
+					goto chk_status;
+				}
 #endif		
 			}
 	    }	
@@ -441,14 +438,12 @@ int rtk_int_waitfor(struct rtkemmc_host *emmc_port, u8 cmdcode, u32 cmd_idx, uns
 
 				MMCPRINTF("[%s:%d] End polling DMA_DONE........\n", __FILE__, __LINE__);
 #ifndef CONFIG_MMC_RTKEMMC_JIFFY_NOT_WORK_ON_1_LAYER_FPGA
-				rtk_lockapi_lock2(flags2, _at_("rtk_int_waitfor"));
-				 if ((readl(emmc_port->emmc_membase+EMMC_ISR) & ISR_DMA_DONE_INT) && time_after_eq(jiffies, timeend)) {
-                                        printk(KERN_ERR "[%s:%d] EMMC_ISR=0x%x, DMA_DONE Timeout !!!........\n", __FILE__, __LINE__,readl(emmc_port->emmc_membase+EMMC_ISR));
-					rtk_lockapi_unlock2(flags2, _at_("rtk_int_waitfor"));
-                                        err = RTK_TOUT;
-                                        goto chk_status;
-                                }
-				else rtk_lockapi_unlock2(flags2, _at_("rtk_int_waitfor"));
+				if (time_after_eq(jiffies, timeend))
+				{
+					printk(KERN_ERR "[%s:%d] DMA_DONE Timeout !!!........\n", __FILE__, __LINE__);
+					err = RTK_TOUT;
+					goto chk_status;
+				}
 #endif			
 		    	}
 
@@ -477,13 +472,11 @@ chk_status: //check status busy
 		}
 		//pr_err("[%s:%d] End polling STATUS BUSY........\n", __FILE__, __LINE__);
 #ifndef CONFIG_MMC_RTKEMMC_JIFFY_NOT_WORK_ON_1_LAYER_FPGA
-		rtk_lockapi_lock2(flags2, _at_("rtk_int_waitfor"));
-		if ((readl(emmc_port->emmc_membase+EMMC_STATUS) & STS_DATA_BUSY) && time_after_eq(jiffies, timeend)) {
-                        printk(KERN_ERR "[%s:%d] STS_DATA_BUSY Timeout !!!........, EMMC_STATUS=%x\n", __FILE__, __LINE__,readl(emmc_port->emmc_membase+EMMC_STATUS));
-			rtk_lockapi_unlock2(flags2, _at_("rtk_int_waitfor"));
-                        err = RTK_TOUT;
-                }
-		else rtk_lockapi_unlock2(flags2, _at_("rtk_int_waitfor"));
+		if (time_after_eq(jiffies, timeend))
+		{
+			printk(KERN_ERR "[%s:%d] Timeout !!!........\n", __FILE__, __LINE__);
+			err = RTK_TOUT;
+		}
 #endif	
 
 chk_cmd_bit31:
@@ -506,14 +499,11 @@ chk_cmd_bit31:
 				
 		}
 #ifndef CONFIG_MMC_RTKEMMC_JIFFY_NOT_WORK_ON_1_LAYER_FPGA
-		rtk_lockapi_lock2(flags2, _at_("rtk_int_waitfor"));
-		if ((readl(emmc_port->emmc_membase+EMMC_CMD) & CMD_START_CMD) && time_after_eq(jiffies, timeend))
+		if (time_after_eq(jiffies, timeend))
 		{
 			printk(KERN_ERR RED_BOLD"EMMC_CMD bit31 can't recover to 0 \n"RESET);
-			rtk_lockapi_unlock2(flags2, _at_("rtk_int_waitfor"));
 			BUG();
 		}
-		else rtk_lockapi_unlock2(flags2, _at_("rtk_int_waitfor"));
 
 #endif	
 
@@ -558,7 +548,7 @@ void print_reg_sts(u32 cmd_idx, u32 rintsts)
 	printk(KERN_ERR "=====================================================\n");
 }
 
-extern unsigned int* gddr_descriptor;
+unsigned int* gddr_descriptor;
 void print_ip_desc(struct rtkemmc_host *emmc_port){
 	unsigned int reg = 0;
 	unsigned int bytecnt = 0, desc_cnt = 0, i = 0;
@@ -695,3 +685,9 @@ void rtkemmc_chk_param(u32 *pparam, u32 len, u8 *ptr)
     	}
 }
 EXPORT_SYMBOL_GPL(rtkemmc_chk_param);
+EXPORT_SYMBOL(rtkemmc_global_blksize);
+EXPORT_SYMBOL(rtkemmc_global_bytecnt);
+EXPORT_SYMBOL(rtkemmc_global_dbaddr);
+EXPORT_SYMBOL(cmd_resend);
+EXPORT_SYMBOL(g_bTuning);
+EXPORT_SYMBOL(gddr_descriptor);

@@ -13,6 +13,10 @@
  * GNU General Public License for more details.
  *
  */
+
+#include <linux/init.h>
+#include <linux/module.h>
+
 #include <linux/spinlock.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
@@ -257,9 +261,6 @@ struct ION_RTK_CARVEOUT_PAGE_INFO * ion_rtk_carveout_allocate(struct ion_heap *h
     else
         strncpy(task_comm, "KTHREAD", sizeof(task_comm));
 
-    /* decrease usage count */
-    put_task_struct(current->group_leader);
-
 #if 0
     if (tmp_flag == 0) {
         pr_err(" Warning: flags is zero!! The default value is set RTK_ION_FLAG_POOL_CONDITION [%16.s] pids:%-5d tgid:%-5d\n",
@@ -498,11 +499,11 @@ static int ion_rtk_carveout_heap_allocate(struct ion_heap *heap,
         buffer->flags &= ~ION_FLAG_CACHED_NEEDS_SYNC;
     } else if ( (buffer->flags & ION_USAGE_MMAP_CACHED) ||
                 (cached_turbo && !(buffer->flags & ION_FLAG_NONCACHED))){
-        /* CACHED */
+		/* CACHED */
         buffer->flags |= ION_FLAG_CACHED;
         buffer->flags &= ~ION_FLAG_NONCACHED;
         buffer->flags |= ION_FLAG_CACHED_NEEDS_SYNC;
-    }
+	}
 
     if (    !(buffer->flags & ION_FLAG_SCPUACC) ||
             (buffer->flags & ION_USAGE_PROTECTED)) {

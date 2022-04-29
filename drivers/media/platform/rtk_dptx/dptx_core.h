@@ -34,8 +34,6 @@
 
 #define DPTX_ERR(format, ...) printk(KERN_ERR "[DPTX_ERR] " format, ## __VA_ARGS__)
 
-//#define SELF_TEST
-
 enum {
 	DPTX_GET_SINK_CAPABILITY,
 	DPTX_GET_RAW_EDID,
@@ -48,7 +46,9 @@ enum {
 	DPTX_SEND_AUDIO_MUTE,
 	DPTX_SEND_AUDIO_VSDB_DATA,
 	DPTX_SEND_AUDIO_EDID2,
-	DPTX_CHECK_TMDS_SRC,	
+	DPTX_CHECK_TMDS_SRC,
+	DPTX_HOTPLUG_DETECTION,
+	DPTX_WAIT_HOTPLUG,
 };
 
 struct rtk_dptx_switch {
@@ -66,7 +66,7 @@ struct rtk_dptx_device {
 
 	struct clk *clks[DPTX_MAX_CLKS];
 	struct reset_control *rstc[DPTX_MAX_RESET];
-	
+
 	unsigned int dptx_irq;
 	unsigned int power_state;
 	unsigned int ignore_edid;
@@ -78,6 +78,8 @@ struct rtk_dptx_device {
 	struct ion_client *rpc_ion_client;
 
 	asoc_dptx_t cap;
+	unsigned int isr_signal;
+	wait_queue_head_t hpd_wait;
 };
 
 int register_dptx_switch(struct rtk_dptx_device *dptx_dev);

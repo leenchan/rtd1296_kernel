@@ -31,6 +31,7 @@
 
 #include "../../../staging/android/sw_sync.h"
 #include "../../../video/fbdev/rtk/dc2vo/dc2vo.h"
+#include "../../../video/fbdev/rtk/dc2vo/dc_rpc.h"
 
 #include "rtk_gem_ion.h"
 #include "rtk_drm_fb_ion.h"
@@ -131,10 +132,14 @@ static int rtk_crtc_swap_post_to_worker(struct drm_crtc *crtc, struct drm_frameb
         buf.height = fb->height;
         buf.stride = ((fb->width * fb->bits_per_pixel) + 7)/8;
         buf.acquire.fence = (struct sync_fence *) 0;
+		buf.colorkey=-1;
+		buf.format=INBAND_CMD_GRAPHIC_FORMAT_ARGB8888_LITTLE;
         if (fb->pixel_format == DRM_FORMAT_XRGB8888) {
             buf.flags |= eBuffer_USE_GLOBAL_ALPHA;
             buf.alpha = 0xff;
+			buf.format= INBAND_CMD_GRAPHIC_FORMAT_RGB888_LITTLE;
         }
+        DRM_DEBUG_KMS("DRM [%s:%d]  buf.phyAddr = %x\n", __func__, __LINE__, buf.phyAddr);
 
         fence = DC_QueueBuffer(&buf);
         memcpy(rtk_crtc->last_buf, &buf, sizeof(buf));
@@ -175,6 +180,7 @@ static int rtk_crtc_swap_post_to_worker(struct drm_crtc *crtc, struct drm_frameb
 void show_framebuffer_on_crtc_cb(void *cb1, void *cb2)
 {
     struct rtk_drm_flip_resource *flip_res = cb1;
+    DRM_DEBUG_KMS("DRM %s: cb1=%p, cb2=%p\n", __func__, cb1, cb2);
     if (rtk_crtc_swap_post_to_worker(flip_res->crtc, flip_res->fb, flip_res->event, flip_res->kds_res_set) != 0) {
         pr_err("DRM %s:%d rtk_crtc_swap_post_to_worker return error!", __FUNCTION__, __LINE__);
     }

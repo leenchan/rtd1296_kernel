@@ -181,11 +181,6 @@ void nf_nat_l4proto_unique_tuple(const struct nf_nat_l3proto *l3proto,
 				rtl865xNaptEntry.extPort = *portptr;
 				rtl865x_preReserveConn(&rtl865xNaptEntry);
 			}
-/*
-			printk("%s:%d:maniptype is %d, %s (%u.%u.%u.%u:%u -> %u.%u.%u.%u:%u -> %u.%u.%u.%u:%u) ,lowestScore is %d,highestScore is %d\n\n\n",
-			__FUNCTION__,__LINE__,maniptype, rtl865xNaptEntry.protocol?"tcp":"udp",
-			NIPQUAD(rtl865xNaptEntry.intIp), rtl865xNaptEntry.intPort, NIPQUAD(rtl865xNaptEntry.extIp), rtl865xNaptEntry.extPort, NIPQUAD(rtl865xNaptEntry.remIp), rtl865xNaptEntry.remPort,lowestScore, highestScore);
-*/
 
 			if (!(range->flags & NF_NAT_RANGE_PROTO_RANDOM))
 				*rover = off;

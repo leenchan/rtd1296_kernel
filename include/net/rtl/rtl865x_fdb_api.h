@@ -1,12 +1,3 @@
-/*
- * Copyright (C) 2017 Realtek Semiconductor Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 
 #ifndef RTL865X_FDB_API_H
 #define RTL865X_FDB_API_H
@@ -14,6 +5,11 @@
 #define RTL_LAN_FID			0
 #if defined(CONFIG_RTD_1295_HWNAT)
 #define RTL_WAN_FID			1
+#if defined(CONFIG_RTL_MULTI_LAN_DEV_SUPPORT_LINUX_BONDING)
+#define RTL_WAN2_FID                                                            2
+#define RTL_WAN3_FID                                                            3
+#define RTL_WAN4_FID                                                            4
+#endif
 #else /* defined(CONFIG_RTD_1295_HWNAT) */
 #if defined(CONFIG_RTL_IVL_SUPPORT)
 #define RTL_WAN_FID			1

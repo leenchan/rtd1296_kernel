@@ -1,14 +1,3 @@
-/*
- * hdmirx_hdcp2p2.c - RTK hdmi rx driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include "v4l2_hdmi_dev.h"
 #include "hdmiInternal.h"
 
@@ -16,7 +5,6 @@
 static unsigned char hdcp2p2key_enable=false;
 static unsigned char CTS_key[864];
 
- unsigned char Repeater_clear_repeater_bit;
 /*=================== extern Variable/Function ===================*/
 extern HDMIRX_IOCTL_STRUCT_T hdmi_ioctl_struct;
 
@@ -25,10 +13,6 @@ extern int h2MessageParse(unsigned char *message, unsigned int length);
 extern int h2MessagePoll(unsigned char *message, unsigned int length);
 extern void Hdmi_HdcpPortWrite(unsigned char addr ,unsigned char value);
 /*======================================================*/
-#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-extern void CA_hdcp2_load_from_MP(unsigned char* keyIn);
-extern void CA_hdcp2_load_from_TEE(void);
-#endif
 
 
 //***********************************************************************************//
@@ -37,8 +21,6 @@ extern void CA_hdcp2_load_from_TEE(void);
 unsigned char g_bmsg_id ,g_RX_state , g_Rx_Send_State;
 
 unsigned char TX_msg_id[864] ;
-unsigned char stream_manage_msg[10];
-unsigned char stream_manage_flag;
 unsigned char bLen;
 
 unsigned int b_Tx_Len;
@@ -55,11 +37,6 @@ unsigned int b_Tx_Len;
 #define LC_Init               	9   //TX=>RX
 #define LC_Send_L_prime         10  //RX=>TX
 #define SKE_Send_Eks            11  //TX=>RX
-//===========================================================
-#define REPEATERAUTH_SEND_RECEIVERID_LIST            12  //RX=>TX
-#define REPEATERAUTH_SEND_ACK            15  //TX=>RX
-#define REPEATERAUTH_STREAM_MANAGE            16  //TX=>RX
-#define REPEATERAUTH_STREAM_READY            17  //RX=>TX
 
 //RX send FSM
 #define  RX_FSM_SEND_START		1
@@ -72,11 +49,8 @@ unsigned int b_Tx_Len;
 #define Read_Message_offset		0x80
 
 struct work_struct hdcp2p2_msg_work;
-struct work_struct repeaterauth_stream_work;
-static DEFINE_MUTEX(hdcprx2p2_lock);
 
 void Hdmi_HDCP_2_2_msg_work_func(struct work_struct *work);
-void repeaterauth_stream_work_func(struct work_struct *work);
 
 
 char Get_Hdmi_hdcp_2_2_Write_Message(void)
@@ -111,17 +85,6 @@ void HW_Cipher_Setting(unsigned char *lc128)
 	hdmi_rx_reg_mask32(HDCP_2P2_LC3, ~HDCP_2P2_LC3_lc_mask, (lc128[3]|(lc128[2]<<8)|(lc128[1]<<16)|(lc128[0]<<24)), HDMI_RX_MAC);
 }
 
-void Set_Rx_status_Ready(void)
-{
-
-	hdmi_rx_reg_write32(HDCP_AP, 0x71, HDMI_RX_MAC);
-	hdmi_rx_reg_write32(HDCP_DP, (0x1 <<2), HDMI_RX_MAC);
-}
-
-void DownStream_done(void)
-{
-	hdmi_rx_reg_mask32(HDCP_2P2_CR, ~HDCP_2P2_CR_downstream_done_mask, HDCP_2P2_CR_downstream_done_mask, HDMI_RX_MAC);
-}
 void KS_Setting(unsigned char* bKs)
 {
 	hdmi_rx_reg_mask32(HDCP_2P2_CR, ~(HDCP_2P2_CR_fw_mode_riv_mask), HDCP_2P2_CR_fw_mode_riv_mask, HDMI_RX_MAC);	
@@ -151,24 +114,14 @@ void HdmiRx_enable_hdcp2p2(unsigned char *key)
 {
 	if(hdcp2p2key_enable)//Already save the key, return
 		return;
-#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-	CA_hdcp2_load_from_MP(key);
 
-	HDMIRX_INFO("[HDCP2.2] TEE HDCP RX INIT");
-#else
 	memset(&CTS_key, 0, sizeof(CTS_key));
 	memcpy(&CTS_key,key,sizeof(CTS_key));
 
 	HDMIRX_INFO("[HDCP2.2] Device ID = 0x%02x%02x%02x%02x%02x",CTS_key[20],CTS_key[19],CTS_key[18],CTS_key[17],CTS_key[16]);
-#endif
 	hdcp2p2key_enable = true;
 
 	return;
-}
-
-unsigned char Is_HdmiRx_hdcp2p2_enabled(void)
-{
-	return hdcp2p2key_enable;
 }
 
 void Hdmi_HDCP_2_2_Init(void)
@@ -178,10 +131,7 @@ void Hdmi_HDCP_2_2_Init(void)
 	static unsigned char clk_init_flag=0;
 
 	HDMIRX_INFO("[HDCP2.2] Hdmi_HDCP_2_2_Init");
-	Repeater_clear_repeater_bit =0;
-	#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-	CA_hdcp2_load_from_TEE();
-	#endif
+
 	if(!hdcp2p2key_enable)
 	{
 		HDMIRX_INFO("[HDCP2.2] key not ready");
@@ -204,7 +154,6 @@ void Hdmi_HDCP_2_2_Init(void)
 		clk_init_flag=1;
 
 		INIT_WORK(&hdcp2p2_msg_work, Hdmi_HDCP_2_2_msg_work_func);
-		INIT_WORK(&repeaterauth_stream_work, repeaterauth_stream_work_func);
 	}
 
 	hdmi_rx_reg_mask32(HDCP_2P2_CR, ~HDCP_2P2_CR_hdcp_2p2_en_mask, 0, HDMI_RX_MAC);	
@@ -225,12 +174,8 @@ char  Hdmi_HDCP2_2_Write_Data_to_TX(unsigned char* bSendData,unsigned short wLen
 {
 	unsigned int i;
 
-	if(bSendData ==NULL)
-		return FALSE;
+	if(bSendData ==NULL)     return FALSE;
 	HDMI_PRINTF("[HDCP2.2] bSendData(%d)\n",bSendData[0]);
-
-	mutex_lock(&hdcprx2p2_lock);
-
 	for(i=0;i<wLen;i++)
 	{
 		hdmi_rx_reg_write32(HDCP_MSAP, i, HDMI_RX_MAC);
@@ -241,8 +186,6 @@ char  Hdmi_HDCP2_2_Write_Data_to_TX(unsigned char* bSendData,unsigned short wLen
 	hdmi_rx_reg_write32(HDCP_DP, (wLen&0xFF), HDMI_RX_MAC); 	
 	hdmi_rx_reg_write32(HDCP_AP, HDCP_RXstatus_addr+1, HDMI_RX_MAC);
 	hdmi_rx_reg_write32(HDCP_DP, ((wLen&0x3FF)>>8), HDMI_RX_MAC);
-
-	mutex_unlock(&hdcprx2p2_lock);
 
 	return TRUE;
 }
@@ -306,10 +249,6 @@ void Hdmi_HDCP_2_2_msg_work_func(struct work_struct *work)
 	Send_Msg_Command();
 }
 
-void repeaterauth_stream_work_func(struct work_struct *work)
-{
-	h2MessageParse(stream_manage_msg, 7);
-}
 
 void  Hdmi_HDCP_2_2_msg_hander(void)
 {
@@ -335,7 +274,6 @@ void  Hdmi_HDCP_2_2_msg_hander(void)
 				hdmi_ioctl_struct.hdcp_state = HDCPRX_STATE_2P2_DISCOVER;// Discover HDCP 2.2
 				g_RX_state =  AKE_Send_Cert ;//AKE_Send_Cert ;
 				bLen =11;
-				stream_manage_flag = 0;
 				break;
 			case AKE_NO_Stored_Km:
 				HDMIRX_INFO("[HDCP2.2] AKE_NO_Stored_Km");
@@ -358,27 +296,15 @@ void  Hdmi_HDCP_2_2_msg_hander(void)
 				hdmi_rx_reg_mask32(HDCP_2P2_CR,~HDCP_2P2_CR_apply_state_mask, HDCP_2P2_CR_apply_state_mask, HDMI_RX_MAC);
 				bLen =24; 
 				break;
-			case REPEATERAUTH_SEND_ACK:
-				bLen =16;
-				break;
-			case REPEATERAUTH_STREAM_MANAGE:
-			//	pr_err("[HDCP2.2] REPEATERAUTH_STREAM_MANAGE");
-				bLen =7; //k=1
-				break;
 			default:
 				bLen =0;
 				HDMI_PRINTF("[HDCP2.2] Unknown message\n");
 				break;
 		}
 
-		if (g_bmsg_id != REPEATERAUTH_STREAM_MANAGE) {
-			for(i = 1; i <= bLen; i++)
-				TX_msg_id[i] = hdmi_rx_reg_read32(HDCP_MSDP, HDMI_RX_MAC);
-		} else {
-			stream_manage_flag = 1;
-			stream_manage_msg[0]= g_bmsg_id;
-			for(i = 1; i <= 7; i++)
-				stream_manage_msg[i] = hdmi_rx_reg_read32(HDCP_MSDP, HDMI_RX_MAC);
+		for(i=1;i<=bLen;i++)
+		{
+			TX_msg_id[i] = hdmi_rx_reg_read32(HDCP_MSDP, HDMI_RX_MAC);
 		}
 
 		// for HW Cipher setting
@@ -389,10 +315,7 @@ void  Hdmi_HDCP_2_2_msg_hander(void)
 		hdmi_rx_reg_write32(HDCP_2P2_SR0, HDCP_2P2_SR0_irq_wr_msg_done_mask, HDMI_RX_MAC);
 		hdmi_rx_reg_write32(HDMI_INTCR,0x80,HDMI_RX_MAC);
 
-		if (g_bmsg_id != REPEATERAUTH_STREAM_MANAGE)
-			schedule_work(&hdcp2p2_msg_work);
-		else
-			schedule_work(&repeaterauth_stream_work);
+		schedule_work(&hdcp2p2_msg_work);
 	}
 		
 }

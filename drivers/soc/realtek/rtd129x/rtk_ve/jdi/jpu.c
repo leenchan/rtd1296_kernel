@@ -366,7 +366,7 @@ static long jpu_ioctl(struct file *filp, u_int cmd, u_long arg)
         spin_lock(&s_jpu_lock);
         list_for_each_entry_safe(jbp, n, &s_jbp_head, list)
         {
-            if (jbp->jb.phys_addr == jb.phys_addr)
+            if (jbp->jb.base == jb.base)
             {
                 list_del(&jbp->list);
                 kfree(jbp);
@@ -766,6 +766,11 @@ static int jpu_probe(struct platform_device *pdev)
     int irq;
     struct device_node *node = pdev->dev.of_node;
 
+#if 1//__LINUX_MEDIA_NAS__
+	if (!of_device_is_available(pdev->dev.of_node))
+		return -ENODEV;
+#endif
+
     of_address_to_resource(node, 0, &res);
     iobase = of_iomap(node, 0);
 
@@ -816,7 +821,7 @@ static int jpu_probe(struct platform_device *pdev)
     jpu_clk_enable(s_jpu_clk);
 #endif
 
-    rstc_jpeg = reset_control_get(&pdev->dev, NULL);
+    rstc_jpeg = rstc_get("rstn_jpeg");
 
     /* RTK clock setting */
     reset_control_deassert(rstc_jpeg); // RESET disable

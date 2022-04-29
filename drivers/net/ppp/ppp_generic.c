@@ -41,9 +41,6 @@
 #include <linux/ip.h>
 #include <linux/tcp.h>
 #include <linux/spinlock.h>
-#if defined(CONFIG_PPP_MPPE_MPPC)
-//#include <linux/smp_lock.h>
-#endif
 #include <linux/rwsem.h>
 #include <linux/stddef.h>
 #include <linux/device.h>
@@ -56,10 +53,6 @@
 #include <linux/nsproxy.h>
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
-
-#if defined(CONFIG_PPP_IDLE_TIMEOUT_REFINE)
-#include <linux/icmp.h>
-#endif
 
 #if defined(CONFIG_RTL_PPPOE_HWACC) || defined (CONFIG_RTL_FAST_PPPOE)
 #include <linux/if_pppox.h>
@@ -417,7 +410,8 @@ static void ppp_ccp_peek(struct ppp *ppp, struct sk_buff *skb, int inbound);
 static void ppp_ccp_closed(struct ppp *ppp);
 static struct compressor *find_compressor(int type);
 static void ppp_get_stats(struct ppp *ppp, struct ppp_stats *st);
-static struct ppp *ppp_create_interface(struct net *net, int unit, int *retp);
+static struct ppp *ppp_create_interface(struct net *net, int unit,
+					struct file *file, int *retp);
 static void init_ppp_file(struct ppp_file *pf, int kind);
 static void ppp_shutdown_interface(struct ppp *ppp);
 static void ppp_destroy_interface(struct ppp *ppp);
@@ -430,6 +424,8 @@ static int unit_get(struct idr *p, void *ptr);
 static int unit_set(struct idr *p, void *ptr, int n);
 static void unit_put(struct idr *p, int n);
 static void *unit_find(struct idr *p, int n);
+
+static const struct net_device_ops ppp_netdev_ops;
 
 static struct class *ppp_class;
 
@@ -552,17 +548,63 @@ static int ppp_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
+#if defined(CONFIG_RTL_PPPOE_HWACC)
+extern int rtl865x_delPppoeRouter(char *name);
+#endif
+
 static int ppp_release(struct inode *unused, struct file *file)
 {
 	struct ppp_file *pf = file->private_data;
 	struct ppp *ppp;
+	#if defined(CONFIG_RTD_1295_HWNAT)
+	bool hit = false;
+	#ifdef CONFIG_RTL_PPPOE_HWACC
+	char dev_name[IFNAMSIZ];
+	#endif
+	#endif /* CONFIG_RTD_1295_HWNAT */
 
 	if (pf) {
 		file->private_data = NULL;
 		if (pf->kind == INTERFACE) {
 			ppp = PF_TO_PPP(pf);
-			if (file == ppp->owner)
+			#if defined(CONFIG_RTD_1295_HWNAT)
+			#ifdef CONFIG_RTL_PPPOE_HWACC
+			memcpy(dev_name, ppp->dev->name, IFNAMSIZ);
+			#endif
+
+			rtnl_lock();
+			if (file == ppp->owner) {
+				unregister_netdevice(ppp->dev);
+				hit = true;
+			}
+			rtnl_unlock();
+
+			if (hit) {
+				#ifdef CONFIG_RTL_PPPOE_HWACC
+				#ifdef CONFIG_RTL_LAYERED_DRIVER
+				#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+				rtl865x_detachMasterNetif(dev_name);
+				#ifdef CONFIG_RTL_LAYERED_DRIVER_L2	// sync from voip customer for multiple ppp
+				#if defined (CONFIG_RTL_HW_QOS_SUPPORT)
+				rtl865x_qosFlushMarkRuleByDev(dev_name);
+				#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
+				#endif /* CONFIG_RTL_LAYERED_DRIVER_L2 */
+				rtl865x_delPppoeRouter(dev_name);
+				rtl865x_delPppbyIfName(dev_name);
+				#endif /* CONFIG_RTL_LAYERED_DRIVER_L3 */
+				#else /* CONFIG_RTL_LAYERED_DRIVER */
+				rtl865x_delPppSession(dev_name,  SE_PPPOE);
+				#endif /* CONFIG_RTL_LAYERED_DRIVER */
+				#endif /* CONFIG_RTL_PPPOE_HWACC */
+			}
+			#else /* !CONFIG_RTD_1295_HWNAT */
+			rtnl_lock();
+			if (file == ppp->owner) {
 				ppp_shutdown_interface(ppp);
+				unregister_netdevice(ppp->dev);
+			}
+			rtnl_unlock();
+			#endif /* CONFIG_RTD_1295_HWNAT */
 		}
 		if (atomic_dec_and_test(&pf->refcnt)) {
 			switch (pf->kind) {
@@ -745,15 +787,6 @@ extern int get_pppoe_last_rx_tx(char * ppp_dev,char * wan_dev,unsigned short sid
 extern int fast_pppoe_fw;
 
 #endif
-
-#if defined(CONFIG_RTL_PPPOE_HWACC)
-extern int rtl865x_delPppoeRouter(char *name);
-#endif
-
-#if defined (CONFIG_RTL_PPPOE_DIRECT_REPLY)
-extern void clear_magicNum(void);
-#endif
-
 static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct ppp_file *pf;
@@ -765,6 +798,12 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct slcompress *vj;
 	void __user *argp = (void __user *)arg;
 	int __user *p = argp;
+	#if defined(CONFIG_RTD_1295_HWNAT)
+	bool hit = false;
+	#ifdef CONFIG_RTL_PPPOE_HWACC
+	char dev_name[IFNAMSIZ];
+	#endif
+	#endif /* CONFIG_RTD_1295_HWNAT */
 
 	mutex_lock(&ppp_mutex);
 
@@ -790,8 +829,44 @@ static long ppp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		err = -EINVAL;
 		if (pf->kind == INTERFACE) {
 			ppp = PF_TO_PPP(pf);
-			if (file == ppp->owner)
+			#if defined(CONFIG_RTD_1295_HWNAT)
+			#ifdef CONFIG_RTL_PPPOE_HWACC
+			memcpy(dev_name, ppp->dev->name, IFNAMSIZ);
+			#endif
+
+			rtnl_lock();
+			if (file == ppp->owner) {
+				unregister_netdevice(ppp->dev);
+				hit = true;
+			}
+			rtnl_unlock();
+
+			if (hit) {
+				#ifdef CONFIG_RTL_PPPOE_HWACC
+				#ifdef CONFIG_RTL_LAYERED_DRIVER
+				#ifdef CONFIG_RTL_LAYERED_DRIVER_L3
+				rtl865x_detachMasterNetif(dev_name);
+				#ifdef CONFIG_RTL_LAYERED_DRIVER_L2	// sync from voip customer for multiple ppp
+				#if defined (CONFIG_RTL_HW_QOS_SUPPORT)
+				rtl865x_qosFlushMarkRuleByDev(dev_name);
+				#endif /* CONFIG_RTL_HW_QOS_SUPPORT */
+				#endif /* CONFIG_RTL_LAYERED_DRIVER_L2 */
+				rtl865x_delPppoeRouter(dev_name);
+				rtl865x_delPppbyIfName(dev_name);
+				#endif /* CONFIG_RTL_LAYERED_DRIVER_L3 */
+				#else /* CONFIG_RTL_LAYERED_DRIVER */
+				rtl865x_delPppSession(dev_name,  SE_PPPOE);
+				#endif /* CONFIG_RTL_LAYERED_DRIVER */
+				#endif /* CONFIG_RTL_PPPOE_HWACC */
+			}
+			#else /* !CONFIG_RTD_1295_HWNAT */
+			rtnl_lock();
+			if (file == ppp->owner) {
 				ppp_shutdown_interface(ppp);
+				unregister_netdevice(ppp->dev);
+			}
+			rtnl_unlock();
+			#endif /* CONFIG_RTD_1295_HWNAT */
 		}
 		if (atomic_long_read(&file->f_count) < 2) {
 			ppp_release(NULL, file);
@@ -1173,7 +1248,7 @@ static int ppp_unattached_ioctl(struct net *net, struct ppp_file *pf,
 		/* Create a new ppp unit */
 		if (get_user(unit, p))
 			break;
-		ppp = ppp_create_interface(net, unit, &err);
+		ppp = ppp_create_interface(net, unit, file, &err);
 		if (!ppp)
 			break;
 		file->private_data = &ppp->file;
@@ -1251,6 +1326,25 @@ static __net_init int ppp_init_net(struct net *net)
 static __net_exit void ppp_exit_net(struct net *net)
 {
 	struct ppp_net *pn = net_generic(net, ppp_net_id);
+	struct net_device *dev;
+	struct net_device *aux;
+	struct ppp *ppp;
+	LIST_HEAD(list);
+	int id;
+
+	rtnl_lock();
+	for_each_netdev_safe(net, dev, aux) {
+		if (dev->netdev_ops == &ppp_netdev_ops)
+			unregister_netdevice_queue(dev, &list);
+	}
+
+	idr_for_each_entry(&pn->units_idr, ppp, id)
+		/* Skip devices already unregistered by previous loop */
+		if (!net_eq(dev_net(ppp->dev), net))
+			unregister_netdevice_queue(ppp->dev, &list);
+
+	unregister_netdevice_many(&list);
+	rtnl_unlock();
 
 	idr_destroy(&pn->units_idr);
 }
@@ -1462,11 +1556,12 @@ ppp_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			proto = npindex_to_proto[npi];
 			put_unaligned_be16(proto, pp);
 		}
-
+		skb_scrub_packet(skb, !net_eq(ppp->ppp_net, dev_net(dev)));
 		skb_queue_tail(&ppp->file.xq, skb);
 		ppp_xmit_process(ppp);
 	}
 #else
+	skb_scrub_packet(skb, !net_eq(ppp->ppp_net, dev_net(dev)));
 	skb_queue_tail(&ppp->file.xq, skb);
 	ppp_xmit_process(ppp);
 #endif
@@ -1553,8 +1648,28 @@ static int ppp_dev_init(struct net_device *dev)
 	return 0;
 }
 
+static void ppp_dev_uninit(struct net_device *dev)
+{
+	struct ppp *ppp = netdev_priv(dev);
+	struct ppp_net *pn = ppp_pernet(ppp->ppp_net);
+
+	ppp_lock(ppp);
+	ppp->closing = 1;
+	ppp_unlock(ppp);
+
+	mutex_lock(&pn->all_ppp_mutex);
+	unit_put(&pn->units_idr, ppp->file.index);
+	mutex_unlock(&pn->all_ppp_mutex);
+
+	ppp->owner = NULL;
+
+	ppp->file.dead = 1;
+	wake_up_interruptible(&ppp->file.rwait);
+}
+
 static const struct net_device_ops ppp_netdev_ops = {
 	.ndo_init	 = ppp_dev_init,
+	.ndo_uninit      = ppp_dev_uninit,
 	.ndo_start_xmit  = ppp_start_xmit,
 	.ndo_do_ioctl    = ppp_net_ioctl,
 	.ndo_get_stats64 = ppp_get_stats64,
@@ -1573,7 +1688,6 @@ static void ppp_setup(struct net_device *dev)
 #endif
 	dev->type = ARPHRD_PPP;
 	dev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
-	dev->features |= NETIF_F_NETNS_LOCAL;
 	netif_keep_dst(dev);
 }
 
@@ -1726,10 +1840,6 @@ ppp_send_frame(struct ppp *ppp, struct sk_buff *skb)
 	struct sk_buff *new_skb;
 	int len;
 	unsigned char *cp;
-#if defined(CONFIG_PPP_IDLE_TIMEOUT_REFINE)
-	struct iphdr *iphp;
-	iphp = (struct iphdr *)((unsigned char *)(skb->data+2));
-#endif
 
 	if (proto < 0x8000) {
 #ifdef CONFIG_PPP_FILTER
@@ -1753,10 +1863,7 @@ ppp_send_frame(struct ppp *ppp, struct sk_buff *skb)
 		skb_pull(skb, 2);
 #else
 		/* for data packets, record the time */
-		#if defined(CONFIG_PPP_IDLE_TIMEOUT_REFINE)
-		if(timeoutCheck_skipp_pkt(iphp)!=1)
-		#endif
-			ppp->last_xmit = jiffies;
+		ppp->last_xmit = jiffies;
 #endif /* CONFIG_PPP_FILTER */
 	}
 
@@ -2507,6 +2614,8 @@ ppp_receive_nonmp_frame(struct ppp *ppp, struct sk_buff *skb)
 			skb->dev = ppp->dev;
 			skb->protocol = htons(npindex_to_ethertype[npi]);
 			skb_reset_mac_header(skb);
+			skb_scrub_packet(skb, !net_eq(ppp->ppp_net,
+						      dev_net(ppp->dev)));
 #ifdef FAST_PPTP
 			if (is_fast_fw)
 				return skb;
@@ -2991,7 +3100,6 @@ void ppp_channel_pppoe(struct ppp_channel *chan)
 EXPORT_SYMBOL(ppp_channel_pppoe);
 #endif
 
-
 /*
  * Return the PPP device interface name of a channel.
  */
@@ -3364,8 +3472,8 @@ ppp_get_stats(struct ppp *ppp, struct ppp_stats *st)
  * or if there is already a unit with the requested number.
  * unit == -1 means allocate a new number.
  */
-static struct ppp *
-ppp_create_interface(struct net *net, int unit, int *retp)
+static struct ppp *ppp_create_interface(struct net *net, int unit,
+					struct file *file, int *retp)
 {
 	struct ppp *ppp;
 	struct ppp_net *pn;
@@ -3388,6 +3496,7 @@ ppp_create_interface(struct net *net, int unit, int *retp)
 #endif
 	init_ppp_file(&ppp->file, INTERFACE);
 	ppp->file.hdrlen = PPP_HDRLEN - 2;	/* don't count proto bytes */
+	ppp->owner = file;
 	for (i = 0; i < NUM_NP; ++i)
 		ppp->npmode[i] = NPMODE_PASS;
 	INIT_LIST_HEAD(&ppp->channels);
@@ -3408,6 +3517,7 @@ ppp_create_interface(struct net *net, int unit, int *retp)
 	 */
 	dev_net_set(dev, net);
 
+	rtnl_lock();
 	mutex_lock(&pn->all_ppp_mutex);
 
 	if (unit < 0) {
@@ -3438,7 +3548,7 @@ ppp_create_interface(struct net *net, int unit, int *retp)
 	ppp->file.index = unit;
 	sprintf(dev->name, "ppp%d", unit);
 
-	ret = register_netdev(dev);
+	ret = register_netdevice(dev);
 	if (ret != 0) {
 		unit_put(&pn->units_idr, unit);
 		netdev_err(ppp->dev, "PPP: couldn't register device %s (%d)\n",
@@ -3450,12 +3560,14 @@ ppp_create_interface(struct net *net, int unit, int *retp)
 
 	atomic_inc(&ppp_unit_count);
 	mutex_unlock(&pn->all_ppp_mutex);
+	rtnl_unlock();
 
 	*retp = 0;
 	return ppp;
 
 out2:
 	mutex_unlock(&pn->all_ppp_mutex);
+	rtnl_unlock();
 	free_netdev(dev);
 out1:
 	*retp = ret;

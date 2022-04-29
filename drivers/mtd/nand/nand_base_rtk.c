@@ -94,10 +94,8 @@ static DEFINE_SEMAPHORE (sem_bbt);
 #define MAX_NW_LENGTH 1024*1024*2
 static unsigned char *nwBuffer = NULL;
 static unsigned char *nrBuffer = NULL;
-dma_addr_t nrPhys_addr;
-dma_addr_t oobPhys_addr;
-dma_addr_t nwPhys_addr;
-dma_addr_t oobwPhys_addr;
+//dma_addr_t nrPhys_addr;
+//dma_addr_t nwPhys_addr;
 static int bEnterSuspend=0;
 
 static unsigned char g_isSysSecure = 0;
@@ -111,7 +109,7 @@ extern int g_isCheckEccStatus;
 #define NAND_CP_RW_DISABLE (0xFFFFFFFF)
 unsigned int g_eccSelect =0xFF;
 
-extern u64 map_base;
+extern void *map_base;
 
 #define check_end(mtd, addr, len)					\
 do {									\
@@ -387,6 +385,7 @@ int NF_rtkcr_get_gpio(void)
 #define K9G4G08U0A	0xECDC1425	//MLC, 512 MB, 1 dies, BB check at last page
 #define K9G4G08U0B	0xECDC14A5	//MLC, 512 MB, 1 dies, BB check at last page
 #define K9F4G08U0B	0xECDC1095	//SLC, 512 MB, 1 dies
+#define K9F4G08U0E      0xECDC1095      //SLC, 512 MB, 1 dies
 #define K9G8G08U0A	0xECD314A5	//MLC, 1GB, 1 dies, BB check at last page
 #define K9G8G08U0M	0xECD31425	//MLC, 1GB, 1 dies, BB check at last page
 #define K9K8G08U0A	0xECD35195	//SLC, 1GB, 1 dies
@@ -424,6 +423,7 @@ int NF_rtkcr_get_gpio(void)
 #define EN27LN4G08  0xC8DC9095
 
 /* ESMT */
+#define F59L1G81MA	0xC8D18095
 #define F59L1G81A	0x92F18095
 #define F59L2G81A        0xC8DA9095
 #define F59L4G81A	0xC8DC9095
@@ -453,6 +453,10 @@ int NF_rtkcr_get_gpio(void)
 
 
 /* RTK Nand Chip ID list */
+static int rtd_get_set_nand_info(void);
+extern char g_rtk_nandinfo_line[64];
+static device_type_t g_nand_device;
+
 static device_type_t nand_device[] = 
 {
  {"MT29F2G08AAD", MT29F2G08AAD, 0x10000000, 0x10000000, 2048, 64*2048, 64, 1, 0, 0xff, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
@@ -503,6 +507,7 @@ static device_type_t nand_device[] =
  {"K9G4G08U0A", K9G4G08U0A, 0x20000000, 0x20000000, 2048, 128*2048, 64, 1, 1, 0x54, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
  {"K9G4G08U0B", K9G4G08U0B, 0x20000000, 0x20000000, 2048, 128*2048, 64, 1, 1, 0x54, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
  {"K9F4G08U0B", K9F4G08U0B, 0x20000000, 0x20000000, 2048, 64*2048, 64, 1, 0, 0x54, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
+ {"K9F4G08U0E", K9F4G08U0E, 0x20000000, 0x20000000, 2048, 64*2048, 64, 1, 0, 0x55, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
  {"K9G8G08U0A", K9G8G08U0A, 0x40000000, 0x40000000, 2048, 128*2048, 64, 1, 1, 0x64, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
  {"K9G8G08U0M", K9G8G08U0M, 0x40000000, 0x40000000, 2048, 128*2048, 64, 1, 1, 0x64, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
  {"K9K8G08U0A", K9K8G08U0A, 0x40000000, 0x40000000, 2048, 64*2048, 64, 1, 0, 0x58, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
@@ -538,6 +543,7 @@ static device_type_t nand_device[] =
  {"MX30LF1G08AM", MX30LF1G08AM, 0x8000000, 0x8000000, 2048,  64*2048, 64, 1, 0, 0xff, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
  {"MX30LF1208AA", MX30LF1208AA, 0x4000000, 0x4000000, 2048,  64*2048, 64, 1, 0, 0xff, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},	 
  {"F59L1G81A", F59L1G81A, 0x8000000, 0x8000000, 2048,  64*2048, 64, 1, 0, 0x40, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},	   
+ {"F59L1G81MA", F59L1G81MA, 0x8000000, 0x8000000, 2048,  64*2048, 64, 1, 0, 0x40, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
  {"F59L2G81A", F59L2G81A, 0x10000000, 0x10000000, 2048,  64*2048, 64, 1, 0, 0x44, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
  //{"F59L4G81A", F59L4G81A, 0x20000000, 0x20000000, 2048, 64*4096, 64, 1, 1, 0x54, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
  {"EN27LN4G08", EN27LN4G08, 0x20000000, 0x20000000, 2048,  64*2048, 64, 1, 0, 0x54, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00}, 	
@@ -557,10 +563,10 @@ static device_type_t nand_device[] =
 /* NAND low-level MTD interface functions */
 static int nand_read (struct mtd_info *mtd, loff_t from, size_t len, size_t *retlen, u_char *buf);
 static int nand_read_ecc (struct mtd_info *mtd, loff_t from, size_t len, size_t *retlen, unsigned char *buf, 
-			u_char *oob_buf, struct nand_oobinfo *oobsel, unsigned char *buf_phy);
+			struct mtd_oob_ops *ops);
 static int nand_write (struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen, const u_char *buf);
 static int nand_write_ecc (struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen, const unsigned char * buf, 
-			const u_char *oob_buf, struct nand_oobinfo *oobsel, const unsigned char *buf_phy);
+			struct mtd_oob_ops *ops);
 static int nand_erase (struct mtd_info *mtd, struct erase_info *instr);
 static void nand_sync (struct mtd_info *mtd);
 static int nand_suspend (struct mtd_info *mtd);
@@ -576,7 +582,7 @@ static int nand_block_isbad (struct mtd_info *mtd, loff_t ofs);
 static int nand_block_markbad (struct mtd_info *mtd, loff_t ofs);
 
 /////////////////////////////////////////
-int rtk_update_bbt (struct mtd_info *mtd, __u8 *data_buf, __u8 *oob_buf, BB_t *bbt);
+int rtk_update_bbt (struct mtd_info *mtd, struct mtd_oob_ops *ops, BB_t *bbt);
 int TEST_ERASE_ALL(struct mtd_info *mtd, int page, int bc);
 
 
@@ -584,6 +590,7 @@ int TEST_ERASE_ALL(struct mtd_info *mtd, int page, int bc);
 /* Global Variables */
 int RBA=0;
 static int oob_size, ppb, isLastPage;
+static int ppb_shift;
 static int page_size = 0;
 //CMYu:, 20090415
 //extern platform_info_t platform_info;
@@ -614,20 +621,29 @@ static void NF_CKSEL(char *PartNum, unsigned int value)
 }
 //------------------------------------------------------------------------------------------------
 
-static unsigned int rtk_find_real_blk(struct mtd_info *mtd, unsigned int blk)
+static unsigned int rtk_find_real_blk(struct mtd_info *mtd, unsigned int blk, int *chipnr_remap)
 {
     struct nand_chip *this = (struct nand_chip *) mtd->priv;
-    unsigned int i = 0, real_blk = 0xFFFFFFFF;
+    unsigned int i;
+    unsigned int real_blk = blk;
 
+    down_write (&rw_sem_bbt);
     for ( i=0; i<RBA; i++){
         if ( this->bbt[i].bad_block != BB_INIT ){
-            if ( blk == this->bbt[i].bad_block ){
+            if ( real_blk == this->bbt[i].bad_block ){
                 real_blk = this->bbt[i].remap_block;
-                printk("need to do remap ...... [%d] to [%d]\n", blk, real_blk);
-                break;
+                printk(KERN_DEBUG "%s: Remap ...... [%d] to [%d]\n",
+                  __func__, blk, real_blk);
+                *chipnr_remap = this->bbt[i].RB_die;
+                blk = real_blk;
             }
         }
     }
+    if ( this->active_chip != *chipnr_remap ){
+        this->active_chip = *chipnr_remap;
+        this->select_chip(mtd, *chipnr_remap);
+    }
+    up_write (&rw_sem_bbt);
 
     return real_blk;
 }
@@ -635,9 +651,9 @@ static unsigned int rtk_find_real_blk(struct mtd_info *mtd, unsigned int blk)
 static int  check_BBT(struct mtd_info *mtd, unsigned int blk)
 {
 	struct nand_chip *this = (struct nand_chip *) mtd->priv;
-	printk("[%s]..RBA:[%d] blk:[%d]\n", __FUNCTION__, RBA, blk);
 	int i;
 	//int BBs=0;
+	printk("[%s]..RBA:[%d] blk:[%d]\n", __FUNCTION__, RBA, blk);
 
 	for ( i=0; i<RBA; i++)
 	{
@@ -774,38 +790,38 @@ static void reverse_to_Yaffs2Tags(__u8 *r_oobbuf)
 	this->active_chip=chipnr=0;		
 	page = ofs >> this->page_shift;
 	//printk("[%s] page(%x), ofs(%x), page_shift(%x)\n", __FUNCTION__, page, ofs, this->page_shift);
-	block_status_p1_org= this->g_oobbuf[0];
+	block_status_p1_org= this->ops.oobbuf[0];
 	page_offset = page & (ppb-1);
-	block = page/ppb;
+	block = page >> ppb_shift;
 	printk ("WARNING: Die %d: block=%d is bad, block_status_p1_org=0x%x\n", chipnr, block, block_status_p1_org);
 	if ( isLastPage ){
 		page = block*ppb + (ppb-1);	
-		if ( this->read_oob (mtd, chipnr, page, oob_size, this->g_oobbuf) ){
+		if ( this->read_oob (mtd, chipnr, page, oob_size, this->ops.oobbuf) ){
 			printk ("%s: read_oob page=%d failed\n", __FUNCTION__, page);
 			return 1;
 		}
-		block_status_p1 = this->g_oobbuf[0];
+		block_status_p1 = this->ops.oobbuf[0];
 #if Nand_Block_Isbad_Slow_Version
 		page = block*ppb + (ppb-2);	
-		if ( this->read_oob (mtd, chipnr, page, oob_size, this->g_oobbuf) ){
+		if ( this->read_oob (mtd, chipnr, page, oob_size, this->ops.oobbuf) ){
 			printk ("%s: read_oob page=%d failed\n", __FUNCTION__, page);
 			return 1;
 		}
-		block_status_p2 = this->g_oobbuf[0];
+		block_status_p2 = this->ops.oobbuf[0];
 		debug_nand("[1]block_status_p1=0x%x, block_status_p2=0x%x\n", block_status_p1, block_status_p2);
 #endif		
 	}else{	
-		if ( this->read_oob (mtd, chipnr, page, oob_size, this->g_oobbuf) ){
+		if ( this->read_oob (mtd, chipnr, page, oob_size, this->ops.oobbuf) ){
 			printk ("%s: read_oob page=%d failed\n", __FUNCTION__, page);
 			return 1;
 		}
-		block_status_p1 = this->g_oobbuf[0];
+		block_status_p1 = this->ops.oobbuf[0];
 #if Nand_Block_Isbad_Slow_Version
-		if ( this->read_oob (mtd, chipnr, page+1, oob_size, this->g_oobbuf) ){
+		if ( this->read_oob (mtd, chipnr, page+1, oob_size, this->ops.oobbuf) ){
 			printk ("%s: read_oob page+1=%d failed\n", __FUNCTION__, page+1);
 			return 1;
 		}
-		block_status_p2 = this->g_oobbuf[0];
+		block_status_p2 = this->ops.oobbuf[0];
 		debug_nand("[2]block_status_p1=0x%x, block_status_p2=0x%x\n", block_status_p1, block_status_p2);
 #endif
 	}
@@ -831,13 +847,13 @@ static int nand_block_isbad (struct mtd_info *mtd, loff_t ofs)
 
 static int nand_block_markbad (struct mtd_info *mtd, loff_t ofs)
 {
-down_write(&rw_sem_markbad);
 	struct nand_chip *this = (struct nand_chip *)mtd->priv;
 	unsigned int page, block, page_offset;
 	int i;
 	int rc = 0;
 	unsigned char buf[oob_size] __attribute__((__aligned__(4)));
 	int chipnr, chipnr_remap;
+down_write(&rw_sem_markbad);
 
 	if (bEnterSuspend)
 	{
@@ -849,7 +865,7 @@ down_write(&rw_sem_markbad);
 	page = ofs >> this->page_shift;
 	this->active_chip = chipnr = chipnr_remap = (int)(ofs >> this->chip_shift);
 	page_offset = page & (ppb-1);
-	block = page/ppb;
+	block = page >> ppb_shift;
 
 	this->active_chip=chipnr=chipnr_remap=0;		
 	this->select_chip(mtd, chipnr);
@@ -920,7 +936,7 @@ static int nand_read_oob_ext (struct mtd_info *mtd, loff_t from, size_t len, siz
 	this->active_chip = chipnr = chipnr_remap = (int)(from >> this->chip_shift);
 	old_page = page = realpage & this->pagemask;
 	page_offset = page & (ppb-1);
-	block = page/ppb;
+	block = page >> ppb_shift;
 	this->active_chip=chipnr=chipnr_remap=0;		
 	this->select_chip(mtd, chipnr);
 
@@ -952,7 +968,7 @@ static int nand_read_oob_ext (struct mtd_info *mtd, loff_t from, size_t len, siz
 		if (rc < 0) {
 			if (rc == -1){
 				printk ("%s: read_oob: Un-correctable HW ECC\n", __FUNCTION__);
-				if(check_BBT(mtd,page/ppb)==0)
+				if(check_BBT(mtd,page >> ppb_shift)==0)
 				{
 				down_write (&rw_sem_bbt);
 				for( i=0; i<RBA; i++){
@@ -961,29 +977,29 @@ static int nand_read_oob_ext (struct mtd_info *mtd, loff_t from, size_t len, siz
 							this->bbt[i].BB_die = chipnr_remap;
 						else
 							this->bbt[i].BB_die = chipnr;
-						this->bbt[i].bad_block = page/ppb;
+						this->bbt[i].bad_block = page >> ppb_shift;
 						break;
 					}
 				}
 				up_write (&rw_sem_bbt);
 				dump_BBT(mtd);
 				
-				if ( rtk_update_bbt (mtd, this->g_databuf, this->g_oobbuf, this->bbt) ){
+				if ( rtk_update_bbt (mtd, &this->ops, this->bbt) ){
 					printk("[%s] rtk_update_bbt() fails\n", __FUNCTION__);
 					up_write(&rw_sem_rd_oob);
 					return -1;
 					}
 				}
 				
-				this->g_oobbuf[0] = 0x00;
+				this->ops.oobbuf[0] = 0x00;
 				if ( isLastPage ){
 					this->erase_block (mtd, this->active_chip, block*ppb);
-					this->write_oob(mtd, this->active_chip, block*ppb+ppb-1, oob_size, this->g_oobbuf);
-					this->write_oob(mtd, this->active_chip, block*ppb+ppb-2, oob_size, this->g_oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+ppb-1, oob_size, this->ops.oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+ppb-2, oob_size, this->ops.oobbuf);
 				}else{
 					this->erase_block (mtd, this->active_chip, block*ppb);
-					this->write_oob(mtd, this->active_chip, block*ppb, oob_size, this->g_oobbuf);
-					this->write_oob(mtd, this->active_chip, block*ppb+1, oob_size, this->g_oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb, oob_size, this->ops.oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+1, oob_size, this->ops.oobbuf);
 				}
 				printk("rtk_read_oob: Un-correctable HW ECC Error at page=%d\n", page);				
 			}else{
@@ -1003,14 +1019,14 @@ static int nand_read_oob_ext (struct mtd_info *mtd, loff_t from, size_t len, siz
 			this->active_chip = chipnr;
 			this->select_chip(mtd, chipnr);
 		}
-		block = old_page/ppb;
+		block = old_page >> ppb_shift;
 	}
 
 	if ( retlen ){
 		if ( oob_len == len )
 			*retlen = oob_len;
 		else{
-			printk("[%s] error: oob_len %d != len %d\n", __FUNCTION__, oob_len, len);
+			printk("[%s] error: oob_len %d != len %zu\n", __FUNCTION__, oob_len, len);
 			up_write(&rw_sem_rd_oob);
 			return -1;
 		}	
@@ -1023,11 +1039,20 @@ static int nand_read_oob_ext (struct mtd_info *mtd, loff_t from, size_t len, siz
 
 static int nand_read (struct mtd_info *mtd, loff_t from, size_t len, size_t * retlen, u_char * buf)
 {
+	int rc=0;
+	unsigned int retryCnt = MTD_SEM_RETRY_COUNT;
+	size_t new_len = 0;
+	u_char *new_buf = NULL;
+	loff_t new_from = from;
+	loff_t is_over_page;
+	struct nand_chip *this = mtd->priv;
+
     // Ignore read with length 0
 down_write(&rw_sem_rd);
 	if(len <= 0){
 		*retlen = 0;
-		printk("%s:%d read non-positive len=%d\n", __func__, __LINE__, len);
+		printk("%s:%d read non-positive len=%zu\n", __func__, __LINE__, len);
+		up_write(&rw_sem_rd);
 		return 0;
 	}
 	if (bEnterSuspend)
@@ -1039,19 +1064,11 @@ down_write(&rw_sem_rd);
 #ifdef CONFIG_MTD_NAND_RTK_HW_SEMAPHORE		
 	rtk_spin_lock();
 #endif	
-	int rc=0;
-	unsigned int retryCnt = MTD_SEM_RETRY_COUNT;
-	size_t new_len = 0;
-	u_char *new_buf = NULL;
-	loff_t new_from = from;
-	loff_t is_over_page;
-	struct nand_chip *this = mtd->priv;
-
 	if (nrBuffer == NULL)
 	{
-		//nrBuffer = (unsigned int *)dma_alloc_coherent(NULL, MAX_NR_LENGTH, (dma_addr_t *) (&nrPhys_addr), GFP_DMA | GFP_KERNEL);
-		nrBuffer = (unsigned char *)dma_alloc_coherent(&mtd->dev, MAX_NR_LENGTH, (dma_addr_t *) (&nrPhys_addr), GFP_KERNEL);
-		printk("%s:%d allocate from dma_alloc_coherent, nrBuffer=0x%.8x, nrPhys_addr=0x%.8x\n", __func__, __LINE__, nrBuffer, nrPhys_addr);
+		//nrBuffer = (unsigned char *)dma_alloc_coherent(&mtd->dev, MAX_NR_LENGTH, (dma_addr_t *) (&nrPhys_addr), GFP_KERNEL);
+		//printk("%s:%d allocate from dma_alloc_coherent, nrBuffer=0x%.8x, nrPhys_addr=0x%.8x\n", __func__, __LINE__, nrBuffer, nrPhys_addr);
+		nrBuffer = kmalloc( MAX_NR_LENGTH, GFP_KERNEL );
 	}
 	
 	if(g_isSysSecure||g_isRandomize)
@@ -1093,26 +1110,24 @@ down_write(&rw_sem_rd);
 		//printk("%s:%d cpu%d  old_len=%d, new_len=%d, from=%lld, new_from=%lld, is_over_page=%lld, page_idx_mask=%lld\n", 
 		//	__func__, __LINE__, raw_smp_processor_id(), len, new_len, from, new_from, is_over_page, this->page_idx_mask);
 
-		//if (new_len <= MAX_NR_LENGTH)
-		if(1)
+		if (new_len <= MAX_NR_LENGTH)
 		{
 			new_buf = nrBuffer;
-                        //new_buf = nrPhys_addr;
 		}
 		else
 		{
 			new_buf = kmalloc( new_len, GFP_KERNEL );
-			//printk("%s:%d cpu%d  len=%d\n", __func__, __LINE__, raw_smp_processor_id(), new_len);
+			printk("%s:%d cpu%d  len=%zu\n", __func__, __LINE__, raw_smp_processor_id(), new_len);
 		}
 
 		if (new_buf) {
 			//rc = nand_read_ecc (mtd, from, new_len, retlen, new_buf, NULL, NULL);
-			rc = nand_read_ecc (mtd, new_from, new_len, retlen, new_buf, NULL, NULL,(unsigned char *)nrPhys_addr);
+			rc = nand_read_ecc (mtd, new_from, new_len, retlen, new_buf, NULL);
 					
-			if (rc == 0) {
+			if (rc >= 0) {
 				*retlen = len;
 				//memcpy(buf, new_buf, len);
-				printk("%s:%d from: %x, new_from: %x, len: %x\n", __func__, __LINE__,from,new_from,len);
+				//printk("%s:%d from: %x, new_from: %x, len: %x\n", __func__, __LINE__,from,new_from,len);
 				memcpy(buf, new_buf+(from-new_from), len);
 			}
 			else {
@@ -1133,8 +1148,8 @@ down_write(&rw_sem_rd);
 
 		if (new_buf) {
 			//rc = nand_read_ecc (mtd, from, len, retlen, new_buf, NULL, NULL);
-			rc = nand_read_ecc (mtd, new_from, len, retlen, new_buf, NULL, NULL,(unsigned char *)nrPhys_addr);
-			if (rc == 0) {
+			rc = nand_read_ecc (mtd, new_from, len, retlen, new_buf, NULL);
+			if (rc >= 0) {
 				//memcpy(buf, new_buf, len);
 				memcpy(buf, new_buf+(from-new_from), len);
 			}
@@ -1164,9 +1179,9 @@ up_write(&rw_sem_rd);
 
 static int nand_read_oob (struct mtd_info *mtd, loff_t from, struct mtd_oob_ops *ops)
 {
-down_write(&rw_sem_rd);
 	int rc = 0;
 	unsigned int retryCnt = MTD_SEM_RETRY_COUNT;
+down_write(&rw_sem_rd);
 
 	if (bEnterSuspend)
 	{
@@ -1188,12 +1203,12 @@ down_write(&rw_sem_rd);
 	//printk("[%s] mtd->writesize =%u\n", __FUNCTION__, mtd->writesize);
 	//mtd->oobinfo.useecc = ops->mode;
 	//printk("[%s]scramble 0x%x\n",__FUNCTION__,mtd->isScramble);
-	if(ops->len==ops->ooblen)// read oob 
-		 rc = nand_read_oob_ext(mtd, from, ops->len, &ops->retlen,ops->oobbuf);
+	if(!ops->len && ops->ooblen)
+		 rc = nand_read_oob_ext(mtd, from, ops->ooblen, &ops->oobretlen,ops->oobbuf);
 	else
 	{
 		
-		// rc = nand_read_ecc(mtd, from, ops->len, &ops->retlen,ops->datbuf, ops->oobbuf, NULL);
+		 rc = nand_read_ecc(mtd, from, ops->len, &ops->retlen,ops->datbuf, ops);
 	}
 	
 	if(g_isSysSecure||g_isRandomize)
@@ -1207,18 +1222,20 @@ up_write(&rw_sem_rd);
 	return rc;
 }                          
 static int nand_read_ecc (struct mtd_info *mtd, loff_t from, size_t len,
-			size_t *retlen, unsigned char *buf, unsigned char *oob_buf, struct nand_oobinfo *oobsel, unsigned char *buf_phy)
+			size_t *retlen, unsigned char *buf, struct mtd_oob_ops *ops)
 {
-	printk("[%s] mtd->writesize=0x%x, from=[0x%x] len=[0x%x]\n", __FUNCTION__, mtd->writesize, from, len);
+	//printk("[%s] mtd->writesize=0x%x, from=[0x%x] len=[0x%x]\n", __FUNCTION__, mtd->writesize, from, len);
 	
 	struct nand_chip *this = mtd->priv;
 	unsigned long long  page, realpage,page_ppb;
-	int data_len, oob_len;
-	int rc;
+	int data_len;
+	int rc = 0;
 	unsigned int old_page, page_offset, block, real_block;
 	int chipnr, chipnr_remap;
 	int i;
+	BB_t *bbt_p = NULL;
 	//int tmp_isCPdisable_R = mtd->isCPdisable_R;
+	unsigned int max_bitflips = 0;
 
 	if (bEnterSuspend)
 	{
@@ -1235,6 +1252,7 @@ static int nand_read_ecc (struct mtd_info *mtd, loff_t from, size_t len,
 
 	if (NOTALIGNED (mtd, from) || NOTALIGNED(mtd, len)) {
 		printk (KERN_NOTICE "nand_read_ecc: Attempt to read not page aligned data\n");
+		*retlen = 0;
 		return -EINVAL;
 	}
 
@@ -1246,7 +1264,7 @@ static int nand_read_ecc (struct mtd_info *mtd, loff_t from, size_t len,
 	page_ppb = page;
 	do_div(page_ppb,ppb);
 	block = (unsigned int)page_ppb;
-	printk("Ready to READ blk:%u, page:%u, len:%u, page_size:%d, oob_size:%d\n",page/ppb,page%ppb,len,page_size,oob_size);
+	//printk("Ready to READ blk:%u, page:%u, len:%u, page_size:%d, oob_size:%d\n",page >> ppb_shift,page&(ppb-1),len,page_size,oob_size);
 
 	this->active_chip=chipnr=chipnr_remap=0;		
 	//CMYu, 20091030
@@ -1272,58 +1290,23 @@ static int nand_read_ecc (struct mtd_info *mtd, loff_t from, size_t len,
 	if ( retlen )
 		*retlen = 0;
 	
-	data_len = oob_len = 0;
+	data_len = 0;
+	if(ops)
+		ops->oobretlen = 0;
 
 	while (data_len < len) {
-		//CMYu, 20091030
-		#if 0
-		if ( this->numchips == 1){
-			if ( (page>=block*ppb) && (page<(block+1)*ppb) && read_has_check_bbt==1 )
-				goto SKIP_BBT_CHECK;
-		}
-		#endif
-		down_write (&rw_sem_bbt);
-		read_remap_block = 0xFFFFFFFF; 
-		for ( i=0; i<RBA; i++){
-			if ( this->bbt[i].bad_block != BB_INIT ){
-				if ( this->active_chip == this->bbt[i].BB_die && block == this->bbt[i].bad_block ){
-					read_remap_block = block = this->bbt[i].remap_block;
-					if ( this->bbt[i].BB_die != this->bbt[i].RB_die ){
-						this->active_chip = chipnr_remap = this->bbt[i].RB_die;
-						this->select_chip(mtd, chipnr_remap);
-					}
-				}
-			}else
-				break;
-		}
-        up_write (&rw_sem_bbt);
-		read_has_check_bbt = 1;
-		
-SKIP_BBT_CHECK:
-
-        if((real_block = rtk_find_real_blk(mtd, page/ppb)) == 0xFFFFFFFF){
-            real_block = page/ppb;
-        }
-#if 0
-		if ( this->numchips == 1 && read_has_check_bbt==1 ){
-			if ( read_remap_block == 0xFFFFFFFF )
-				page = block*ppb + page_offset;
-			else	
-				page = read_remap_block*ppb + page_offset;
-		}else
-#endif
+		real_block = rtk_find_real_blk(mtd, block, &chipnr_remap);
 		page = real_block*ppb + page_offset;  
 		//printk("\t\tConfirm to READ blk:%u, page:%u\n",page/ppb,page%ppb);
 		//mtd->isCPdisable_R =tmp_isCPdisable_R;
         
-        printk("real_block:[%d] this->active_chip:[%d ]page:[%d]\n", real_block, this->active_chip, page);
-		rc = this->read_ecc_page (mtd, this->active_chip, page, &buf[data_len], &oob_buf[oob_len], CP_NF_NONE, &buf_phy[data_len]);
+        //printk("real_block:[%d] this->active_chip:[%d ]page:[%d]\n", real_block, this->active_chip, page);
+		rc = this->read_ecc_page (mtd, this->active_chip, page, &buf[data_len], ops, CP_NF_NONE);
 		if (rc < 0) {
-		//if(0){
 			#if	NAND_POWEROFF_CARDREADER_WITH_MULTI_READ
 			printk("[%s]Try again..\n",__FUNCTION__);
 			NF_rtkcr_card_power(1);//power off card reader.
-			rc = this->read_ecc_page (mtd, this->active_chip, page, &buf[data_len], &oob_buf[oob_len], CP_NF_NONE, &buf_phy[data_len]);
+			rc = this->read_ecc_page (mtd, this->active_chip, page, &buf[data_len], ops, CP_NF_NONE);
 			if(rc<0)
 			{
 			#if NAND_READ_SKIP_UPDATE_BBT	
@@ -1345,27 +1328,73 @@ SKIP_BBT_CHECK:
 						else
 							this->bbt[i].BB_die = chipnr;
 						this->bbt[i].bad_block = page_ppb;
+						bbt_p = &this->bbt[i];
 						break;
 					}
 				}
 				up_write (&rw_sem_bbt);
 				dump_BBT(mtd);
-				
-				if ( rtk_update_bbt (mtd, this->g_databuf, this->g_oobbuf, this->bbt) ){
+				if ( NULL == bbt_p || i >= RBA ){
+					printk("KERN_ERR [%s] RBA do not have free remap block\n", __FUNCTION__);
+					return -1;
+				}
+
+				if ( rtk_update_bbt (mtd, &this->ops, this->bbt) ){
 					printk("[%s] rtk_update_bbt() fails\n", __FUNCTION__);
 					return -1;
 					}
 				}
-				this->g_oobbuf[0] = 0x00;
+
+				/* Block copy */
+				this->select_chip(mtd, chipnr);
+				this->erase_block(mtd, chipnr, bbt_p->remap_block*ppb);
+				for ( i=0; i<ppb; i++){
+					if ( bbt_p->BB_die != bbt_p->RB_die ){
+						this->active_chip = bbt_p->BB_die;
+						this->select_chip(mtd, bbt_p->BB_die);
+					}
+
+					rc = this->read_ecc_page(mtd, this->active_chip, block*ppb+i, &buf[data_len], NULL, CP_NF_NONE);
+					/* Skip write on clean page */
+					if(rc >= 0 && this->ops.retlen){
+						if ( bbt_p->BB_die != bbt_p->RB_die ){
+							this->active_chip = bbt_p->RB_die;
+							this->select_chip(mtd, bbt_p->RB_die);
+						}
+
+						if(this->write_ecc_page (mtd, this->active_chip, bbt_p->remap_block*ppb+i, &buf[data_len], NULL, 0))
+							printk(KERN_ERR "Failed to write page 0x%x in block %u on block backup.\n",
+								bbt_p->remap_block*ppb+i, bbt_p->remap_block);
+						max_bitflips = max_t(unsigned int, max_bitflips, rc);
+					}
+					else if (rc < 0) {
+						printk (KERN_ERR "%s: Un-correctable HW ECC on page 0x%x in block %u\n",
+							__FUNCTION__, block*ppb+i, block);
+					}
+					/* Skip addition in last iteration */
+					if (block*ppb+i >= page && i != ppb-1) {
+						data_len += page_size;
+						if(ops) ops->oobretlen += oob_size;
+						page++;
+					}
+				} // block loop
+
+				if ( bbt_p->BB_die != bbt_p->RB_die ){
+					this->active_chip = bbt_p->BB_die;
+					this->select_chip(mtd, bbt_p->BB_die);
+				}
+				/* End of block copy */
+
+				this->ops.oobbuf[0] = 0x00;
 				block = page_ppb;
 				if ( isLastPage){
 					this->erase_block (mtd, this->active_chip, block*ppb);
-					this->write_oob(mtd, this->active_chip, block*ppb+ppb-1, oob_size, this->g_oobbuf);
-					this->write_oob(mtd, this->active_chip, block*ppb+ppb-2, oob_size, this->g_oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+ppb-1, oob_size, this->ops.oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+ppb-2, oob_size, this->ops.oobbuf);
 				}else{
 					this->erase_block (mtd, this->active_chip, block*ppb);
-					this->write_oob(mtd, this->active_chip, block*ppb, oob_size, this->g_oobbuf);
-					this->write_oob(mtd, this->active_chip, block*ppb+1, oob_size, this->g_oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb, oob_size, this->ops.oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+1, oob_size, this->ops.oobbuf);
 				}
 				printk("rtk_read_ecc_page: Un-correctable HW ECC Error at page=0x%llx\n", page);
 			}else{
@@ -1373,12 +1402,12 @@ SKIP_BBT_CHECK:
 				return -1;
 			}
 		}
-		//else
-			//printk("\t\tConfirm to READ blk:%u, page:%u Succeed!!\n",page/ppb,page%ppb);
+		else
+			max_bitflips = max_t(unsigned int, max_bitflips, rc);
 		data_len += page_size;
 
-		if(oob_buf)//add by alexchang 0524-2010
-		oob_len += oob_size;
+		if(ops)//add by alexchang 0524-2010
+			ops->oobretlen += oob_size;
 		
 		old_page++;
 		page_offset = old_page & (ppb-1);
@@ -1388,20 +1417,23 @@ SKIP_BBT_CHECK:
 			this->active_chip = chipnr;
 			this->select_chip(mtd, chipnr);
 		}
-		block = old_page/ppb;
+		block = old_page >> ppb_shift;
 	}
 
 	if ( retlen ){
 		if ( data_len == len )
 			*retlen = data_len;
 		else{
-				printk("[%s] error: data_len %d != len %d\n", __FUNCTION__, data_len, len);
+				printk("[%s] error: data_len %d != len %zu\n", __FUNCTION__, data_len, len);
 				return -1;
 		}	
 	}
 	//printk("[%s]OK\n",__FUNCTION__);
 
-	return 0;
+	if(rc < 0)
+		return rc;
+
+	return max_bitflips;
 }
 
 //panic_nand_write without oobbuf.
@@ -1433,7 +1465,7 @@ static int panic_nand_write (struct mtd_info *mtd, loff_t to, size_t len, size_t
 	this->active_chip = chipnr = chipnr_remap = (int)(to >> this->chip_shift);
 	old_page = page = realpage & this->pagemask;
 	page_offset = page & (ppb-1);
-	block = page/ppb;
+	block = page >> ppb_shift;
 
 	this->active_chip=chipnr=chipnr_remap=0;		
 	if ( this->numchips == 1 && block != write_block ){
@@ -1487,12 +1519,12 @@ SKIP_BBT_CHECK:
 			page = block*ppb + page_offset;
 		//printk("Confirm to write blk:%u, page:%u\n",page/ppb,page%ppb);
 		//mtd->isCPdisable_W= tmp_isCPdisable_W;
-		rc = this->write_ecc_page (mtd, this->active_chip, page, &buf[data_len], NULL, 0, &buf[data_len]);
+		rc = this->write_ecc_page (mtd, this->active_chip, page, &buf[data_len], NULL, 0);
 		if (rc < 0) {
 			if ( rc == -1){
 				//printk ("%s: write_ecc_page:  write blk:%u, page:%u failed\n", __FUNCTION__,page/ppb,page%ppb);
 
-			if(check_BBT(mtd,page/ppb)==0)
+			if(check_BBT(mtd,page >> ppb_shift)==0)
 			{
 				down_write (&rw_sem_bbt);
 				/* update BBT */
@@ -1503,7 +1535,7 @@ SKIP_BBT_CHECK:
 						else
 							err_chipnr = chipnr;
 						this->bbt[i].BB_die = err_chipnr;
-						this->bbt[i].bad_block = page/ppb;
+						this->bbt[i].bad_block = page >> ppb_shift;
 						err_chipnr_remap = this->bbt[i].RB_die;
 						block_remap = this->bbt[i].remap_block;
 						break;
@@ -1512,13 +1544,14 @@ SKIP_BBT_CHECK:
 				up_write (&rw_sem_bbt);
 				if ( block_remap == 0x12345678 ){
 					printk("[%s] RBA do not have free remap block\n", __FUNCTION__);
+					up_write(&rw_sem_panic_write);
 					return -1;
 				}
 			}
 			
 				dump_BBT(mtd);
 			
-				if ( rtk_update_bbt (mtd, this->g_databuf, this->g_oobbuf, this->bbt) ){
+				if ( rtk_update_bbt (mtd, &this->ops, this->bbt) ){
 					printk("[%s] rtk_update_bbt() fails\n", __FUNCTION__);
 					up_write(&rw_sem_panic_write);
 					return -1;
@@ -1533,16 +1566,16 @@ SKIP_BBT_CHECK:
 					this->select_chip(mtd, err_chipnr);
 				}
 
-				this->g_oobbuf[0] = 0x00;
-				block = page/ppb;
+				this->ops.oobbuf[0] = 0x00;
+				block = page >> ppb_shift;
 				if ( isLastPage ){
 					this->erase_block (mtd, err_chipnr, block*ppb);
-					this->write_oob(mtd, this->active_chip, block*ppb+ppb-1, oob_size, this->g_oobbuf);
-					this->write_oob(mtd, this->active_chip, block*ppb+ppb-2, oob_size, this->g_oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+ppb-1, oob_size, this->ops.oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+ppb-2, oob_size, this->ops.oobbuf);
 				}else{
 					this->erase_block (mtd, err_chipnr, block*ppb);
-					this->write_oob(mtd, this->active_chip, block*ppb, oob_size, this->g_oobbuf);	
-					this->write_oob(mtd, this->active_chip, block*ppb+1, oob_size, this->g_oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb, oob_size, this->ops.oobbuf);	
+					this->write_oob(mtd, this->active_chip, block*ppb+1, oob_size, this->ops.oobbuf);
 				}
 			}else{
 				printk ("%s: write_ecc_page:  rc=%d\n", __FUNCTION__, rc);
@@ -1561,7 +1594,7 @@ SKIP_BBT_CHECK:
 			this->active_chip = chipnr;
 			this->select_chip(mtd, chipnr);
 		}
-		block = old_page/ppb;
+		block = old_page >> ppb_shift;
 	}
 
 	if ( retlen ){
@@ -1569,7 +1602,7 @@ SKIP_BBT_CHECK:
 		if ( data_len == len )
 			*retlen = data_len;
 		else{
-			printk("[%s] error: data_len %d != len %d\n", __FUNCTION__, data_len, len);
+			printk("[%s] error: data_len %d != len %zu\n", __FUNCTION__, data_len, len);
 			up_write(&rw_sem_panic_write);
 			return -1;
 		}	
@@ -1580,6 +1613,10 @@ SKIP_BBT_CHECK:
 
 static int nand_write (struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen, const u_char *buf)
 {
+	int rc = 0;
+	unsigned int retryCnt = MTD_SEM_RETRY_COUNT;
+	u_char *new_buf = NULL;
+
 down_write(&rw_sem_wte);
 	if (bEnterSuspend)
 	{
@@ -1590,15 +1627,11 @@ down_write(&rw_sem_wte);
 #ifdef CONFIG_MTD_NAND_RTK_HW_SEMAPHORE		
 	rtk_spin_lock();
 #endif	
-	int rc = 0;
-	unsigned int retryCnt = MTD_SEM_RETRY_COUNT;
-	u_char *new_buf = NULL;
-
 	if (nwBuffer == NULL)
 	{
-		//nwBuffer = (unsigned char *)dma_alloc_coherent(NULL, MAX_NW_LENGTH, (dma_addr_t *) (&nwPhys_addr), GFP_DMA | GFP_KERNEL);
-                nwBuffer = (unsigned char *)dma_alloc_coherent(&mtd->dev, MAX_NW_LENGTH, (dma_addr_t *) (&nwPhys_addr), GFP_DMA | GFP_KERNEL);
-                printk("%s:%d allocate from dma_alloc_coherent, nwBuffer=0x%.8x, nwPhys_addr=0x%.8x\n", __func__, __LINE__, nwBuffer, nwPhys_addr);
+                //nwBuffer = (unsigned char *)dma_alloc_coherent(&mtd->dev, MAX_NW_LENGTH, (dma_addr_t *) (&nwPhys_addr), GFP_DMA | GFP_KERNEL);
+                //printk("%s:%d allocate from dma_alloc_coherent, nwBuffer=0x%.8x, nwPhys_addr=0x%.8x\n", __func__, __LINE__, nwBuffer, nwPhys_addr);
+		nwBuffer = kmalloc( MAX_NW_LENGTH, GFP_KERNEL );
 	}
 
 	if(g_isSysSecure||g_isRandomize)
@@ -1618,20 +1651,19 @@ down_write(&rw_sem_wte);
 
 	//printk("[%s] to:%llu, len:%d\n", __FUNCTION__, to, len);
 #if 1
-	//if (len <= MAX_NW_LENGTH)
-	if(1)
+	if (len <= MAX_NW_LENGTH)
 	{
 		new_buf = nwBuffer;
 	}
 	else
 	{
-		//printk("%s:%d cpu%d  len=%d\n", __func__, __LINE__, raw_smp_processor_id(), len);
 		new_buf = kmalloc( len, GFP_KERNEL );
+		printk("%s:%d cpu%d  len=%zu\n", __func__, __LINE__, raw_smp_processor_id(), len);
 	}
 
 	if (new_buf) {
 		memcpy(new_buf, buf, len);
-		rc = (nand_write_ecc (mtd, to, len, retlen, new_buf, NULL, NULL,(unsigned char *)nwPhys_addr));
+		rc = (nand_write_ecc (mtd, to, len, retlen, new_buf, NULL));
 		if (len > MAX_NW_LENGTH)
 		{
 			kfree(new_buf);
@@ -1658,10 +1690,10 @@ up_write(&rw_sem_wte);
 
 static int nand_write_oob (struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *ops)//for 2.6.34 YAFFS-->mtd
 {
-down_write(&rw_sem_wte_oob);
 	int rc = 0;
 	unsigned int retryCnt = MTD_SEM_RETRY_COUNT;
-printk("[%s] to 0x%llx\n",__FUNCTION__,to);
+down_write(&rw_sem_wte_oob);
+//printk("[%s] to 0x%llx\n",__FUNCTION__,to);
 	if (bEnterSuspend)
 	{
 		printk(KERN_INFO "[%s] - prevent cmd execute while in suspend stage\n",__func__);
@@ -1680,7 +1712,7 @@ printk("[%s] to 0x%llx\n",__FUNCTION__,to);
 		//printk("[%s]Set mtd->isCPdisable_W --> 1 ",__FUNCTION__);
 		//printk("[%s]Scrabmle flag 0x%x\n",__FUNCTION__,mtd->isScramble);
 	}
-	rc =  nand_write_ecc (mtd, to, ops->len, &ops->retlen,ops->datbuf, ops->oobbuf, NULL,ops->datbuf);
+	rc =  nand_write_ecc (mtd, to, ops->len, &ops->retlen,ops->datbuf, ops);
 	if(g_isSysSecure||g_isRandomize)
         {
 		//	mtd->isScramble= 0;
@@ -1691,11 +1723,11 @@ up_write(&rw_sem_wte_oob);
 }                          
 
 static int nand_write_ecc (struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen, 
-			const u_char * buf, const u_char *oob_buf, struct nand_oobinfo *oobsel,const u_char * buf_phy)
+			const u_char * buf, struct mtd_oob_ops *ops)
 {
 	struct nand_chip *this = mtd->priv;
 	unsigned long long page, realpage,page_ppb;
-	int data_len, oob_len;
+	int data_len;
 	int rc;
 	unsigned int i, old_page, page_offset, block, real_block;
 	int chipnr, chipnr_remap, err_chipnr = 0, err_chipnr_remap = 1;
@@ -1717,7 +1749,6 @@ static int nand_write_ecc (struct mtd_info *mtd, loff_t to, size_t len, size_t *
 		printk (KERN_NOTICE "nand_write_ecc: Attempt to write not page aligned data mtd size: %x\n", mtd->writesize-1);
 		return -EINVAL;
 	}
-//printk("[%s] to 0x%llx\n",__FUNCTION__,to);
 	realpage = (unsigned long long)(to >> this->page_shift);
 //	printk("realpage 0x%llx, to 0x%llx\n",realpage,to);
 	this->active_chip = chipnr = chipnr_remap = (int)(to >> this->chip_shift);
@@ -1729,7 +1760,7 @@ static int nand_write_ecc (struct mtd_info *mtd, loff_t to, size_t len, size_t *
 	do_div(page_ppb,ppb);
 	block = (unsigned int)page_ppb;
 
-    printk("[NAND_DBG][%s]READY write to block 0x%x, page 0x%x",__FUNCTION__,block,page);		
+    //printk("[NAND_DBG][%s]READY write to block 0x%x, page 0x%x",__FUNCTION__,block,page);
     //printk("Ready to write blk:%u, page:%u, len:%u, page_size:%d, oob_size:%d\n",page/ppb,page%ppb,len,page_size,oob_size);
 	//CMYu, 20091030
 
@@ -1760,69 +1791,18 @@ static int nand_write_ecc (struct mtd_info *mtd, loff_t to, size_t len, size_t *
 	if ( retlen )
 		*retlen = 0;
 	
-	data_len = oob_len = 0;
+	data_len = 0;
+	if(ops)
+		ops->oobretlen = 0;
 
 	while ( data_len < len) {
-		
-		//CMYu, 20091030
-		#if 0
-		if ( this->numchips == 1){
-			if ( (page>=block*ppb) && (page<(block+1)*ppb) && write_has_check_bbt==1 )
-			{
-				//printk("goto skip_bbt_check: write_has_check_bbt %d\n",write_has_check_bbt);
-				goto SKIP_BBT_CHECK;
-			}
-		}
-		#endif
-
-#if 0
-		down_write (&rw_sem_bbt);
-		write_remap_block = 0xFFFFFFFF; 
-		for ( i=0; i<RBA; i++){
-			if ( this->bbt[i].bad_block != BB_INIT ){
-				if ( this->active_chip == this->bbt[i].BB_die && block == this->bbt[i].bad_block ){
-					write_remap_block = block = this->bbt[i].remap_block;
-					if ( this->bbt[i].BB_die != this->bbt[i].RB_die ){
-						this->active_chip = chipnr_remap = this->bbt[i].RB_die;
-						this->select_chip(mtd, chipnr_remap);
-					}
-				}
-			}else
-				break;
-		}
-		up_write (&rw_sem_bbt);
-		write_has_check_bbt = 1;
-#endif
-
-SKIP_BBT_CHECK:
-        down_write (&rw_sem_bbt);
-        if((real_block = rtk_find_real_blk(mtd, block)) == 0xFFFFFFFF){
-            real_block = block;
-        } 
-        up_write (&rw_sem_bbt);
-        
-        page = real_block*ppb + page_offset;
-
-#if 0
-		if ( this->numchips == 1 && write_has_check_bbt==1 ){
-			if ( write_remap_block == 0xFFFFFFFF )
-				page = real_block*ppb + page_offset;
-			else	
-				page = write_remap_block*ppb + page_offset;
-		}else
-			page = real_block*ppb + page_offset;
-#endif
-		printk("Confirm to write blk:[%u] real_block:[%d], page:[%u]\n",page/ppb, real_block, page%ppb);
-		//mtd->isCPdisable_W= tmp_isCPdisable_W;
-		if(oob_buf)
-			rc = this->write_ecc_page (mtd, this->active_chip, page, &buf[data_len], &oob_buf[oob_len], 0, &buf_phy[data_len]);
-		else
-			rc = this->write_ecc_page (mtd, this->active_chip, page, &buf[data_len], NULL, 0, &buf_phy[data_len]);
-				
+		real_block = rtk_find_real_blk(mtd, block, &chipnr_remap);
+		page = real_block*ppb + page_offset;
+		rc = this->write_ecc_page (mtd, this->active_chip, page, &buf[data_len], ops, 0);
 		if (rc < 0) {
 		//if (0) {
 			if ( rc == -1){
-				printk ("%s: write_ecc_page:  write blk:%u, page:%u failed\n", __FUNCTION__,page/ppb,page%ppb);
+				printk ("%s: write_ecc_page:  write blk:%llu, page:%llu failed\n", __FUNCTION__,page >> ppb_shift,page&(ppb-1));
 
 			
 			if(check_BBT(mtd,page_ppb)==0)
@@ -1856,7 +1836,7 @@ SKIP_BBT_CHECK:
 			
 				dump_BBT(mtd);
 			
-				if ( rtk_update_bbt (mtd, this->g_databuf, this->g_oobbuf, this->bbt) ){
+				if ( rtk_update_bbt (mtd, &this->ops, this->bbt) ){
 					printk("[%s] rtk_update_bbt() fails\n", __FUNCTION__);
 					if(g_sw_WP_level > 0)
 					{
@@ -1877,14 +1857,14 @@ SKIP_BBT_CHECK:
 						this->active_chip = err_chipnr;
 						this->select_chip(mtd, err_chipnr);
 					}
-					this->read_ecc_page(mtd, this->active_chip, (page/ppb)*ppb+i, this->g_databuf, this->g_oobbuf);
-					if ( this->g_oobbuf )
-						reverse_to_Yaffs2Tags(this->g_oobbuf);
+					this->read_ecc_page(mtd, this->active_chip, (page/ppb)*ppb+i, this->ops.datbuf, this->ops.oobbuf);
+					if ( this->ops.oobbuf )
+						reverse_to_Yaffs2Tags(this->ops.oobbuf);
 					if ( err_chipnr != err_chipnr_remap ){
 						this->active_chip = err_chipnr_remap;
 						this->select_chip(mtd, err_chipnr_remap);
 					}
-					this->write_ecc_page(mtd, this->active_chip, block_remap*ppb+i, this->g_databuf, this->g_oobbuf, 0);
+					this->write_ecc_page(mtd, this->active_chip, block_remap*ppb+i, this->ops.datbuf, this->ops.oobbuf, 0);
 				}
 				this->write_ecc_page (mtd, this->active_chip, block_remap*ppb+backup_offset, &buf[data_len], &oob_buf[oob_len], 0);
 				printk("[%s] write failure page = %d to %d\n", __FUNCTION__, page, block_remap*ppb+backup_offset);
@@ -1893,19 +1873,19 @@ SKIP_BBT_CHECK:
 					this->active_chip = err_chipnr;
 					this->select_chip(mtd, err_chipnr);
 				}
-				this->g_oobbuf[0] = 0x00;
+				this->ops.oobbuf[0] = 0x00;
 				block = page_ppb;
 				if ( isLastPage ){
 					this->erase_block (mtd, err_chipnr, block*ppb);
-					this->write_oob(mtd, this->active_chip, block*ppb+ppb-1, oob_size, this->g_oobbuf);
-					this->write_oob(mtd, this->active_chip, block*ppb+ppb-2, oob_size, this->g_oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+ppb-1, oob_size, this->ops.oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb+ppb-2, oob_size, this->ops.oobbuf);
 				}else{
 					this->erase_block (mtd, err_chipnr, block*ppb);
-					this->write_oob(mtd, this->active_chip, block*ppb, oob_size, this->g_oobbuf);	
-					this->write_oob(mtd, this->active_chip, block*ppb+1, oob_size, this->g_oobbuf);
+					this->write_oob(mtd, this->active_chip, block*ppb, oob_size, this->ops.oobbuf);	
+					this->write_oob(mtd, this->active_chip, block*ppb+1, oob_size, this->ops.oobbuf);
 				}
 			}else{
-				printk ("%s: write_ecc_page:  rc=%d\n", __FUNCTION__, rc);
+				//printk ("%s: write_ecc_page:  rc=%d\n", __FUNCTION__, rc);
 				if(g_sw_WP_level > 0)
 				{
 					if(g_disNFWP)
@@ -1917,7 +1897,8 @@ SKIP_BBT_CHECK:
 		//else
 			//printk("Confirm to write blk:%u, page:%u Succeed!!\n",page/ppb,page%ppb);
 		data_len += page_size;
-		oob_len += oob_size;
+		if(ops)
+			ops->oobretlen += oob_size;
 		
 		old_page++;
 		page_offset = old_page & (ppb-1);
@@ -1927,7 +1908,7 @@ SKIP_BBT_CHECK:
 			this->active_chip = chipnr;
 			this->select_chip(mtd, chipnr);
 		}
-		block = old_page/ppb;
+		block = old_page >> ppb_shift;
 	}
 	if(g_sw_WP_level > 0)
 	{
@@ -1940,7 +1921,7 @@ SKIP_BBT_CHECK:
 		if ( data_len == len )
 			*retlen = data_len;
 		else{
-			printk("[%s] error: data_len %d != len %d\n", __FUNCTION__, data_len, len);
+			printk("[%s] error: data_len %d != len %zu\n", __FUNCTION__, data_len, len);
 			return -1;
 		}	
 	}
@@ -1957,10 +1938,6 @@ static int nand_erase (struct mtd_info *mtd, struct erase_info *instr)
 
 int nand_erase_nand (struct mtd_info *mtd, struct erase_info *instr, int allowbbt)
 {
-down_write(&rw_sem_erase);
-#ifdef CONFIG_MTD_NAND_RTK_HW_SEMAPHORE			
-	rtk_spin_lock();
-#endif	
 	struct nand_chip *this = (struct nand_chip *)mtd->priv;
 	u_int64_t addr = instr->addr;
 	u_int64_t len = instr->len;
@@ -1969,6 +1946,12 @@ down_write(&rw_sem_erase);
 	u_int64_t elen = 0;
 	int rc = 0;
 	int realpage, chipnr_remap, block_remap=0x12345678;
+	int i;
+
+down_write(&rw_sem_erase);
+#ifdef CONFIG_MTD_NAND_RTK_HW_SEMAPHORE
+	rtk_spin_lock();
+#endif
 
 	if (bEnterSuspend)
 	{
@@ -1985,7 +1968,7 @@ down_write(&rw_sem_erase);
 	realpage =  addr >> this->page_shift;
 	this->active_chip = chipnr = chipnr_remap = addr >> this->chip_shift;
 	old_page = page = realpage & this->pagemask;
-	block = page/ppb;
+	block = page >> ppb_shift;
 	if(g_sw_WP_level > 0)
 	{
 		if(!g_disNFWP)
@@ -2009,42 +1992,13 @@ down_write(&rw_sem_erase);
 	
 	instr->state = MTD_ERASING;
 	while (elen < len) {
-		//printk("Ready to Erase blk %u\n",page/ppb);
-		down_write (&rw_sem_bbt);
-		//block_remap=0x12345678;
-
-		int i;
-
-        printk("block:[%d]\n",block);
-#if 0
-		for ( i=0; i<RBA; i++){
-			if ( this->bbt[i].bad_block != BB_INIT ){
-				//if ( this->active_chip == this->bbt[i].BB_die && block == this->bbt[i].bad_block ){
-				if ( block == this->bbt[i].bad_block ){
-					block = this->bbt[i].remap_block;
-					//if ( this->bbt[i].BB_die != this->bbt[i].RB_die ){
-					//	this->active_chip = chipnr_remap = this->bbt[i].RB_die;
-					//	this->select_chip(mtd, chipnr_remap);
-					//}
-				}
-			}else
-				break;
-		}
-#endif
-        if((real_block = rtk_find_real_blk(mtd, block)) == 0xFFFFFFFF){
-            real_block = block;
-        }
-
-		up_write (&rw_sem_bbt);
-		//page = block*ppb;
+		real_block = rtk_find_real_blk(mtd, block, &chipnr_remap);
 		page = real_block*ppb;
-		printk("confirm to Erase blk[%u][%d] this->active_chip:[%d]\n", page/ppb, real_block, this->active_chip);
 		rc = this->erase_block (mtd, this->active_chip, page);
-			
 		if (rc) {
 			printk ("%s: block erase failed at page address=%llu\n", __FUNCTION__, addr);
 			instr->fail_addr = (page << this->page_shift);	
-			if(check_BBT(mtd,page/ppb)==0)
+			if(check_BBT(mtd,page >> ppb_shift)==0)
 			{
 				down_write (&rw_sem_bbt);
 				//block_remap=0x12345678;
@@ -2055,7 +2009,7 @@ down_write(&rw_sem_erase);
 								this->bbt[i].BB_die = chipnr_remap;
 							else
 								this->bbt[i].BB_die = chipnr;
-						this->bbt[i].bad_block = page/ppb;
+						this->bbt[i].bad_block = page >> ppb_shift;
 						block_remap = this->bbt[i].remap_block;
 						break;
 					}
@@ -2073,7 +2027,7 @@ down_write(&rw_sem_erase);
 				}
 
 
-			    if ( rtk_update_bbt (mtd, this->g_databuf, this->g_oobbuf, this->bbt) ){
+			    if ( rtk_update_bbt (mtd, &this->ops, this->bbt) ){
 				    printk("[%s] rtk_update_bbt() fails\n", __FUNCTION__);
 				    if(g_sw_WP_level > 0)
 				    {
@@ -2088,7 +2042,7 @@ down_write(&rw_sem_erase);
 
 			dump_BBT(mtd);
 #if 0
-			if ( rtk_update_bbt (mtd, this->g_databuf, this->g_oobbuf, this->bbt) ){
+			if ( rtk_update_bbt (mtd, &this->ops, this->bbt) ){
 				printk("[%s] rtk_update_bbt() fails\n", __FUNCTION__);
 				if(g_sw_WP_level > 0)
 				{
@@ -2100,13 +2054,13 @@ down_write(&rw_sem_erase);
 			}
 #endif		
             printk("[%s] isLastPage:[%d]\n", __FUNCTION__, isLastPage);
-			this->g_oobbuf[0] = 0x00;
+			this->ops.oobbuf[0] = 0x00;
 			if ( isLastPage ){
-				this->write_oob(mtd, chipnr, page+ppb-1, oob_size, this->g_oobbuf);
-				this->write_oob(mtd, chipnr, page+ppb-2, oob_size, this->g_oobbuf);
+				this->write_oob(mtd, chipnr, page+ppb-1, oob_size, this->ops.oobbuf);
+				this->write_oob(mtd, chipnr, page+ppb-2, oob_size, this->ops.oobbuf);
 			}else{
-				this->write_oob(mtd, chipnr, page, oob_size, this->g_oobbuf);
-				this->write_oob(mtd, chipnr, page+1, oob_size, this->g_oobbuf);
+				this->write_oob(mtd, chipnr, page, oob_size, this->ops.oobbuf);
+				this->write_oob(mtd, chipnr, page+1, oob_size, this->ops.oobbuf);
 			}
 
 		    printk("[%s] chipnr_remap:[%d] block_remap:[%d] block_remap*ppb:[%d]\n", __FUNCTION__, chipnr_remap, block_remap, block_remap*ppb);
@@ -2130,7 +2084,7 @@ down_write(&rw_sem_erase);
 			this->select_chip(mtd, chipnr);
 		}
 
-		block = old_page/ppb;
+		block = old_page >> ppb_shift;
 	}
 	instr->state = MTD_ERASE_DONE;
 	if(g_sw_WP_level > 0)
@@ -2142,6 +2096,10 @@ down_write(&rw_sem_erase);
 #ifdef CONFIG_MTD_NAND_RTK_HW_SEMAPHORE
 	rtk_spin_unlock();
 #endif	
+	/* Do call back function */
+	if (!rc)
+		mtd_erase_callback(instr);
+
 	up_write(&rw_sem_erase);
 	return rc;
 }
@@ -2349,7 +2307,7 @@ static int rtk_create_bbt(struct mtd_info *mtd, int page)
 	struct nand_chip *this = (struct nand_chip *)mtd->priv;
 	
 	int rc = 0;
-	u32 *temp_BBT = 0;
+	u8 *temp_BBT = 0;
 	u8 mem_page_num, page_counter=0;
 	int i;
 	
@@ -2385,16 +2343,16 @@ static int rtk_create_bbt(struct mtd_info *mtd, int page)
 	this->select_chip(mtd, 0);
 	
 	if ( this->erase_block(mtd, 0, page) ){
-		printk("[%s]erase block %d failure !!\n", __FUNCTION__, page/ppb);
+		printk("[%s]erase block %d failure !!\n", __FUNCTION__, page >> ppb_shift);
 		rc =  -1;
 		goto EXIT;
 	}
 		
-	this->g_oobbuf[0] = BBT_TAG;	
+	this->ops.oobbuf[0] = BBT_TAG;	
 	memcpy( temp_BBT, this->bbt, sizeof(BB_t)*RBA );
 	while( mem_page_num>0 ){
 		if ( this->write_ecc_page(mtd, 0, page+page_counter, temp_BBT+page_counter*page_size, 
-			this->g_oobbuf, 1, temp_BBT+page_counter*page_size) ){
+			&this->ops, 1) ){
 				printk("[%s] write BBT B%d page %d failure!!\n", __FUNCTION__, 
 					page ==0?0:1, page+page_counter);
 				rc =  -1;
@@ -2412,12 +2370,14 @@ EXIT:
 }
 
 
-int rtk_update_bbt (struct mtd_info *mtd, __u8 *data_buf, __u8 *oob_buf, BB_t *bbt)
+int rtk_update_bbt (struct mtd_info *mtd, struct mtd_oob_ops *ops, BB_t *bbt)
 {
 	int rc = 0;
 	struct nand_chip *this = mtd->priv;
 	unsigned char active_chip = this->active_chip;
 	u8 *temp_BBT = 0;
+	__u8 *data_buf = ops->datbuf;
+	__u8 *oob_buf = ops->oobbuf;
 	
 	if (bEnterSuspend)
 	{
@@ -2446,13 +2406,13 @@ int rtk_update_bbt (struct mtd_info *mtd, __u8 *data_buf, __u8 *oob_buf, BB_t *b
 		printk("[%s]error: erase block 1 failure\n", __FUNCTION__);
 	}
 
-	if ( this->write_ecc_page(mtd, 0, ppb, data_buf, oob_buf, 1, data_buf) ){
+	if ( this->write_ecc_page(mtd, 0, ppb, data_buf, ops, 1) ){
 		printk("[%s]update BBT B1 page 0 failure\n", __FUNCTION__);
 	}else{
 		if ( sizeof(BB_t)*RBA > page_size){
 			memset(data_buf, 0xff, page_size);
 			memcpy( data_buf, temp_BBT+page_size, sizeof(BB_t)*RBA - page_size );
-			if ( this->write_ecc_page(mtd, 0, ppb+1, data_buf, oob_buf, 1, data_buf) ){
+			if ( this->write_ecc_page(mtd, 0, ppb+1, data_buf, ops, 1) ){
 				printk("[%s]update BBT B1 page 1 failure\n", __FUNCTION__);
 			}
 			memcpy(data_buf, temp_BBT, page_size);//add by alexchang 0906-2010
@@ -2464,14 +2424,14 @@ int rtk_update_bbt (struct mtd_info *mtd, __u8 *data_buf, __u8 *oob_buf, BB_t *b
 		return -1;
 	}
 
-	if ( this->write_ecc_page(mtd, 0, ppb<<1, data_buf, oob_buf, 1, data_buf) ){
+	if ( this->write_ecc_page(mtd, 0, ppb<<1, data_buf, ops, 1) ){
 		printk("[%s]update BBT B2 failure\n", __FUNCTION__);
 		return -1;
 	}else{
 		if ( sizeof(BB_t)*RBA > page_size){
 			memset(data_buf, 0xff, page_size);
 			memcpy( data_buf, temp_BBT+page_size, sizeof(BB_t)*RBA - page_size );
-			if ( this->write_ecc_page(mtd, 0, 2*ppb+1, data_buf, oob_buf, 1, data_buf) ){
+			if ( this->write_ecc_page(mtd, 0, 2*ppb+1, data_buf, ops, 1) ){
 				printk("[%s]error: erase block 2 failure\n", __FUNCTION__);
 				return -1;
 			}
@@ -2487,7 +2447,7 @@ int rtk_update_bbt (struct mtd_info *mtd, __u8 *data_buf, __u8 *oob_buf, BB_t *b
 }
 
 
-static int rtk_nand_scan_bbt(struct mtd_info *mtd, unsigned char *buf_phy)
+static int rtk_nand_scan_bbt(struct mtd_info *mtd)
 {
 	struct nand_chip *this = (struct nand_chip *)mtd->priv;
 	int rc = 0;
@@ -2495,25 +2455,18 @@ static int rtk_nand_scan_bbt(struct mtd_info *mtd, unsigned char *buf_phy)
 	u8 *temp_BBT=0;
 	u8 mem_page_num, page_counter=0;
 	int i;
-    u_char *new_buf = NULL;
-    size_t retlen;
 
+#if 0
 	if (0) {
 		for (i=0 ; i<this->block_num*ppb; i+=ppb) {
-			//rc = this->read_oob(mtd, 0, i, oob_size, this->g_oobbuf);
+			//rc = this->read_oob(mtd, 0, i, oob_size, this->ops.oobbuf);
 			rc = this->erase_block(mtd, 0, i);
 			printk("erase_block (%d) rc = 0x%x \n", i, rc);
-			//rc = this->read_oob(mtd, 0, i, oob_size, this->g_oobbuf);
+			//rc = this->read_oob(mtd, 0, i, oob_size, this->ops.oobbuf);
 		}
 	}
+#endif
 
-    if (nrBuffer == NULL)
-    {
-        //nrBuffer = (unsigned int *)dma_alloc_coherent(NULL, MAX_NR_LENGTH, (dma_addr_t *) (&nrPhys_addr), GFP_DMA | GFP_KERNEL);
-        nrBuffer = (unsigned char *)dma_alloc_coherent(&mtd->dev, MAX_NR_LENGTH, (dma_addr_t *) (&nrPhys_addr), GFP_KERNEL);
-        printk("%s:%d allocate from dma_alloc_coherent, nrBuffer=0x%.8x, nrPhys_addr=0x%.8x\n", __func__, __LINE__, nrBuffer, nrPhys_addr);
-    }
-		
 	RTK_FLUSH_CACHE((unsigned long) this->bbt, sizeof(BB_t)*RBA);
 	mem_page_num = (sizeof(BB_t)*RBA + page_size-1 )/page_size;
     
@@ -2526,29 +2479,24 @@ static int rtk_nand_scan_bbt(struct mtd_info *mtd, unsigned char *buf_phy)
 	}
 	memset( temp_BBT, 0xff, mem_page_num*page_size);
 
-    new_buf = nrBuffer;
-
-    isbbt_b1 = this->g_oobbuf[0];
-
-	rc = this->read_ecc_page(mtd, this->active_chip, ppb, this->g_databuf, this->g_oobbuf, CP_NF_NONE, &buf_phy[0]);
+	rc = this->read_ecc_page(mtd, this->active_chip, ppb, this->ops.datbuf, &this->ops, CP_NF_NONE);
 	
-	isbbt_b1 = this->g_oobbuf[0];
-	if ( !rc ){
-		if ( isbbt_b1 == BBT_TAG ){
+	isbbt_b1 = this->ops.oobbuf[0];
+	printk("[%s] isbbt_b1:[%x] BBT_TAG:[%x] BBT_TAG >> 8 [%x]\n", __FUNCTION__, isbbt_b1, BBT_TAG, BBT_TAG >> 8);
+	if ( rc >= 0 ){
+		if ( isbbt_b1 == (BBT_TAG >> 8) ){
 			printk("[%s] have created bbt B1, just loads it !!\n", __FUNCTION__);
-            rc = nand_read_ecc (mtd, ppb*page_size, page_size, retlen, new_buf, NULL, NULL,(unsigned char *)nrPhys_addr);
-            
-			memcpy( temp_BBT, new_buf, page_size );
+			memcpy( temp_BBT, this->ops.datbuf, page_size );
 			page_counter++;
 			mem_page_num--;
 
 			while( mem_page_num>0 ){
-				if ( this->read_ecc_page(mtd, this->active_chip, ppb+page_counter, this->g_databuf, this->g_oobbuf, CP_NF_NONE, &buf_phy[0]) ){
+				if ( this->read_ecc_page(mtd, this->active_chip, ppb+page_counter, this->ops.datbuf, &this->ops, CP_NF_NONE) < 0 ){
 					printk("[%s] load bbt B1 error!!\n", __FUNCTION__);
 					kfree(temp_BBT);
 					return -1;
 				}
-				memcpy( temp_BBT+page_counter*page_size, this->g_databuf, page_size );
+				memcpy( temp_BBT+page_counter*page_size, this->ops.datbuf, page_size );
 				page_counter++;
 				mem_page_num--;
 			}
@@ -2556,22 +2504,22 @@ static int rtk_nand_scan_bbt(struct mtd_info *mtd, unsigned char *buf_phy)
 		}
 		else{
 			printk("[%s] read BBT B1 tags fails, try to load BBT B2\n", __FUNCTION__);
-			rc = this->read_ecc_page(mtd, this->active_chip, ppb<<1, this->g_databuf, this->g_oobbuf, CP_NF_NONE, &buf_phy[0]);
-			isbbt_b2 = this->g_oobbuf[0];	
-			if ( !rc ){
-				if ( isbbt_b2 == BBT_TAG ){
+			rc = this->read_ecc_page(mtd, this->active_chip, ppb<<1, this->ops.datbuf, &this->ops, CP_NF_NONE);
+			isbbt_b2 = this->ops.oobbuf[0];	
+			if ( rc >= 0 ){
+				if ( isbbt_b2 == (BBT_TAG >> 8) ){
 					printk("[%s] have created bbt B2, just loads it !!\n", __FUNCTION__);
-					memcpy( temp_BBT, this->g_databuf, page_size );
+					memcpy( temp_BBT, this->ops.datbuf, page_size );
 					page_counter++;
 					mem_page_num--;
 
 					while( mem_page_num>0 ){
-						if ( this->read_ecc_page(mtd, this->active_chip, 2*ppb+page_counter, this->g_databuf, this->g_oobbuf, CP_NF_NONE, &buf_phy[0]) ){
+						if ( this->read_ecc_page(mtd, this->active_chip, 2*ppb+page_counter, this->ops.datbuf, &this->ops, CP_NF_NONE) < 0 ){
 							printk("[%s] load bbt B2 error!!\n", __FUNCTION__);
 							kfree(temp_BBT);
 							return -1;
 						}
-						memcpy( temp_BBT+page_counter*page_size, this->g_databuf, page_size );
+						memcpy( temp_BBT+page_counter*page_size, this->ops.datbuf, page_size );
 						page_counter++;
 						mem_page_num--;
 					}
@@ -2588,22 +2536,22 @@ static int rtk_nand_scan_bbt(struct mtd_info *mtd, unsigned char *buf_phy)
 		}
 	}else{
 		printk("[%s] read BBT B1 with HW ECC error, try to load BBT B2\n", __FUNCTION__);
-		rc = this->read_ecc_page(mtd, this->active_chip, ppb<<1, this->g_databuf, this->g_oobbuf, CP_NF_NONE, &buf_phy[0]);
-		isbbt_b2 = this->g_oobbuf[0];	
-		if ( !rc ){
-			if ( isbbt_b2 == BBT_TAG ){
+		rc = this->read_ecc_page(mtd, this->active_chip, ppb<<1, this->ops.datbuf, &this->ops, CP_NF_NONE);
+		isbbt_b2 = this->ops.oobbuf[0];	
+		if ( rc >= 0 ){
+			if ( isbbt_b2 == (BBT_TAG >> 8) ){
 				printk("[%s] have created bbt B1, just loads it !!\n", __FUNCTION__);
-				memcpy( temp_BBT, this->g_databuf, page_size );
+				memcpy( temp_BBT, this->ops.datbuf, page_size );
 				page_counter++;
 				mem_page_num--;
 
 				while( mem_page_num>0 ){
-					if ( this->read_ecc_page(mtd, this->active_chip, 2*ppb+page_counter, this->g_databuf, this->g_oobbuf, CP_NF_NONE, &buf_phy[0]) ){
+					if ( this->read_ecc_page(mtd, this->active_chip, 2*ppb+page_counter, this->ops.datbuf, &this->ops, CP_NF_NONE) < 0 ){
 						printk("[%s] load bbt B2 error!!\n", __FUNCTION__);
 						kfree(temp_BBT);
 						return -1;
 					}
-					memcpy( temp_BBT+page_counter*page_size, this->g_databuf, page_size );
+					memcpy( temp_BBT+page_counter*page_size, this->ops.datbuf, page_size );
 					page_counter++;
 					mem_page_num--;
 				}
@@ -2627,6 +2575,80 @@ static int rtk_nand_scan_bbt(struct mtd_info *mtd, unsigned char *buf_phy)
 	return rc;
 }
 
+static void rtd_set_nand_info(char *item)
+{
+	char *s = NULL;
+	unsigned int temp = 0;
+#if 0
+	if( (s = strstr(item, "id:")) != NULL ){
+	}
+#endif
+	if( (s = strstr(item, "ds:")) != NULL ){
+		kstrtoull(s+3, 10, &g_nand_device.size);
+		g_nand_device.chipsize = g_nand_device.size;
+	}
+	else if( (s = strstr(item, "ps:")) != NULL ){
+		kstrtouint(s+3, 10, &g_nand_device.PageSize);
+	}
+	else if( (s = strstr(item, "bs:")) != NULL ){
+		kstrtouint(s+3, 10, &g_nand_device.BlockSize);
+	}
+	else if( (s = strstr(item, "t1:")) != NULL ){
+		kstrtouint(s+3, 10, &temp);
+		g_nand_device.T1 = (unsigned char)temp;
+	}
+	else if( (s = strstr(item, "t2:")) != NULL ){
+		kstrtouint(s+3, 10, &temp);
+		g_nand_device.T2 = (unsigned char)temp;
+	}
+	else if( (s = strstr(item, "t3:")) != NULL ){
+		kstrtouint(s+3, 10, &temp);
+		g_nand_device.T3 = (unsigned char)temp;
+	}
+	else if( (s = strstr(item, "eb:")) != NULL ){
+		kstrtouint(s+3, 10, &temp);
+		g_nand_device.eccSelect = (unsigned short)temp;
+	}
+}
+
+static int rtd_get_set_nand_info()
+{
+	const char * const delim = ",";
+	char *sepstr = g_rtk_nandinfo_line;
+	char *substr = NULL;
+
+	if(strlen(g_rtk_nandinfo_line) == 0) {
+		printk(KERN_NOTICE "No nand info got from lk!!!!\n");
+		return -1;
+	}
+
+	memset(&g_nand_device, 0x0, sizeof(device_type_t));
+
+	printk(KERN_DEBUG "g_rtk_nandinfo_line:[%s]\n", sepstr);
+
+	substr = strsep(&sepstr, delim);
+
+	do{
+		rtd_set_nand_info(substr);
+
+		substr = strsep(&sepstr, delim);
+	}while(substr);
+
+	g_nand_device.OobSize = 64;
+	g_nand_device.num_chips = 1;
+	g_nand_device.isLastPage = 0;
+
+	printk(KERN_INFO "total flash size:[%llu]\n", g_nand_device.size);
+	printk(KERN_INFO "chip size:[%llu]\n", g_nand_device.chipsize);
+	printk(KERN_INFO "block size:[%u], page size:[%u], oob size:[%u]\n",
+		g_nand_device.BlockSize, g_nand_device.PageSize, g_nand_device.OobSize);
+	printk(KERN_INFO "t1:[%u], t2:[%u], t3:[%u]\n",
+		g_nand_device.T1, g_nand_device.T2, g_nand_device.T3);
+	printk(KERN_INFO "ecc bit:[%u]\n", g_nand_device.eccSelect);
+
+	return 1;
+}
+
 
 int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
 {
@@ -2647,6 +2669,7 @@ int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
 	uint64_t result = 0;
 	uint64_t div_res = 0;
 	unsigned int flag_size, mempage_order;
+	unsigned int num_coding_blk = 0;
 	
 	if ( !this->select_chip )
 		this->select_chip = nand_select_chip;
@@ -2668,6 +2691,28 @@ printk("nand_base_rtk version:1029-2015\n");
 		printk("(X)NAND_READ_SKIP_UPDATE_BBT\n");
 #endif
 
+	if(rtd_get_set_nand_info() > 0)
+	{
+		REG_WRITE_U32( REG_TIME_PARA1+map_base, g_nand_device.T1);
+		REG_WRITE_U32( REG_TIME_PARA2+map_base, g_nand_device.T2);
+		REG_WRITE_U32( REG_TIME_PARA3+map_base, g_nand_device.T3);
+
+		device_size = g_nand_device.size;
+		chip_size   = g_nand_device.chipsize;
+		page_size   = g_nand_device.PageSize;
+		block_size  = g_nand_device.BlockSize;
+		oob_size    = g_nand_device.OobSize;
+		num_chips   = g_nand_device.num_chips;
+		isLastPage  = g_nand_device.isLastPage;
+
+		REG_WRITE_U32( REG_TIME_PARA1+map_base, g_nand_device.T1);
+		REG_WRITE_U32( REG_TIME_PARA2+map_base, g_nand_device.T2);
+		REG_WRITE_U32( REG_TIME_PARA3+map_base, g_nand_device.T3);
+
+		this->ecc_select = g_nand_device.eccSelect;
+	}
+	else
+	{
 	while (1) {
 		this->read_id(mtd, id);
 
@@ -2758,13 +2803,23 @@ printk("READ ID:0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",id[0],id[1],id[2],id[3],id[4],i
 					mtd->name, id[0], id[1], id[2], id[3], id[4], id[5]);
 			return -1;
 		}
-		
+
+		this->ecc_select = nand_device[i].eccSelect;
+
+		break;
+
+	} // old way of NAND flash detection
+	} // Get NAND info from bootcode
+
+	/* Common attributes setup */
+	{
 		this->page_shift = __ffs(page_size); 
 		this->page_idx_mask = ~((1L << this->page_shift) -1);
 		this->phys_erase_shift = __ffs(block_size);
 		this->oob_shift = __ffs(oob_size);
 		ppb = this->ppb = block_size >> this->page_shift;
-		
+		ppb_shift = this->phys_erase_shift - this->page_shift;
+
 		if (chip_size){
 			this->block_num = chip_size >> this->phys_erase_shift;
 			this->page_num = chip_size >> this->page_shift;
@@ -2774,30 +2829,33 @@ printk("READ ID:0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",id[0],id[1],id[2],id[3],id[4],i
 		}
 
 		this->pagemask = (this->chipsize >> this->page_shift) - 1;
-	
+
 		mtd->oobsize = this->oob_size = oob_size;
 
-		//mtd->writesize = mtd->oobblock = page_size;//add by alexchang 0923-2010
-		mtd->writesize = page_size;//add by alexchang 0923-2010
+		mtd->writesize = page_size;
 		mtd->erasesize = block_size;
 		mtd->writebufsize = page_size;
 
 		mtd->erasesize_shift = this->phys_erase_shift;
 		mtd->writesize_shift = this->page_shift;
-		 	
 
-		this->ecc_select = nand_device[i].eccSelect;//add by alexchang 0617-2011.
 		g_eccSelect = this->ecc_select;
 		printk("QQ g_eccSelect 0x%x[0x%x]\n",g_eccSelect,this->ecc_select);
-		//this->eccmode = MTD_ECC_RTK_HW;
 
-		if(this->ecc_select>=0x18)
-			mtd->ecc_strength = 1024;
-		else
-			mtd->ecc_strength = 512;
+		// Default to 6 bit BCH ECC if ecc_select = 0
+		mtd->ecc_strength = (this->ecc_select)?this->ecc_select:0x6;
+		if(this->ecc_select>=0x10){
+			/* 1KB coding block */
+			num_coding_blk = mtd->writesize >> 10;
+		}
+		else{
+			/* 512B coding block */
+			num_coding_blk = mtd->writesize >> 9;
+		}
+		/* Need to consider the ECC error in each mini page? */
+		mtd->bitflip_threshold = max(mtd->ecc_strength, 4u) >> 2;
 
-		break;
-
+		mtd->ecc_strength *= num_coding_blk;
 	}
 
 	this->select_chip(mtd, 0);
@@ -2816,7 +2874,7 @@ printk("READ ID:0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",id[0],id[1],id[2],id[3],id[4],i
 
 	//mtd->size = mtd->size - RBA*block_size;
 
-	RBA = this->RBA = (mtd->size/block_size) * this->RBA_PERCENT/100;
+	//RBA = this->RBA = (mtd->size/block_size) * this->RBA_PERCENT/100;
 	//if(mtd->u32RBApercentage)
 		//mtd->u32RBApercentage = this->RBA_PERCENT;
 	//printk("[%s],mtd->u32RBApercentage %d%\n",__FUNCTION__,mtd->u32RBApercentage);
@@ -2828,22 +2886,19 @@ printk("READ ID:0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",id[0],id[1],id[2],id[3],id[4],i
 	}
 	memset(this->bbt, 0,  sizeof(BB_t)*RBA); 
 
-	this->g_databuf = kmalloc( page_size, GFP_KERNEL );
-	if ( !this->g_databuf ){
+	this->ops.datbuf = kmalloc( page_size, GFP_KERNEL );
+	if ( !this->ops.datbuf ){
 		printk("%s: Error, no enough memory for g_databuf\n",__FUNCTION__);
 		return -ENOMEM;
 	}
-	memset(this->g_databuf, 0xff, page_size);
+	memset(this->ops.datbuf, 0xff, page_size);
 
-	//this->g_oobbuf = kmalloc( oob_size, GFP_KERNEL );
-		this->g_oobbuf = (unsigned char  *)dma_alloc_coherent(&mtd->dev, oob_size, (dma_addr_t *) (&oobPhys_addr), GFP_KERNEL|GFP_DMA);
-		printk("%s:%d QQ allocate from dma_alloc_coherent, this->g_oobbuf=0x%.8x, oobPhys_addr=0x%.8x\n", __func__, __LINE__, this->g_oobbuf, oobPhys_addr);
-    
-	if ( !this->g_oobbuf ){
+	this->ops.oobbuf = kmalloc( oob_size, GFP_KERNEL );
+	if ( !this->ops.oobbuf ){
 		printk("%s: Error, no enough memory for g_oobbuf\n",__FUNCTION__);
 		return -ENOMEM;
 	}
-	memset(this->g_oobbuf, 0xff, oob_size);
+	memset(this->ops.oobbuf, 0xff, oob_size);
 
 	flag_size =  (this->numchips * this->page_num) >> 3;
 	mempage_order = get_order(flag_size);
@@ -2857,9 +2912,6 @@ printk("READ ID:0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",id[0],id[1],id[2],id[3],id[4],i
 		}
 		memset ( (__u32 *)this->erase_page_flag, 0, flag_size);
 	}
-printk("%s: %d\n",__FUNCTION__,__LINE__);
-		//nrBuffer = (unsigned int *)dma_alloc_coherent(&mtd->dev, MAX_NR_LENGTH, (dma_addr_t *) (&nrPhys_addr), GFP_KERNEL|GFP_DMA);
-		//printk("%s:%d QQ allocate from dma_alloc_coherent, nrBuffer=0x%.8x, nrPhys_addr=0x%.8x\n", __func__, __LINE__, nrBuffer, nrPhys_addr);
 	mtd->type			= MTD_NANDFLASH;
 	mtd->flags			= MTD_CAP_NANDFLASH;
 	//mtd->ecctype		= MTD_ECC_NONE;
@@ -2892,7 +2944,7 @@ printk("%s: %d\n",__FUNCTION__,__LINE__);
 	mtd->owner = THIS_MODULE;
 
 	//return 0;//ignore bbt scan
-	return this->scan_bbt(mtd, (unsigned char *)nrPhys_addr);
+	return this->scan_bbt(mtd);
 }
 
 
@@ -2901,7 +2953,7 @@ int TEST_ERASE_ALL(struct mtd_info *mtd, int page, int bc)
 	struct nand_chip *this = (struct nand_chip *) mtd->priv;
 	int i;
 	int chip_block_num = this->block_num;
-	int start_block = page/ppb;
+	int start_block = page >> ppb_shift;
 	int block_in_die; 
 	int rc = 0;
 	int chipnr =0, block;
@@ -2913,7 +2965,7 @@ int TEST_ERASE_ALL(struct mtd_info *mtd, int page, int bc)
 	}
 
 	if ( page & (ppb-1) ){
-		page = (page/ppb)*ppb;
+		page = (page >> ppb_shift)*ppb;
 	}
 
 	for ( i=0; i<bc; i++){
@@ -2925,13 +2977,13 @@ int TEST_ERASE_ALL(struct mtd_info *mtd, int page, int bc)
 		this->select_chip(mtd, block_in_die/chip_block_num);
 		rc = this->erase_block(mtd, chipnr, block*ppb);
 		if ( rc<0 ){
-			this->g_oobbuf[0] = 0x00;
+			this->ops.oobbuf[0] = 0x00;
 			if ( isLastPage ){
-				this->write_oob(mtd, chipnr, block*ppb+ppb-1, oob_size, this->g_oobbuf);
-				this->write_oob(mtd, chipnr, block*ppb+ppb-2, oob_size, this->g_oobbuf);
+				this->write_oob(mtd, chipnr, block*ppb+ppb-1, oob_size, this->ops.oobbuf);
+				this->write_oob(mtd, chipnr, block*ppb+ppb-2, oob_size, this->ops.oobbuf);
 			}else{
-				this->write_oob(mtd, chipnr, block*ppb, oob_size, this->g_oobbuf);
-				this->write_oob(mtd, chipnr, block*ppb+1, oob_size, this->g_oobbuf);
+				this->write_oob(mtd, chipnr, block*ppb, oob_size, this->ops.oobbuf);
+				this->write_oob(mtd, chipnr, block*ppb+1, oob_size, this->ops.oobbuf);
 			}
 		}
 	}

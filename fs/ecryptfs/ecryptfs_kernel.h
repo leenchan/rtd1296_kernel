@@ -41,7 +41,7 @@
 #include <linux/crypto.h>
 
 #define ECRYPTFS_DEFAULT_IV_BYTES 16
-#define ECRYPTFS_DEFAULT_EXTENT_SIZE 4096
+#define ECRYPTFS_DEFAULT_EXTENT_SIZE PAGE_SIZE
 #define ECRYPTFS_MINIMUM_HEADER_EXTENT_SIZE 8192
 #define ECRYPTFS_DEFAULT_MSG_CTX_ELEMS 32
 #define ECRYPTFS_DEFAULT_SEND_TIMEOUT HZ
@@ -86,7 +86,7 @@ ecryptfs_get_encrypted_key_payload_data(struct key *key)
 {
 	if (key->type == &key_type_encrypted)
 		return (struct ecryptfs_auth_tok *)
-			(&((struct encrypted_key_payload *)key->payload.data)->payload_data);
+			(&((struct encrypted_key_payload *)key->payload.data[0])->payload_data);
 	else
 		return NULL;
 }
@@ -117,8 +117,7 @@ ecryptfs_get_key_payload_data(struct key *key)
 
 	auth_tok = ecryptfs_get_encrypted_key_payload_data(key);
 	if (!auth_tok)
-		return (struct ecryptfs_auth_tok *)
-			(((struct user_key_payload *)key->payload.data)->data);
+		return (struct ecryptfs_auth_tok *)user_key_payload(key)->data;
 	else
 		return auth_tok;
 }

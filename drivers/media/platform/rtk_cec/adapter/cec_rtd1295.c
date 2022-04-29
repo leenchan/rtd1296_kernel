@@ -64,8 +64,8 @@ static cec_device rtk_cec_controller[] =
 
 static const int cec_divider_table[] =
 {
-	256000000, 255, 25,
-	128000000, 200, 16,
+	255999023, 255, 25,
+	127999511, 200, 16,
 };
 
 extern struct ion_device *rtk_phoenix_ion_device;
@@ -1459,6 +1459,11 @@ int rtk_cec_suspend(rtk_cec* p_this)
  *------------------------------------------------------------------*/
 int rtk_cec_resume(rtk_cec* p_this)
 {
+	if(!p_this->status.enable) //CEC is off
+	{
+		printk("[CEC0]function is off when power on, doesn't enable!!\n");
+		return 0;
+	}
 	cec_info("rtk cec resume");     
 	if (read_reg32(p_this->reg_base + CEC_TXCR0) & TX_INT)
 		write_reg32(p_this->reg_base + CEC_TXCR0, read_reg32(p_this->reg_base + CEC_TXCR0));// clear tx interrupt
@@ -1486,8 +1491,7 @@ int rtk_cec_resume(rtk_cec* p_this)
 	else
 		rtk_cec_set_mode(p_this, CEC_MODE_OFF);
 
-	if (p_this->status.enable)
-		enable_irq(p_this->irq_num);
+	enable_irq(p_this->irq_num);
 
 	write_reg32(p_this->wrapper_reg + CBUS_WRAPPER, (read_reg32(p_this->wrapper_reg + CBUS_WRAPPER) | CEC1_INT_SCPU_EN | CEC1_INT_ACPU_EN));
     return 0;

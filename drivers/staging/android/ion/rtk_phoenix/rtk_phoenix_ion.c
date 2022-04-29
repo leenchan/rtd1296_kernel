@@ -53,34 +53,7 @@ static int rtk_ion_sync_for_device(struct ion_client *client, int fd, int cmd)
 	return 0;
 }
 
-static int rtk_ion_sync_range_for_device(struct ion_client *client, int cmd, struct RTK_ION_IOC_SYNC_RANE *range_data)
-{
-    struct dma_buf *dmabuf;
-    struct ion_buffer *buffer;
-    enum dma_data_direction dir = (cmd == RTK_ION_IOC_INVALIDATE_RANGE) ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
-    int fd;
 
-    switch (cmd) {
-        case RTK_ION_IOC_INVALIDATE_RANGE:
-        case RTK_ION_IOC_FLUSH_RANGE:
-            break;
-        default:
-            return -EINVAL;
-    }
-
-    fd = (int) range_data->handle & -1U;
-
-    dmabuf = dma_buf_get(fd);
-    if (IS_ERR(dmabuf))
-        return PTR_ERR(dmabuf);
-
-    buffer = dmabuf->priv;
-
-    dma_sync_single_for_device(NULL, range_data->phyAddr, range_data->len, dir);
-
-    dma_buf_put(dmabuf);
-    return 0;
-}
 
 static int rtk_ion_get_memory_info(struct ion_client *client, unsigned int heapMask, unsigned int flags, struct ion_rtk_carveout_meminfo * info)
 {
@@ -140,28 +113,13 @@ long rtk_phoenix_ion_ioctl(struct ion_client *client, unsigned int cmd,
         }
 		break;
 	}
-    case RTK_ION_IOC_FLUSH_RANGE:
-    case RTK_ION_IOC_INVALIDATE_RANGE:
-    {
-        struct RTK_ION_IOC_SYNC_RANE range_data;
-        int ret = copy_from_user(&range_data, (void __user *)arg, sizeof (range_data));
-        if (ret) {
-            pr_err("%s:%d copy_from_user failed! (ret = %d)\n", __func__, __LINE__, ret);
-            return -EFAULT;
-        }
-        if (rtk_ion_sync_range_for_device(client, cmd, &range_data) != 0) {
-            pr_err("%s: rtk_ion_sync_range_for_device failed! (cmd:%d handle:%d)\n", __func__, cmd, (int) range_data.handle);
-            return -EFAULT;
-        }
-        break;
-    }
 
     case RTK_ION_IOC_GET_MEMORY_INFO:
     {
         struct RTK_ION_IOC_GET_MEMORY_INFO_S user_info;
         struct ion_rtk_carveout_meminfo ion_info;
         int ret;
-        ret = copy_from_user(&user_info, (void __user *)arg, sizeof (user_info));
+        ret = copy_from_user((void __user *)arg, &user_info, sizeof (user_info));
         if (ret) {
             pr_err("%s:%d copy_from_user failed! (ret = %d)\n", __func__, __LINE__, ret);
             return -EFAULT;

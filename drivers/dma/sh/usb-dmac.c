@@ -600,30 +600,27 @@ static irqreturn_t usb_dmac_isr_channel(int irq, void *dev)
 {
 	struct usb_dmac_chan *chan = dev;
 	irqreturn_t ret = IRQ_NONE;
-	u32 mask = 0;
+	u32 mask = USB_DMACHCR_TE;
+	u32 check_bits = USB_DMACHCR_TE | USB_DMACHCR_SP;
 	u32 chcr;
-	bool xfer_end = false;
 
 	spin_lock(&chan->vc.lock);
 
 	chcr = usb_dmac_chan_read(chan, USB_DMACHCR);
-	if (chcr & (USB_DMACHCR_TE | USB_DMACHCR_SP)) {
-		mask |= USB_DMACHCR_DE | USB_DMACHCR_TE | USB_DMACHCR_SP;
-		if (chcr & USB_DMACHCR_DE)
-			xfer_end = true;
-		ret |= IRQ_HANDLED;
-	}
+	if (chcr & check_bits)
+		mask |= USB_DMACHCR_DE | check_bits;
 	if (chcr & USB_DMACHCR_NULL) {
 		/* An interruption of TE will happen after we set FTE */
 		mask |= USB_DMACHCR_NULL;
 		chcr |= USB_DMACHCR_FTE;
 		ret |= IRQ_HANDLED;
 	}
-	if (mask)
-		usb_dmac_chan_write(chan, USB_DMACHCR, chcr & ~mask);
+	usb_dmac_chan_write(chan, USB_DMACHCR, chcr & ~mask);
 
-	if (xfer_end)
+	if (chcr & check_bits) {
 		usb_dmac_isr_transfer_end(chan);
+		ret |= IRQ_HANDLED;
+	}
 
 	spin_unlock(&chan->vc.lock);
 
@@ -682,8 +679,11 @@ static int usb_dmac_runtime_suspend(struct device *dev)
 	struct usb_dmac *dmac = dev_get_drvdata(dev);
 	int i;
 
-	for (i = 0; i < dmac->n_channels; ++i)
+	for (i = 0; i < dmac->n_channels; ++i) {
+		if (!dmac->channels[i].iomem)
+			break;
 		usb_dmac_chan_halt(&dmac->channels[i]);
+	}
 
 	return 0;
 }
@@ -802,11 +802,10 @@ static int usb_dmac_probe(struct platform_device *pdev)
 	ret = pm_runtime_get_sync(&pdev->dev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "runtime PM get sync failed (%d)\n", ret);
-		return ret;
+		goto error_pm;
 	}
 
 	ret = usb_dmac_init(dmac);
-	pm_runtime_put(&pdev->dev);
 
 	if (ret) {
 		dev_err(&pdev->dev, "failed to reset device\n");
@@ -854,10 +853,13 @@ static int usb_dmac_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto error;
 
+	pm_runtime_put(&pdev->dev);
 	return 0;
 
 error:
 	of_dma_controller_free(pdev->dev.of_node);
+	pm_runtime_put(&pdev->dev);
+error_pm:
 	pm_runtime_disable(&pdev->dev);
 	return ret;
 }

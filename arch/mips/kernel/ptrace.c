@@ -25,6 +25,7 @@
 #include <linux/regset.h>
 #include <linux/smp.h>
 #include <linux/security.h>
+#include <linux/stddef.h>
 #include <linux/tracehook.h>
 #include <linux/audit.h>
 #include <linux/seccomp.h>
@@ -65,6 +66,199 @@ static void init_fp_ctx(struct task_struct *target)
 	 */
 	set_stopped_child_used_math(target);
 }
+#if defined(CONFIG_CPU_RLX4281) || defined(CONFIG_CPU_RLX5281)
+struct mips3264_watch_reg_state kwatch;
+
+static int ptrace_wmpu_find_slot(void)
+{
+	struct cpuinfo_mips *c = &current_cpu_data;
+	unsigned long wmpctl;
+	unsigned long mask = 0x10;
+	int num;
+
+	wmpctl = read_lxc0_wmpctl();
+	wmpctl = wmpctl >> 16;
+
+	/* Return a usable register index in kernel space */
+	for (num = c->watch_reg_use_cnt; num < c->watch_reg_count; num++) {
+		if ((wmpctl & mask) == 0x0) {
+			return num;
+		}
+		mask = mask << 1;
+	}
+
+	return -1;
+}
+
+static int ptrace_wmpu_calc_mask(unsigned long start, unsigned long end,
+				 int *wmpuhi, int *wmpxmask)
+{
+	unsigned long boundary = end;
+	unsigned int mask_bit = 0x1;
+	int size;
+	int shift = 1;
+
+	if (start > end)
+		return -EIO;
+
+	size = end - start;
+	size = size >> 3;
+
+	/* Set shift = 0 if size < 8 bytes */
+	if (mask_bit > size)
+		shift = 0;
+	else {
+		while (mask_bit <= size) {
+			mask_bit = mask_bit << 1;
+			shift++;
+		}
+	}
+
+	/* Make sure that wmpu can cover all the range */
+	boundary = boundary | (mask_bit -1);
+	if (boundary < end)
+		shift++;
+
+	if (shift <= 9)
+		*wmpuhi = *wmpuhi | (mask_bit - 1);
+	else {
+		*wmpuhi = 0xff8;
+		*wmpxmask |= ((mask_bit << 3) - 1);
+	}
+
+	return 0;
+}
+
+int ptrace_wmpu_set(unsigned long start, unsigned long end,
+		    unsigned char attr, unsigned char mode)
+{
+	struct cpuinfo_mips *c = &current_cpu_data;
+	unsigned int wmpuhi = 0x000;
+	unsigned int wmpxmask = 0x00000000;
+	unsigned int wmpctl = 0x0;
+	int err, slot, idx;
+
+	slot = ptrace_wmpu_find_slot();
+	if (slot < 0) {
+		printk(KERN_ERR "wmpu: unable to find free slot!\n");
+		BUG();
+	}
+
+	err = ptrace_wmpu_calc_mask(start, end, &wmpuhi, &wmpxmask);
+	if (err !=0) {
+		printk(KERN_ERR "wmpu: unable to set mask!\n");
+		BUG();
+	}
+
+	/*
+	 * Set lo, hi, and wmpxmask register
+	 *
+	 * wmpu entries are either 0, 4, or 8.
+	 *
+	 * We assume half of the wmpu entries are reserved for kernel, so there
+	 * are at most 4 entries reserved for kernel, and we use a global kwatch
+	 * to hold those kernel wmpu entries.
+	 *
+	 * The mapping is tricky, but straightforward:
+	 *
+	 * if wmpu entries == 4: kwatch[0,1] => slot 2 and 3
+	 * if wmpu entries == 8: kwatch[0,1,2,3] => slot 4, 5, 6 and 7
+	 */
+
+	idx = slot % (c->watch_reg_use_cnt);
+
+	kwatch.watchhi[idx] = wmpuhi << 3;
+	kwatch.watchlo[idx] = (start & 0xfffffff8) | attr;
+	kwatch.wmpxmask[idx] = wmpxmask;
+
+	switch (slot) {
+	case 2:
+		write_c0_watchlo2(kwatch.watchlo[0]);
+		write_c0_watchhi2(0x40000000 | kwatch.watchhi[0]);
+		write_lxc0_wmpxmask2(wmpxmask);
+		break;
+	case 3:
+		write_c0_watchlo3(kwatch.watchlo[1]);
+		write_c0_watchhi3(0x40000000 | kwatch.watchhi[1]);
+		write_lxc0_wmpxmask3(wmpxmask);
+		break;
+	case 4:
+		write_c0_watchlo4(kwatch.watchlo[0]);
+		write_c0_watchhi4(0x40000000 | kwatch.watchhi[0]);
+		write_lxc0_wmpxmask4(wmpxmask);
+		break;
+	case 5:
+		write_c0_watchlo5(kwatch.watchlo[1]);
+		write_c0_watchhi5(0x40000000 | kwatch.watchhi[1]);
+		write_lxc0_wmpxmask5(wmpxmask);
+		break;
+	case 6:
+		write_c0_watchlo6(kwatch.watchlo[2]);
+		write_c0_watchhi6(0x40000000 | kwatch.watchhi[2]);
+		write_lxc0_wmpxmask6(wmpxmask);
+		break;
+	case 7:
+		write_c0_watchlo7(kwatch.watchlo[3]);
+		write_c0_watchhi7(0x40000000 | kwatch.watchhi[3]);
+		write_lxc0_wmpxmask7(wmpxmask);
+		break;
+	default:
+		BUG();
+		break;
+	}
+
+	/* Set wmpu ctrl register */
+	wmpctl |= (0x1 << (slot + 16)) | 0x2 | mode;
+	set_lxc0_wmpctl(wmpctl);
+	return slot;
+}
+
+void ptrace_wmpu_clear(int slot)
+{
+	switch (slot) {
+	case 2:
+		write_c0_watchlo2(0);
+		write_c0_watchhi2(0);
+		write_lxc0_wmpxmask2(0);
+		clear_lxc0_wmpctl(WMPCTLF_EE2);
+		break;
+	case 3:
+		write_c0_watchlo3(0);
+		write_c0_watchhi3(0);
+		write_lxc0_wmpxmask3(0);
+		clear_lxc0_wmpctl(WMPCTLF_EE3);
+		break;
+	case 4:
+		write_c0_watchlo4(0);
+		write_c0_watchhi4(0);
+		write_lxc0_wmpxmask4(0);
+		clear_lxc0_wmpctl(WMPCTLF_EE4);
+		break;
+	case 5:
+		write_c0_watchlo5(0);
+		write_c0_watchhi5(0);
+		write_lxc0_wmpxmask5(0);
+		clear_lxc0_wmpctl(WMPCTLF_EE5);
+		break;
+	case 6:
+		write_c0_watchlo6(0);
+		write_c0_watchhi6(0);
+		write_lxc0_wmpxmask6(0);
+		clear_lxc0_wmpctl(WMPCTLF_EE6);
+		break;
+	case 7:
+		write_c0_watchlo7(0);
+		write_c0_watchhi7(0);
+		write_lxc0_wmpxmask7(0);
+		clear_lxc0_wmpctl(WMPCTLF_EE7);
+		break;
+	default:
+		printk(KERN_ERR "wmpu: clear wmpu fail!\n");
+		BUG();
+		break;
+	}
+}
+#endif
 
 /*
  * Called by kernel/ptrace.c when detaching..
@@ -501,6 +695,93 @@ enum mips_regset {
 	REGSET_FPR,
 };
 
+struct pt_regs_offset {
+	const char *name;
+	int offset;
+};
+
+#define REG_OFFSET_NAME(reg, r) {					\
+	.name = #reg,							\
+	.offset = offsetof(struct pt_regs, r)				\
+}
+
+#define REG_OFFSET_END {						\
+	.name = NULL,							\
+	.offset = 0							\
+}
+
+static const struct pt_regs_offset regoffset_table[] = {
+	REG_OFFSET_NAME(r0, regs[0]),
+	REG_OFFSET_NAME(r1, regs[1]),
+	REG_OFFSET_NAME(r2, regs[2]),
+	REG_OFFSET_NAME(r3, regs[3]),
+	REG_OFFSET_NAME(r4, regs[4]),
+	REG_OFFSET_NAME(r5, regs[5]),
+	REG_OFFSET_NAME(r6, regs[6]),
+	REG_OFFSET_NAME(r7, regs[7]),
+	REG_OFFSET_NAME(r8, regs[8]),
+	REG_OFFSET_NAME(r9, regs[9]),
+	REG_OFFSET_NAME(r10, regs[10]),
+	REG_OFFSET_NAME(r11, regs[11]),
+	REG_OFFSET_NAME(r12, regs[12]),
+	REG_OFFSET_NAME(r13, regs[13]),
+	REG_OFFSET_NAME(r14, regs[14]),
+	REG_OFFSET_NAME(r15, regs[15]),
+	REG_OFFSET_NAME(r16, regs[16]),
+	REG_OFFSET_NAME(r17, regs[17]),
+	REG_OFFSET_NAME(r18, regs[18]),
+	REG_OFFSET_NAME(r19, regs[19]),
+	REG_OFFSET_NAME(r20, regs[20]),
+	REG_OFFSET_NAME(r21, regs[21]),
+	REG_OFFSET_NAME(r22, regs[22]),
+	REG_OFFSET_NAME(r23, regs[23]),
+	REG_OFFSET_NAME(r24, regs[24]),
+	REG_OFFSET_NAME(r25, regs[25]),
+	REG_OFFSET_NAME(r26, regs[26]),
+	REG_OFFSET_NAME(r27, regs[27]),
+	REG_OFFSET_NAME(r28, regs[28]),
+	REG_OFFSET_NAME(r29, regs[29]),
+	REG_OFFSET_NAME(r30, regs[30]),
+	REG_OFFSET_NAME(r31, regs[31]),
+	REG_OFFSET_NAME(c0_status, cp0_status),
+	REG_OFFSET_NAME(hi, hi),
+	REG_OFFSET_NAME(lo, lo),
+#ifdef CONFIG_CPU_HAS_SMARTMIPS
+	REG_OFFSET_NAME(acx, acx),
+#endif
+	REG_OFFSET_NAME(c0_badvaddr, cp0_badvaddr),
+	REG_OFFSET_NAME(c0_cause, cp0_cause),
+	REG_OFFSET_NAME(c0_epc, cp0_epc),
+#ifdef CONFIG_MIPS_MT_SMTC
+	REG_OFFSET_NAME(c0_tcstatus, cp0_tcstatus),
+#endif
+#ifdef CONFIG_CPU_CAVIUM_OCTEON
+	REG_OFFSET_NAME(mpl0, mpl[0]),
+	REG_OFFSET_NAME(mpl1, mpl[1]),
+	REG_OFFSET_NAME(mpl2, mpl[2]),
+	REG_OFFSET_NAME(mtp0, mtp[0]),
+	REG_OFFSET_NAME(mtp1, mtp[1]),
+	REG_OFFSET_NAME(mtp2, mtp[2]),
+#endif
+	REG_OFFSET_END,
+};
+
+/**
+ * regs_query_register_offset() - query register offset from its name
+ * @name:       the name of a register
+ *
+ * regs_query_register_offset() returns the offset of a register in struct
+ * pt_regs from its name. If the name is invalid, this returns -EINVAL;
+ */
+int regs_query_register_offset(const char *name)
+{
+        const struct pt_regs_offset *roff;
+        for (roff = regoffset_table; roff->name != NULL; roff++)
+                if (!strcmp(roff->name, name))
+                        return roff->offset;
+        return -EINVAL;
+}
+
 #if defined(CONFIG_32BIT) || defined(CONFIG_MIPS32_O32)
 
 static const struct user_regset mips_regsets[] = {
@@ -785,6 +1066,12 @@ long arch_ptrace(struct task_struct *child, long request,
 		break;
 
 	case PTRACE_SET_WATCH_REGS:
+#if defined(CONFIG_CPU_RLX4281) || defined(CONFIG_CPU_RLX5281)
+		if (read_lxc0_wmpctl() & 0x1) {
+			ret = -EIO;
+			goto out;
+		}
+#endif
 		ret = ptrace_set_watch_regs(child, addrp);
 		break;
 

@@ -1,15 +1,5 @@
-/**
- * snd-realtek.c - Realtek alsa driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
-#include <linux/init.h>
+//Copyright (C) 2007-2014 Realtek Semiconductor Corporation.
+//#include <linux/init.h>
 //#include <linux/kernel.h>
 #include <linux/jiffies.h>
 #include <linux/slab.h>
@@ -38,6 +28,7 @@
 #include <RPCDriver.h>
 #include <linux/suspend.h>
 #include "snd-realtek-compress.h"
+#include <linux/module.h>
 
 #ifdef RTK_TRACE_ALSA_EN
 #define RTK_TRACE_ALSA(format, ...) printk(KERN_ALERT format, ##__VA_ARGS__);
@@ -51,14 +42,13 @@
 
 #define ENDIAN_CHANGE(x) ((((x)&0xff000000)>>24)|(((x)&0x00ff0000)>>8)|(((x)&0x0000ff00)<<8)|(((x)&0x000000ff)<<24))
 #define SHARE_MEM_SIZE 8
-#define SHARE_MEM_SIZE_LATENCY sizeof(ALSA_LATENCY_INFO)
+#define SHARE_MEM_SIZE_LATENCY sizeof(ALSA_LATENCY_INFO)//Add by PC
 #define LPCM_2CH_16BITS (4)
 
 #define SND_REALTEK_DRIVER "snd_alsa_rtk"
-#define SND_REALTEK_DRIVER_I2S_IN "snd_alsa_rtk_i2s_in"
+#define SND_REALTEK_DRIVER_I2S_IN "snd_alsa_rtk_i2s_in"//Add by PC
 #define SND_REALTEK_DRIVER_NONPCM_IN "snd_alsa_rtk_nonpcm_in"
 #define SND_REALTEK_DRIVER_ANALOG_IN "snd_alsa_rtk_analog_in"
-#define SND_REALTEK_DRIVER_AMIC_IN "snd_alsa_rtk_amic_in"
 
 #ifndef MIN
 #define MIN(a, b) ((a) <= (b) ? (a) : (b))
@@ -75,10 +65,9 @@ static snd_pcm_uframes_t snd_card_playback_pointer(snd_pcm_substream_t * substre
 //static int snd_card_playback_copy(struct snd_pcm_substream *substream, int channel, snd_pcm_uframes_t pos, void __user *buf, snd_pcm_uframes_t count);
 
 static int snd_card_capture_open(snd_pcm_substream_t * substream);
-static int snd_card_capture_i2s_open(snd_pcm_substream_t * substream);
+static int snd_card_capture_i2s_open(snd_pcm_substream_t * substream);//Add by PC
 static int snd_card_capture_nonpcm_open(snd_pcm_substream_t * substream);
 static int snd_card_capture_analog_open(snd_pcm_substream_t * substream);
-static int snd_card_capture_amic_open(snd_pcm_substream_t * substream);
 static int snd_card_capture_close(snd_pcm_substream_t * substream);
 static int snd_card_capture_ioctl(struct snd_pcm_substream *substream,  unsigned int cmd, void *arg);
 static int snd_card_capture_prepare(snd_pcm_substream_t * substream);
@@ -109,7 +98,7 @@ static unsigned long ring_valid_data(unsigned long ring_base, unsigned long ring
 static unsigned long buf_memcpy2_ring(unsigned long base, unsigned long limit, unsigned long ptr, char* buf, unsigned long size);
 static int ring_check_ptr_valid_32(unsigned int ring_rp, unsigned int ring_wp, unsigned int ptr);
 static long ring_memcpy2_buf(char* buf,unsigned long base, unsigned long limit, unsigned long ptr, unsigned int size);
-//static unsigned long snd_card_get_90k_pts(void);
+//static unsigned long snd_card_get_90k_pts(void);//Add by PC
 static unsigned long ring_minus(unsigned long ring_base, unsigned long ring_limit, unsigned long ptr, int bytes);
 
 static int snd_realtek_hw_free_ring (snd_pcm_runtime_t *runtime);
@@ -131,13 +120,12 @@ static void ring1_to_ring2_general_64(AUDIO_RINGBUF_PTR_64* ring1, AUDIO_RINGBUF
 /************************************************************************/
 static struct platform_device *devices[SNDRV_CARDS] = {NULL};
 static bool snd_card_enable[SNDRV_CARDS] = {1, [1 ... (SNDRV_CARDS - 1)] = 0};    // only one sound card
-static int pcm_substreams[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 2};
+static int pcm_substreams[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 8};
 static int pcm_capture_substreams[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 1};
 static snd_card_t *snd_RTK_cards[SNDRV_CARDS] = SNDRV_DEFAULT_PTR;
 static int snd_open_count = 0;
-static int snd_open_ai_count = 0;
-static char *snd_pcm_id[] = {SND_REALTEK_DRIVER, SND_REALTEK_DRIVER_I2S_IN, SND_REALTEK_DRIVER_NONPCM_IN,
-			SND_REALTEK_DRIVER_ANALOG_IN, SND_REALTEK_DRIVER_AMIC_IN}; // multiple PCM instances in 1 sound card
+static int snd_open_ai_count = 0;//Add by PC
+static char *snd_pcm_id[] = {SND_REALTEK_DRIVER, SND_REALTEK_DRIVER_I2S_IN, SND_REALTEK_DRIVER_NONPCM_IN, SND_REALTEK_DRIVER_ANALOG_IN}; // multiple PCM instances in 1 sound card
 static unsigned int rtk_dec_ao_buffer = RTK_DEC_AO_BUFFER_SIZE;
 static void __iomem *clk90k_vaddr_hi = NULL;
 static void __iomem *clk90k_vaddr_lo = NULL;
@@ -148,23 +136,17 @@ static spinlock_t capture_lock;
 static int dec_out_msec = 0;
 static int mtotal_latency = 0;
 static int *g_ShareMemPtr = NULL;
-static ALSA_LATENCY_INFO *g_ShareMemPtr2 = NULL;
+static ALSA_LATENCY_INFO *g_ShareMemPtr2 = NULL;//Add by PC
 static ALSA_LATENCY_INFO *g_ShareMemPtr3 = NULL;
 
 static bool is_suspend = false;
-
-#ifdef CONFIG_SND_SOC_TLV320ADC3X01
-int adc3x01_i2c_setup(void);
-int adc3x01_i2c_unmute(void);
-int adc3x01_i2c_destroy(void);
-#endif
 
 #ifdef USE_ION_AUDIO_HEAP
 struct ion_client *alsa_client;
 static struct ion_handle *alsa_playback_handle = NULL;
 static struct ion_handle *dec_out_handle[8] = {NULL};
 static struct ion_handle *sharemem_handle = NULL;
-static struct ion_handle *sharemem_handle2 = NULL;
+static struct ion_handle *sharemem_handle2 = NULL;//Add by PC
 static struct ion_handle *sharemem_handle3 = NULL;
 static struct ion_handle *alsa_capture_handle = NULL;
 static struct ion_handle *enc_in_handle[2] = {NULL};
@@ -173,11 +155,11 @@ static struct ion_handle *enc_pts_handle = NULL;
 static char gRtkDriverName[] = SND_REALTEK_DRIVER;
 
 static ion_phys_addr_t g_ShareMemPtr_dat = 0;
-static ion_phys_addr_t g_ShareMemPtr_dat2 = 0;
+static ion_phys_addr_t g_ShareMemPtr_dat2 = 0;//Add by PC
 static ion_phys_addr_t g_ShareMemPtr_dat3 = 0;
 #else
 static dma_addr_t g_ShareMemPtr_dat;
-static dma_addr_t g_ShareMemPtr_dat2;
+static dma_addr_t g_ShareMemPtr_dat2;//Add by PC
 static dma_addr_t g_ShareMemPtr_dat3;
 #endif
 
@@ -215,7 +197,7 @@ static snd_pcm_ops_t snd_card_rtk_playback_ops = {
 //    .ack =          NULL,
 };
 
-// for HDMI-RX in
+// for HDMI-RX in//Add by PC
 static snd_pcm_ops_t snd_card_rtk_capture_ops = {
     .open =         snd_card_capture_open,
     .close =        snd_card_capture_close,
@@ -275,21 +257,6 @@ static snd_pcm_ops_t snd_card_rtk_capture_analog_ops = {
     .get_time_info = snd_card_capture_get_time_info
 };
 
-// for amic-in in
-static snd_pcm_ops_t snd_card_rtk_capture_amic_ops = {
-    .open =			snd_card_capture_amic_open,
-    .close =        snd_card_capture_close,
-    .ioctl =        snd_card_capture_ioctl,
-    .hw_params =    snd_card_hw_params,
-    .hw_free =      snd_card_capture_hw_free,
-    .prepare =      snd_card_capture_prepare,
-    .trigger =      snd_card_capture_trigger,
-    .pointer =      snd_card_capture_pointer,
-    .copy =         NULL,
-    .silence =      NULL,
-    .get_time_info = snd_card_capture_get_time_info
-};
-
 static snd_pcm_hardware_t snd_card_playback =
 {
     .info               = RTK_DMP_PLAYBACK_INFO,
@@ -317,8 +284,8 @@ static snd_pcm_hardware_t snd_card_mars_capture =
     .channels_min       = RTK_DMP_CAPTURE_CHANNELS_MIN,
     .channels_max       = RTK_DMP_CAPTURE_CHANNELS_MAX,
     .buffer_bytes_max   = RTK_DMP_CAPTURE_MAX_BUFFER_SIZE,
-    .period_bytes_min   = RTK_DMP_CAPTURE_MIN_PERIOD_BYTE,
-    .period_bytes_max   = RTK_DMP_CAPTURE_MAX_PERIOD_BYTE,
+    .period_bytes_min   = RTK_DMP_CAPTURE_MIN_PERIOD_SIZE,
+    .period_bytes_max   = RTK_DMP_CAPTURE_MAX_PERIOD_SIZE,
     .periods_min        = RTK_DMP_CAPTURE_PERIODS_MIN,
     .periods_max        = RTK_DMP_CAPTURE_PERIODS_MAX,
     .fifo_size          = RTK_DMP_CAPTURE_FIFO_SIZE,
@@ -337,7 +304,7 @@ MODULE_PARM_DESC(pcm_substreams, "PCM substreams # (1-16) for mars driver.");
 /************************************************************************/
 int snd_monitor_audio_data_queue(void)
 {
-    /*
+    /*//Add by PC
     int audioLatency = 0;
     if (g_ShareMemPtr)
     {
@@ -931,7 +898,7 @@ static int snd_realtek_hw_init_decoder_info(snd_pcm_runtime_t *runtime)
             break;
     }
 
-    cmd.wPtr = dpcm->decInRing[0].writePtr;
+    cmd.wPtr = dpcm->decInRing[0].writePtr;//Add by PC
     //printk("[test] dpcm->decInRing[0].beginAddr %lx\n" , cmd.wPtr); //decoder buffer ring physical address
 
 #ifdef CONFIG_64BIT
@@ -1337,23 +1304,24 @@ static int snd_realtek_hw_free_ring (snd_pcm_runtime_t *runtime)
 
 static void snd_card_runtime_free(snd_pcm_runtime_t *runtime)
 {
-    snd_card_RTK_pcm_t *dpcm = runtime->private_data;
-	struct ion_handle *alsa_playback_handle_free = NULL;
-	alsa_playback_handle_free = dpcm->inRingHandle;
     ALSA_VitalPrint("[ALSA %s %d]\n", __FUNCTION__, __LINE__);
+#ifndef USE_ION_AUDIO_HEAP
+    snd_card_RTK_pcm_t *dpcm = runtime->private_data;
+#endif
     
     //snd_realtek_hw_free_ring(runtime);
 #ifdef USE_ION_AUDIO_HEAP
-    if (alsa_client != NULL && alsa_playback_handle_free != NULL)
+    if (alsa_client != NULL && alsa_playback_handle != NULL)
     {
-        //printk("%s free handle %p \n", __FUNCTION__, alsa_playback_handle_free);
-        ion_unmap_kernel(alsa_client, alsa_playback_handle_free);
-        ion_free(alsa_client, alsa_playback_handle_free);
-        alsa_playback_handle_free = NULL;
+        //printk("%s free alsa_playback_handle\n", __FUNCTION__);
+        ion_unmap_kernel(alsa_client, alsa_playback_handle);
+        ion_free(alsa_client, alsa_playback_handle);
+        alsa_playback_handle = NULL;
     }
 #else
     dma_free_coherent(NULL, 4096, dpcm, dpcm->phy_addr);
 #endif
+
     runtime->private_data = NULL;
 }
 
@@ -1423,8 +1391,8 @@ static int snd_card_playback_open(snd_pcm_substream_t * substream)
 #endif
 
 #ifdef USE_ION_AUDIO_HEAP
+    //printk("%s create alsa_playback_handle\n", __FUNCTION__);
     alsa_playback_handle = ion_alloc(alsa_client, sizeof(snd_card_RTK_pcm_t), 1024, RTK_PHOENIX_ION_HEAP_AUDIO_MASK, AUDIO_ION_FLAG);
-    //printk("%s create alsa_playback_handle %p\n", __FUNCTION__, alsa_playback_handle);
 
     if (IS_ERR(alsa_playback_handle)) {
         ALSA_WARNING("[%s %d ion_alloc fail]\n", __FUNCTION__, __LINE__);
@@ -1439,7 +1407,6 @@ static int snd_card_playback_open(snd_pcm_substream_t * substream)
     dpcm = ion_map_kernel(alsa_client, alsa_playback_handle);
     memset(dpcm, 0, len);
     dpcm->phy_addr = dat;
-    dpcm->inRingHandle = alsa_playback_handle;
 #else
     dma_addr_t dat;
     void *p;
@@ -1529,7 +1496,7 @@ static int snd_card_playback_open(snd_pcm_substream_t * substream)
         }
         //printk("g_ShareMemPtr %p\n", g_ShareMemPtr);
 #endif
-        memset(g_ShareMemPtr, 0, SHARE_MEM_SIZE);
+        memset(g_ShareMemPtr, 0, SHARE_MEM_SIZE);//Add by PC
         //RPC_TOAGENT_PUT_SHARE_MEMORY((void *)g_ShareMemPtr_dat, ENUM_PRIVATEINFO_AUDIO_GET_SHARE_MEMORY_FROM_ALSA);
     }
 
@@ -1602,7 +1569,7 @@ fail:
 
 #ifdef USE_ION_AUDIO_HEAP
     if (alsa_client != NULL && alsa_playback_handle != NULL) {
-        //printk("%s free alsa_playback_handle %p\n", __FUNCTION__, alsa_playback_handle);
+        //printk("%s free alsa_playback_handle\n", __FUNCTION__);
         ion_unmap_kernel(alsa_client, alsa_playback_handle);
         ion_free(alsa_client, alsa_playback_handle);
         alsa_playback_handle = NULL;
@@ -1619,7 +1586,6 @@ fail:
     return ret;
 }
 
-// it's for HDMI-RX
 static int snd_card_capture_open(snd_pcm_substream_t * substream)
 {
     snd_pcm_runtime_t *runtime = substream->runtime;
@@ -1632,7 +1598,7 @@ static int snd_card_capture_open(snd_pcm_substream_t * substream)
     ion_phys_addr_t dat;
     size_t len;
 
-    if(alsa_capture_handle)
+    if(alsa_capture_handle)//Add by PC
     {
         ALSA_WARNING("ERR more than 1 capture instance!!!\n");
     }
@@ -1695,9 +1661,6 @@ static int snd_card_capture_open(snd_pcm_substream_t * substream)
 
     ALSA_VitalPrint("[ALSA %s END]\n", __FUNCTION__);
 
-	/* device index for capture */
-	dpcm->devices_index = 0;
-
     ret = 0;
     
     return ret;
@@ -1727,7 +1690,7 @@ fail:
 static int snd_card_capture_nonpcm_open(snd_pcm_substream_t * substream)
 {
     snd_pcm_runtime_t *runtime = substream->runtime;
-    snd_card_RTK_capture_pcm_t *dpcm = NULL;
+    snd_card_RTK_capture_pcm_t *dpcm = NULL;//Add by PC
     int ret = ENOMEM;
 
 //    ALSA_VitalPrint("[ALSA %s %s %d %s]\n",substream->pcm->name, __FUNCTION__, __LINE__, __TIME__);
@@ -1802,9 +1765,6 @@ static int snd_card_capture_nonpcm_open(snd_pcm_substream_t * substream)
 
     ALSA_VitalPrint("[ALSA %s END]\n", __FUNCTION__);
 
-	/* device index for nonpcm */
-	dpcm->devices_index = 2;
-
     ret = 0;
     
     return ret;
@@ -1813,7 +1773,7 @@ fail:
 #ifdef USE_ION_AUDIO_HEAP
     if(alsa_client != NULL && alsa_capture_handle != NULL)
     {
-        //printk("%s free alsa_capture_handle\n", __FUNCTION__);
+        //printk("%s free alsa_capture_handle\n", __FUNCTION__);//Add by PC
         ion_unmap_kernel(alsa_client, alsa_capture_handle);
         ion_free(alsa_client, alsa_capture_handle);
         alsa_capture_handle = NULL;
@@ -1855,7 +1815,7 @@ static int snd_card_capture_i2s_open(snd_pcm_substream_t * substream)
         ALSA_WARNING("[%s %d ion_alloc fail]\n", __FUNCTION__, __LINE__);
         goto fail;
     }
-
+//Add by PC
     if(ion_phys(alsa_client, alsa_capture_handle, &dat, &len) != 0) {
         printk("[%s %d] alloc memory faild\n", __FUNCTION__, __LINE__);
         goto fail;
@@ -1894,20 +1854,8 @@ static int snd_card_capture_i2s_open(snd_pcm_substream_t * substream)
         goto fail;
     }
 
-#ifdef CONFIG_SND_SOC_TLV320ADC3X01
-	adc3x01_i2c_setup();
-
-	/* config kernel rpc 0 */
-	RPC_TOAGENT_AI_CONFIG_I2S_krpc0_IN(dpcm);
-	
-	/* Delay 1 second between two kernel rpc */
-	mdelay(1000);	
-	
-	adc3x01_i2c_unmute();
-	
-	/* config kernel rpc 1 */
-	RPC_TOAGENT_AI_CONFIG_I2S_krpc1_IN(dpcm);
-#endif
+    // config I2S
+    RPC_TOAGENT_AI_CONFIG_I2S_IN(dpcm);
 
     dpcm->card = (RTK_snd_card_t *)(substream->pcm->card->private_data);
 
@@ -1922,9 +1870,6 @@ static int snd_card_capture_i2s_open(snd_pcm_substream_t * substream)
     spin_lock_init(&capture_lock);
 
     ALSA_VitalPrint("[ALSA %s END]\n", __FUNCTION__);
-
-	/* device index for i2s */
-	dpcm->devices_index = 1;
 
     ret = 0;
     
@@ -1988,7 +1933,7 @@ static int snd_card_capture_analog_open(snd_pcm_substream_t * substream)
         printk("[%s %d] alloc memory faild\n", __FUNCTION__, __LINE__);
         goto fail;
     }
-
+//Add by PC
     dpcm = p;
     dpcm->phy_addr = dat;
 #endif
@@ -2008,6 +1953,9 @@ static int snd_card_capture_analog_open(snd_pcm_substream_t * substream)
         goto fail;
     }
 
+    // config analog in
+    RPC_TOAGENT_AI_CONFIG_ANALOG_IN(dpcm);
+
     dpcm->card = (RTK_snd_card_t *)(substream->pcm->card->private_data);
 
     // init timer
@@ -2021,9 +1969,6 @@ static int snd_card_capture_analog_open(snd_pcm_substream_t * substream)
     spin_lock_init(&capture_lock);
 
     ALSA_VitalPrint("[ALSA %s END]\n", __FUNCTION__);
-
-	/* device index for analog */
-	dpcm->devices_index = 3;
 
     ret = 0;
     
@@ -2050,104 +1995,6 @@ fail:
     return ret;
 }
 
-// it's for amic
-static int snd_card_capture_amic_open(snd_pcm_substream_t * substream)
-{
-    snd_pcm_runtime_t *runtime = substream->runtime;
-    snd_card_RTK_capture_pcm_t *dpcm = NULL;
-    int ret = ENOMEM;
-
-//    ALSA_VitalPrint("[ALSA %s %s %d %s]\n",substream->pcm->name, __FUNCTION__, __LINE__, __TIME__);
-
-#ifdef USE_ION_AUDIO_HEAP
-    ion_phys_addr_t dat;
-    size_t len;
-    if(alsa_capture_handle)
-    {
-        ALSA_WARNING("ERR more than 1 capture instance!!!\n");
-    }
-    alsa_capture_handle = ion_alloc(alsa_client, sizeof(snd_card_RTK_capture_pcm_t), 1024, RTK_PHOENIX_ION_HEAP_AUDIO_MASK, AUDIO_ION_FLAG);
-    if (IS_ERR(alsa_capture_handle)) {
-        ALSA_WARNING("[%s %d ion_alloc fail]\n", __FUNCTION__, __LINE__);
-        goto fail;
-    }
-    if(ion_phys(alsa_client, alsa_capture_handle, &dat, &len) != 0) {
-        printk("[%s %d] alloc memory faild\n", __FUNCTION__, __LINE__);
-        goto fail;
-    }
-    dpcm = ion_map_kernel(alsa_client, alsa_capture_handle);
-    memset(dpcm, 0, len);
-    dpcm->phy_addr = dat;
-#else
-    dma_addr_t dat;
-    void *p;
-    p = dma_alloc_coherent(NULL, sizeof(snd_card_RTK_pcm_t), &dat, GFP_KERNEL);
-    if (!p)
-    {
-        printk("[%s %d] alloc memory faild\n", __FUNCTION__, __LINE__);
-        goto fail;
-    }
-
-    dpcm = p;
-    dpcm->phy_addr = dat;
-#endif
-    // private data
-    runtime->private_data = dpcm;
-    runtime->private_free = snd_card_capture_runtime_free;
-
-    memcpy(&runtime->hw, &snd_card_mars_capture, sizeof(struct snd_pcm_hardware));
-    dpcm->substream = substream;
-    dpcm->source_in = ENUM_AIN_AMIC;
-
-    // create AI
-    if (snd_realtek_hw_create_AI(substream) < 0)
-    {
-        ALSA_WARNING("[error %s %d]\n", __FUNCTION__, __LINE__);
-        ret = -ENOMEM;
-        goto fail;
-    }
-
-    dpcm->card = (RTK_snd_card_t *)(substream->pcm->card->private_data);
-
-    // init timer
-    init_timer(&dpcm->nStartTimer);
-    dpcm->nStartTimer.data = (unsigned long) substream;
-
-    // init todo
-//  INIT_WORK(&dpcm->nEOSWork, snd_realtek_hw_eos_work);
-
-    //spin_lock_init(&dpcm->nLock);
-    spin_lock_init(&capture_lock);
-
-    ALSA_VitalPrint("[ALSA %s END]\n", __FUNCTION__);
-
-	/* device index for amic */
-	dpcm->devices_index = 4;
-
-    ret = 0;
-
-    return ret;
-fail:
-
-#ifdef USE_ION_AUDIO_HEAP
-    if(alsa_client != NULL && alsa_capture_handle != NULL)
-    {
-        //printk("%s free alsa_capture_handle\n", __FUNCTION__);
-        ion_unmap_kernel(alsa_client, alsa_capture_handle);
-        ion_free(alsa_client, alsa_capture_handle);
-        alsa_capture_handle = NULL;
-        dpcm = NULL;
-    }
-#else
-    if(p)
-    {
-        dma_free_coherent(NULL, sizeof(snd_card_RTK_capture_pcm_t), p, dat);
-        dpcm = NULL;
-    }
-#endif
-
-    return ret;
-}
 
 static int snd_card_capture_close(snd_pcm_substream_t * substream)
 {
@@ -2156,17 +2003,13 @@ static int snd_card_capture_close(snd_pcm_substream_t * substream)
     int ret = -1;
 //    ALSA_VitalPrint("[ALSA %s %d]\n", __FUNCTION__, __LINE__);
 
-#ifdef CONFIG_SND_SOC_TLV320ADC3X01
-	adc3x01_i2c_destroy();
-#endif
-
     if(snd_open_ai_count)
     {
         if (RPC_TOAGENT_DESTROY_AI_FLOW_SVC(dpcm->AIAgentID)) 
         {
             ALSA_WARNING("[%s %d fail]\n", __FUNCTION__, __LINE__);
             goto exit; 
-        }        
+        }
     }
 
     ret = 0;
@@ -2194,11 +2037,6 @@ static int snd_card_playback_close(snd_pcm_substream_t * substream)
         return ret;
     }
 #endif
-    // DHCKYLIN-2822 disable get_latency before destroy decoder instance
-    if (dpcm->DECAgentID) {
-        RPC_TOAGENT_PUT_SHARE_MEMORY(NULL, ENUM_PRIVATEINFO_AUDIO_GET_SHARE_MEMORY_FROM_ALSA);
-        RPC_TOAGENT_PUT_SHARE_MEMORY_LATENCY(NULL, NULL, 0, ENUM_PRIVATEINFO_AUDIO_GET_SHARE_MEMORY_FROM_ALSA);
-    }
 
     if (dpcm->AOpinID) {
 #ifndef AO_ON_SCPU
@@ -2243,8 +2081,10 @@ exit:
     snd_open_count--;
 
     snd_realtek_hw_free_ring(runtime);
-
+//Add by PC
     if ((g_ShareMemPtr || g_ShareMemPtr2 || g_ShareMemPtr3) && snd_open_count == 0) {
+        RPC_TOAGENT_PUT_SHARE_MEMORY(NULL, ENUM_PRIVATEINFO_AUDIO_GET_SHARE_MEMORY_FROM_ALSA);
+        RPC_TOAGENT_PUT_SHARE_MEMORY_LATENCY(NULL, NULL, 0, ENUM_PRIVATEINFO_AUDIO_GET_SHARE_MEMORY_FROM_ALSA);
 #ifdef USE_ION_AUDIO_HEAP
         if (alsa_client != NULL && sharemem_handle != NULL) {
             //printk("%s destory sharemem_handle\n", __FUNCTION__);
@@ -2253,7 +2093,7 @@ exit:
             sharemem_handle = NULL;
         }
 
-        if (alsa_client != NULL && sharemem_handle2 != NULL) {
+        if (alsa_client != NULL && sharemem_handle2 != NULL) {//Add by PC
             ion_unmap_kernel(alsa_client, sharemem_handle2);
             ion_free(alsa_client, sharemem_handle2);
             sharemem_handle2 = NULL;
@@ -2266,11 +2106,11 @@ exit:
         }
 #else
         dma_free_coherent(NULL, 4096, g_ShareMemPtr, g_ShareMemPtr_dat);
-        dma_free_coherent(NULL, 4096, g_ShareMemPtr2, g_ShareMemPtr_dat2);
+        dma_free_coherent(NULL, 4096, g_ShareMemPtr2, g_ShareMemPtr_dat2);//Add by PC
         dma_free_coherent(NULL, 4096, g_ShareMemPtr3, g_ShareMemPtr_dat3);
 #endif
         g_ShareMemPtr = NULL;
-        g_ShareMemPtr2 = NULL;
+        g_ShareMemPtr2 = NULL;//Add by PC
         g_ShareMemPtr3 = NULL;
     }
 
@@ -2379,7 +2219,7 @@ static int snd_card_playback_ioctl(struct snd_pcm_substream *substream,  unsigne
         case SNDRV_PCM_IOCTL_GET_LATENCY:
         {
             int mLatency = 0;
-            mLatency = snd_monitor_audio_data_queue_new(substream);
+            mLatency = snd_monitor_audio_data_queue_new(substream);//Add by PC
             //mLatency = snd_monitor_audio_data_queue();
             put_user(mLatency, (int *) arg);
             break;
@@ -2388,7 +2228,7 @@ static int snd_card_playback_ioctl(struct snd_pcm_substream *substream,  unsigne
         {
             int mLatency = 0;
             snd_pcm_sframes_t n = 0;
-            mLatency = snd_monitor_audio_data_queue_new(substream);
+            mLatency = snd_monitor_audio_data_queue_new(substream);//Add by PC
             //mLatency = snd_monitor_audio_data_queue();
             n = (mLatency * runtime->rate) / 1000;
             put_user(n, (snd_pcm_sframes_t *) arg);
@@ -2560,20 +2400,6 @@ static int snd_card_capture_prepare(snd_pcm_substream_t * substream)
     {
         ALSA_WARNING("[SNDRV_PCM_STATE_XRUN appl_ptr %d hw_ptr %d]\n", (int)runtime->control->appl_ptr, (int)runtime->status->hw_ptr);
     }
-
-	if (dpcm->devices_index == 3){
-		// config analog in
-		// index 3 is analog
-		RPC_TOAGENT_AI_CONFIG_ANALOG_IN(runtime, dpcm);
-	} else if(dpcm->devices_index == 1){
-		// config i2s in
-		// index 1 is i2s
-		RPC_TOAGENT_AI_CONFIG_I2S_IN(runtime, dpcm);
-	} else if(dpcm->devices_index == 4){
-		// config amic in
-		// index 4 is amic
-		RPC_TOAGENT_AI_CONFIG_AMIC_IN(runtime, dpcm);
-	}
 
     dpcm->nPeriodJiffies = HZ / (runtime->rate / runtime->period_size);
     if(dpcm->nPeriodJiffies == 0)
@@ -2860,7 +2686,7 @@ static int snd_card_playback_prepare(snd_pcm_substream_t * substream)
         ALSA_WARNING("[%s %d fail]\n", __FUNCTION__, __LINE__);
         return -ENOMEM;
     }
-    if (g_ShareMemPtr != NULL && g_ShareMemPtr2 != NULL) {
+    if (g_ShareMemPtr != NULL && g_ShareMemPtr2 != NULL) {//Add by PC
         printk("to set latency of DECAgentID %d  \n", dpcm->DECAgentID);
         RPC_TOAGENT_PUT_SHARE_MEMORY_LATENCY((void *)g_ShareMemPtr_dat, (void *)g_ShareMemPtr_dat2, dpcm->DECAgentID, ENUM_PRIVATEINFO_AUDIO_GET_SHARE_MEMORY_FROM_ALSA);
     }
@@ -2918,7 +2744,7 @@ static long snd_card_get_ring_data(RINGBUFFER_HEADER *pRing_BE, RINGBUFFER_HEADE
     //rp = (long)SND_UNCACHE_ADDRESS(ntohl(pRing_BE->readPtr[0]));
     wp = (unsigned long)(ntohl(pRing_BE->writePtr));
     rp = (unsigned long)(ntohl(pRing_BE->readPtr[0]));
-//    printk("[�� b %x l %x r %x w %x]\n", base, limit, rp, wp);
+//    printk("[?? b %x l %x r %x w %x]\n", base, limit, rp, wp);
     data_size = ring_valid_data(base, limit, rp, wp);
     return data_size;
 }
@@ -3035,7 +2861,7 @@ static long ring_memcpy2_buf(char* buf,unsigned long base, unsigned long limit, 
 	}	
 	return ptr;
 }
-
+//Add by PC
 //static unsigned long snd_card_get_90k_pts(void)
 unsigned long snd_card_get_90k_pts(void)
 {
@@ -3266,10 +3092,10 @@ static void snd_card_capture_lpcm_timer_function(unsigned long data)
     snd_pcm_substream_t * substream = (snd_pcm_substream_t *)data;
     snd_pcm_runtime_t *runtime = substream->runtime;
     snd_card_RTK_capture_pcm_t *dpcm = runtime->private_data;
-    snd_pcm_uframes_t nRingDataFrame, free_size;  
+    snd_pcm_uframes_t nRingDataFrame, free_size;//Add by PC 
     unsigned long flags;
     long nRingDataSize; // bytes
-    unsigned int nPeriodCount = 0, free_period;
+    unsigned int nPeriodCount = 0, free_period;//Add by PC
 
     if(ring_valid_data(0
         , (unsigned long)runtime->boundary
@@ -3282,13 +3108,13 @@ static void snd_card_capture_lpcm_timer_function(unsigned long data)
             , (int)runtime->buffer_size, __FUNCTION__, __LINE__);
     }
 
-#if 0   // DEBUG: check wp/rp
+#if 0   // DEBUG: check wp/rp//Add by PC
     ALSA_SEC_PRINT(2, "[alsa cap state %d appl_ptr %d hw_ptr %d]\n", (int)runtime->status->state, (int)runtime->control->appl_ptr, (int)runtime->status->hw_ptr);
 #endif
 
     _DBG_CHECK_AI_HW_RING_DATA(data);
 
-    // check if HDMI-RX plug out
+    // check if HDMI-RX plug out//Add by PC
     if(dpcm->source_in == ENUM_AIN_HDMIRX)
     {
         if(snd_realtek_capture_check_hdmirx_enable() == 0)
@@ -3306,7 +3132,7 @@ static void snd_card_capture_lpcm_timer_function(unsigned long data)
         
         if(nPeriodCount == runtime->periods)
             nPeriodCount--;
-
+//Add by PC
         // check overflow
         {
             free_size = runtime->buffer_size - ring_valid_data(0
@@ -3338,7 +3164,7 @@ static void snd_card_capture_lpcm_timer_function(unsigned long data)
         dpcm->nLPCMRing.readPtr[0] = htonl(dpcm->nLPCMRing_LE.readPtr[0]);
 
         dpcm->nTotalWrite += nPeriodCount * runtime->period_size;
-
+//Add by PC
         // update runtime->status->hw_ptr
         snd_pcm_period_elapsed(substream);
     }
@@ -3375,7 +3201,7 @@ static void snd_card_capture_timer_function(unsigned long data)
     }
 
 #if 0   // DEBUG: check wp/rp
-    ALSA_SEC_PRINT(2, "[���� state %d appl_ptr %d hw_ptr %d]\n", (int)runtime->status->state, (int)runtime->control->appl_ptr, (int)runtime->status->hw_ptr);
+    ALSA_SEC_PRINT(2, "[???? state %d appl_ptr %d hw_ptr %d]\n", (int)runtime->status->state, (int)runtime->control->appl_ptr, (int)runtime->status->hw_ptr);
 #endif
 
     // fresh wp
@@ -3520,7 +3346,7 @@ static void snd_card_timer_function(unsigned int data)
             pRingHdr[ch].readPtr[i] = ntohl(pRingHdr_share[ch].readPtr[i]);
 
 #if 0
-    ALSA_SEC_PRINT(2, "�� alsa b %x l %x w %x r %x\n"
+    ALSA_SEC_PRINT(2, "?? alsa b %x l %x w %x r %x\n"
         , pRingHdr->beginAddr, pRingHdr->beginAddr + rtk_dec_ao_buffer
         , pRingHdr->writePtr, pRingHdr->readPtr[0]);
 #endif
@@ -3544,7 +3370,6 @@ static void snd_card_timer_function(unsigned int data)
     if(runtime->control->appl_ptr == runtime->status->hw_ptr)
     {
         ALSA_WARNING("[appl_ptr %d = hw_ptr %s %d]\n", (int)runtime->control->appl_ptr, __FUNCTION__, __LINE__);
-		ALSA_WARNING("Need to check why data didn't send to alsa\n");
     }
 
     // check overflow of AO flash in-ring
@@ -3704,7 +3529,6 @@ static void snd_card_timer_function(unsigned long data)
     if (runtime->control->appl_ptr == runtime->status->hw_ptr)
     {
         ALSA_WARNING("[appl_ptr %d = hw_ptr %s %d]\n", (int)runtime->control->appl_ptr, __FUNCTION__, __LINE__);
-		ALSA_WARNING("Need to check why data didn't send to alsa\n");
     }
 
     // update HW rp
@@ -3733,6 +3557,7 @@ static void snd_card_timer_function(unsigned long data)
 #ifndef USE_COPY_OPS
     // update wp
     nPeriodCount = ring_valid_data(0, runtime->boundary, dpcm->nTotalWrite, runtime->control->appl_ptr) / runtime->period_size;
+
     if (nPeriodCount == runtime->periods)
         nPeriodCount--;
     
@@ -3839,7 +3664,7 @@ static void snd_card_timer_function(unsigned long data)
     }
 #endif
     dpcm->nPreHWPtr = dpcm->nHWPtr;
-    //dpcm->nPre_appl_ptr = runtime->control->appl_ptr;
+//    dpcm->nPre_appl_ptr = runtime->control->appl_ptr;
 
     // set timer
     //if(nPeriodCount <= 1)
@@ -4202,7 +4027,7 @@ static unsigned long buf_memcpy2_ring(unsigned long base, unsigned long limit, u
     }   
     return ptr;
 }
-
+//Add by PC
 // create PCM instance
 static int __init snd_card_create_PCM_instance(
 RTK_snd_card_t *pSnd, 
@@ -4229,7 +4054,7 @@ int capture_substreams)
         ALSA_WARNING("[%s %d fail]\n", __FUNCTION__, __LINE__);
         return err;
     }
-    
+//Add by PC    
     // set OPs
     switch(instance_idx)
     {
@@ -4250,10 +4075,6 @@ int capture_substreams)
             snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, &snd_card_rtk_capture_analog_ops);
             sprintf(pcm->name, SND_REALTEK_DRIVER_ANALOG_IN);
             break;
-		case 4:
-			snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, &snd_card_rtk_capture_amic_ops);
-			sprintf(pcm->name, SND_REALTEK_DRIVER_AMIC_IN);
-			break;
         default:
         ALSA_WARNING("[%s %d fail]\n", __FUNCTION__, __LINE__);
             break;
@@ -4305,7 +4126,7 @@ int capture_substreams)
 
 void snd_realtek_hw_playback_volume_work(struct work_struct *work) {
     RTK_snd_card_t *mars = container_of(work, RTK_snd_card_t, work_volume);     
-    TRACE_CODE("[���� %s %d]\n", __FUNCTION__, __LINE__);
+    TRACE_CODE("[???? %s %d]\n", __FUNCTION__, __LINE__);
     RPC_TOAGENT_SET_VOLUME(mars->mixer_volume[MIXER_ADDR_MASTER][0]);
 }
 
@@ -4682,7 +4503,7 @@ static int snd_card_probe(struct platform_device *devptr)
             goto __nodev;
         }
     }
-
+//Add by PC
     // create another instance ONLY for capture AI I2S in
     snd_card_create_PCM_instance(pRTKSnd, 1, 0, 1);
 
@@ -4692,8 +4513,6 @@ static int snd_card_probe(struct platform_device *devptr)
     // create instance ONLY for capture AI Analog in
     snd_card_create_PCM_instance(pRTKSnd, 3, 0, 1);
 
-	// create instance ONLY for capture AI Amic in
-    snd_card_create_PCM_instance(pRTKSnd, 4, 0, 1);
 
     RTK_TRACE_ALSA(" @ %s %d\n", __func__, __LINE__);
     if ((err = snd_card_mars_new_mixer(pRTKSnd)) < 0)
@@ -4792,7 +4611,6 @@ static void rtk_alsa_unregister_all(void)
         platform_device_unregister(devices[i]);
     platform_driver_unregister(&rtk_alsa_driver);
 }
-
 static int __init RTK_alsa_card_init(void)
 {
     int i, cards, ret, err;
@@ -4805,6 +4623,8 @@ static int __init RTK_alsa_card_init(void)
         goto RETURN_ERR;
 
 #ifdef USE_ION_AUDIO_HEAP
+    if (IS_ERR_OR_NULL(rtk_phoenix_ion_device))
+        goto RETURN_ERR;
     alsa_client = ion_client_create(rtk_phoenix_ion_device, "ALSADriver");
 #endif
 
@@ -4885,6 +4705,5 @@ static void __exit RTK_alsa_card_exit(void)
 EXPORT_SYMBOL(snd_realtek_capture_check_hdmirx_enable);
 EXPORT_SYMBOL(snd_realtek_capture_get_stream_name);
 
-
-module_init(RTK_alsa_card_init)
-module_exit(RTK_alsa_card_exit)
+module_init(RTK_alsa_card_init);
+module_exit(RTK_alsa_card_exit);

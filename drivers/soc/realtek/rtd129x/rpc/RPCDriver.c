@@ -1,16 +1,4 @@
 /*
- * Realtek RPC driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- */
-
-
-/*
  * $Id: RPCDriver.c,v 1.10 2004/8/4 09:25 Jacky Exp $
  */
 #include <generated/autoconf.h>
@@ -51,11 +39,11 @@
 //#define SHOW_TASKS_ON_SYSFS
 #define SHOW_TASKS_ON_DEBUGFS
 
+DEFINE_SPINLOCK(gASLock);
 #ifdef CONFIG_FB_RTK
-extern spinlock_t gASLock;
+//extern spinlock_t gASLock;
 extern void dc_irq_handler(void);
 #else
-static DEFINE_SPINLOCK(gASLock);
 #endif
 
 extern int venus_irtx_getscancode(u32, u32*, u32*);
@@ -70,8 +58,6 @@ volatile void __iomem *rpc_ringbuf_base = NULL;
 volatile void __iomem *rpc_common_base = NULL;
 volatile void __iomem *rpc_int_base = NULL;
 volatile void __iomem *rpc_int_flag = NULL;
-
-volatile void __iomem *rpc_refclk_base = NULL;
 
 static int  rpc_irq;
 
@@ -97,14 +83,14 @@ static ssize_t show_tasks(struct device *cd, struct device_attribute *attr, char
     cnt += scnprintf(buf + cnt, (ssize_t)PAGE_SIZE - cnt, "RingEnd:   %x\n", dev->ringEnd);
 
     spin_lock_bh(&extra->lock);
-    list_for_each_entry(proc, &extra->tasks, list){
+    list_for_each_entry(proc, &extra->tasks, list) {
         task = find_task_by_vpid(proc->pid);
         cnt += scnprintf(buf + cnt, (ssize_t)PAGE_SIZE - cnt, "\nProcess:%s\n", task ? task->comm : "N/A");
-        list_for_each_entry(handler, &proc->handlers, list){
+        list_for_each_entry(handler, &proc->handlers, list) {
             cnt += scnprintf(buf + cnt, (ssize_t)PAGE_SIZE - cnt, "\tprogramID:%u\n", handler->programID);
         }
         cnt += scnprintf(buf + cnt, (ssize_t)PAGE_SIZE - cnt, "\tp:%d\n", proc->pid);
-        list_for_each_entry(thread, &proc->threads, list){
+        list_for_each_entry(thread, &proc->threads, list) {
             cnt += scnprintf(buf + cnt, (ssize_t)PAGE_SIZE - cnt, "\tt:%d\n", thread->pid);
         }
     }
@@ -137,20 +123,20 @@ static int rpc_debug_node_show(struct seq_file *s, void *unused)
     seq_printf(s, "RingEnd:   %x\n", dev->ringEnd);
 
     seq_printf(s, "\nRingBuffer:\n");
-    for(i = 0; i < RPC_RING_SIZE; i+= 16){
+    for(i = 0; i < RPC_RING_SIZE; i+= 16) {
         uint32_t *addr = (uint32_t *)(AVCPU2SCPU(dev->ringStart) + i);
         seq_printf(s, "%x: %08x %08x %08x %08x\n", dev->ringStart + i, ntohl(*(addr + 0)), ntohl(*(addr + 1)), ntohl(*(addr + 2)), ntohl(*(addr + 3)));
     }
 
     spin_lock_bh(&extra->lock);
-    list_for_each_entry(proc, &extra->tasks, list){
+    list_for_each_entry(proc, &extra->tasks, list) {
         task = find_task_by_vpid(proc->pid);
         seq_printf(s, "\nProcess:%s\n", task ? task->comm : "N/A");
-        list_for_each_entry(handler, &proc->handlers, list){
+        list_for_each_entry(handler, &proc->handlers, list) {
             seq_printf(s, "\tprogramID:%u\n", handler->programID);
         }
         seq_printf(s, "\tp:%d\n", proc->pid);
-        list_for_each_entry(thread, &proc->threads, list){
+        list_for_each_entry(thread, &proc->threads, list) {
             seq_printf(s, "\tt:%d\n", thread->pid);
         }
     }
@@ -177,17 +163,17 @@ __maybe_unused static struct notifier_block rpc_event_notifier = {
     .notifier_call  = rpc_event_notify,
 };
 
-struct file_operations *rpc_fop_array[]={
+struct file_operations *rpc_fop_array[]= {
     &rpc_poll_fops, /* poll */
     &rpc_intr_fops  /* intr */
 };
 
-void **rpc_data_ptr_array[]={
+void **rpc_data_ptr_array[]= {
     (void **)&rpc_poll_devices, /* poll */
     (void **)&rpc_intr_devices  /* intr */
 };
 
-int rpc_data_size_array[]={
+int rpc_data_size_array[]= {
     sizeof(RPC_DEV), /* poll */
     sizeof(RPC_DEV)  /* intr */
 };
@@ -203,9 +189,9 @@ static struct class *rpc_class;
 
 void rpc_set_flag(uint32_t flag)
 {
-	struct RTK119X_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
-	
-	writel(__cpu_to_be32(flag), &(ipc->audio_rpc_flag));// audio RPC flag
+    struct RTK119X_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
+
+    writel(__cpu_to_be32(flag), &(ipc->audio_rpc_flag));// audio RPC flag
 //    rtk_rpc_wmb(rpc_common_base, RPC_COMM_SIZE);
 
 //  *((int *)phys_to_virt(0x0000b000)) = flag;      // audio RPC flag
@@ -217,18 +203,18 @@ void rpc_set_flag(uint32_t flag)
 
 void rpc_set_ir_wakeup_key(uint32_t uScancode, uint32_t uScancode_msk)
 {
-	struct RTK119X_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
+    struct RTK119X_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
 
-	pr_info("uScancode = 0x%x , uScancode_msk = 0x%x ",uScancode, uScancode_msk);
-	writel(__cpu_to_be32(uScancode_msk), &(ipc->ir_scancode_mask));// audio RPC flag for scancode mask
-	writel(__cpu_to_be32(uScancode), &(ipc->ir_wakeup_scancode));// audio RPC flag for scancode key
+    pr_info("uScancode = 0x%x , uScancode_msk = 0x%x ",uScancode, uScancode_msk);
+    writel(__cpu_to_be32(uScancode_msk), &(ipc->ir_scancode_mask));// audio RPC flag for scancode mask
+    writel(__cpu_to_be32(uScancode), &(ipc->ir_wakeup_scancode));// audio RPC flag for scancode key
 }
 
 uint32_t rpc_get_flag(void)
 {
-	struct RTK119X_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
+    struct RTK119X_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
 
-	return __be32_to_cpu(readl(&(ipc->audio_rpc_flag)));
+    return __be32_to_cpu(readl(&(ipc->audio_rpc_flag)));
 }
 
 void rpc_send_interrupt(void)
@@ -258,55 +244,55 @@ static int rpc_event_notify(struct notifier_block *self, unsigned long action, v
 {
 #ifdef CONFIG_REALTEK_AVCPU
     switch (action) {
-        case AVCPU_SUSPEND:
-            pr_debug("[RPC]: AVCPU_SUSPEND...\n");
-            //rpc_poll_pause();
-            rpc_poll_suspend();
-            //rpc_intr_pause();
-            rpc_intr_suspend();
-            //rpc_kern_pause();
-            rpc_kern_suspend();
-            mdelay(10);
-            break;
-        case AVCPU_RESUME:
-            pr_debug("[RPC]: AVCPU_RESUME...\n");
-            rpc_poll_resume();
-            rpc_intr_resume();
-            rpc_kern_resume();
-            break;
-        case AVCPU_RESET_PREPARE:
-            pr_debug("[RPC]: AVCPU_RESET_PREPARE...\n");
-            rpc_poll_pause();
-            rpc_intr_pause();
-            rpc_kern_pause();
-            mdelay(10);
-            rpc_set_flag(0x00000000);
-            break;
-        case AVCPU_RESET_DONE:
-            pr_debug("[RPC]: AVCPU_RESET_DONE...\n");
-            rpc_poll_init();
-            rpc_intr_init();
-            rpc_kern_init();
+    case AVCPU_SUSPEND:
+        pr_debug("[RPC]: AVCPU_SUSPEND...\n");
+        //rpc_poll_pause();
+        rpc_poll_suspend();
+        //rpc_intr_pause();
+        rpc_intr_suspend();
+        //rpc_kern_pause();
+        rpc_kern_suspend();
+        mdelay(10);
+        break;
+    case AVCPU_RESUME:
+        pr_debug("[RPC]: AVCPU_RESUME...\n");
+        rpc_poll_resume();
+        rpc_intr_resume();
+        rpc_kern_resume();
+        break;
+    case AVCPU_RESET_PREPARE:
+        pr_debug("[RPC]: AVCPU_RESET_PREPARE...\n");
+        rpc_poll_pause();
+        rpc_intr_pause();
+        rpc_kern_pause();
+        mdelay(10);
+        rpc_set_flag(0x00000000);
+        break;
+    case AVCPU_RESET_DONE:
+        pr_debug("[RPC]: AVCPU_RESET_DONE...\n");
+        rpc_poll_init();
+        rpc_intr_init();
+        rpc_kern_init();
 
-            // clear the inter-processor interrupts
-            //modify by Angus
-            //*((int *)REG_SB2_CPU_INT) = 0x0000007e;
-DC_SET_BIT(rpc_int_flag,RPC_AUDIO_SET_NOTIFY);
+        // clear the inter-processor interrupts
+        //modify by Angus
+        //*((int *)REG_SB2_CPU_INT) = 0x0000007e;
+        DC_SET_BIT(rpc_int_flag,RPC_AUDIO_SET_NOTIFY);
 //    rtk_rpc_wmb(rpc_common_base, RPC_COMM_SIZE);
 
-            writel(RPC_INT_AS, rpc_int_base+RPC_SB2_INT);
-            writel(RPC_INT_SA, rpc_int_base+RPC_SB2_INT);
+        writel(RPC_INT_AS, rpc_int_base+RPC_SB2_INT);
+        writel(RPC_INT_SA, rpc_int_base+RPC_SB2_INT);
 
 // Enable the interrupt from system to audio & video
 #if 0
-writel((RPC_INT_SA | RPC_INT_WRITE_1), rpc_int_base+RPC_SB2_INT_EN);
+        writel((RPC_INT_SA | RPC_INT_WRITE_1), rpc_int_base+RPC_SB2_INT_EN);
 #else
-rpc_send_interrupt();
+        rpc_send_interrupt();
 #endif
 
-            rpc_set_flag(0xffffffff);
+        rpc_set_flag(0xffffffff);
 
-            break;
+        break;
     }
 #endif
     return 0;
@@ -317,7 +303,7 @@ int my_copy_to_user(int *des, int *src, int size)
 {
     char buf[256];
     int count = size;
-    void __user *pDes = (void __user *)des;
+    //void __user *pDes = (void __user *)des;
     void *pSrc = (void *)src;
     int ret = 0;
     int i = 0;
@@ -345,37 +331,37 @@ int my_copy_to_user(int *des, int *src, int size)
 
 int my_copy_from_user(volatile void __iomem *des, const void *src, int size)
 {
-/*
-    char buf[256];
-    int count = size;
-    void *pSrc = (void *)src;
-    int ret = 0;
-    int i = 0;
+    /*
+        char buf[256];
+        int count = size;
+        void *pSrc = (void *)src;
+        int ret = 0;
+        int i = 0;
 
-    if (size > 256)
-    {
-        BUG();
-    }
+        if (size > 256)
+        {
+            BUG();
+        }
 
-    ret = copy_from_user((int *)buf, (int *)src, size);
+        ret = copy_from_user((int *)buf, (int *)src, size);
 
-    while (size >= 4)
-    {
-        __raw_writel((volatile u32 *)&buf[i], des);
-        i+=4;
-        des += 4;
-        size -= 4;
-    }
-    while (size > 0)
-    {
-        __raw_writeb((volatile u8 *)&buf[i], des);
-        i++;
-        des++;
-        size--;
-    }
-    return ret;
-*/
-return 0;
+        while (size >= 4)
+        {
+            __raw_writel((volatile u32 *)&buf[i], des);
+            i+=4;
+            des += 4;
+            size -= 4;
+        }
+        while (size > 0)
+        {
+            __raw_writeb((volatile u8 *)&buf[i], des);
+            i++;
+            des++;
+            size--;
+        }
+        return ret;
+    */
+    return 0;
 }
 
 
@@ -392,7 +378,7 @@ int my_copy_user(int *des, int *src, int size)
         BUG();
     if((unsigned long)src < 0xc0000000 && access_ok(VERIFY_READ, src, size) == 0)
         BUG();
-    if (((int)src & 0x3) || ((int)des & 0x3))
+    if (((unsigned long)src & 0x3) || ((unsigned long)des & 0x3))
         pr_warn("my_copy_user: unaligned happen...\n");
 
     while (size >= 4) {
@@ -425,11 +411,11 @@ irqreturn_t rpc_isr(int irq, void *dev_id)
             //to clear interrupt, set bit[0] to 0 then we can clear A2S int
             writel(RPC_INT_AS, rpc_int_base+RPC_SB2_INT);
         }
-        #if 1
+#if 1
         return IRQ_HANDLED;
-        #else
+#else
         return IRQ_NONE;
-        #endif
+#endif
     } else {
         //unsigned long flags;
         //spin_lock_irqsave(&gASLock,flags);
@@ -446,24 +432,20 @@ irqreturn_t rpc_isr(int irq, void *dev_id)
             if (itr & RPC_INT_AS) {
                 //to clear interrupt, set bit[0] to 0 then we can clear A2S int
                 writel(RPC_INT_AS, rpc_int_base+RPC_SB2_INT);
-                if (rpc_intr_devices[RPC_INTR_DEV_AS_ID1].ringIn != rpc_intr_devices[RPC_INTR_DEV_AS_ID1].ringOut){
-                    pr_debug("%s intr\n", __func__);
+                if (rpc_intr_devices[RPC_INTR_DEV_AS_ID1].ringIn != rpc_intr_devices[RPC_INTR_DEV_AS_ID1].ringOut)
                     tasklet_schedule(&(rpc_intr_extra[RPC_INTR_DEV_AS_ID1].tasklet));
-                }
-                if (rpc_kern_devices[RPC_KERN_DEV_AS_ID1].ringIn != rpc_kern_devices[RPC_KERN_DEV_AS_ID1].ringOut){
-                    pr_debug("%s kern\n", __func__);
+                if (rpc_kern_devices[RPC_KERN_DEV_AS_ID1].ringIn != rpc_kern_devices[RPC_KERN_DEV_AS_ID1].ringOut)
                     wake_up_interruptible(&(rpc_kern_devices[RPC_KERN_DEV_AS_ID1].ptrSync->waitQueue));
-                }
             }
             itr = readl(rpc_int_base+RPC_SB2_INT);
         }
     } else {
 //      pr_warn("Not RPC interrupt...\n");
-        #if 1
+#if 1
         return IRQ_HANDLED;
-        #else
+#else
         return IRQ_NONE;
-        #endif
+#endif
     }
 
     return IRQ_HANDLED;
@@ -482,10 +464,11 @@ __maybe_unused static int rtk_rpc_probe(struct platform_device *pdev)
     int i;
     struct device_node *np = pdev->dev.of_node;
     struct RTK119X_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
-    struct resource res;
-
-    rpc_refclk_base = ioremap(0x9801B540, 0x8);
-
+    //struct resource res;
+#ifdef SHOW_TASKS_ON_DEBUGFS
+    struct dentry *rpcroot;
+	struct dentry *rpcnode;
+#endif
     if (WARN_ON(!np))
         pr_err("Could not found device node");
 
@@ -521,7 +504,7 @@ __maybe_unused static int rtk_rpc_probe(struct platform_device *pdev)
     rpc_class->devnode = rpc_devnode;
 
 #ifdef SHOW_TASKS_ON_DEBUGFS
-    struct dentry *rpcroot = debugfs_create_dir("rpc", NULL);
+    rpcroot = debugfs_create_dir("rpc", NULL);
 #endif
 
     for (i = 0; i < RPC_NR_DEVS; i++) {
@@ -533,7 +516,7 @@ __maybe_unused static int rtk_rpc_probe(struct platform_device *pdev)
 #endif
 #ifdef SHOW_TASKS_ON_DEBUGFS
         sprintf(buf, "rpc%d", i);
-        struct dentry *rpcnode = debugfs_create_file(buf, 0444, rpcroot, extra, &rpc_debug_node_ops);
+        rpcnode = debugfs_create_file(buf, 0444, rpcroot, extra, &rpc_debug_node_ops);
 #endif
         extra->sdev = dev;
         dev_set_drvdata(dev, extra);
@@ -585,38 +568,38 @@ __maybe_unused static int rtk_rpc_remove(struct platform_device *pdev)
 static int venus_rpc_pm_suspend(struct device *dev) {
     // Disable the interrupt from system to audio & video
 
-	printk(KERN_INFO "[RTK_RPC] Enter %s\n", __func__);
 
 #if 1
     int MaxCount = 500;
-	u32 uScancode = 0x0;
-	u32 uScancode_msk = 0x0;
+//    u32 uScancode = 0x0;
+//    u32 uScancode_msk = 0x0;
 
-	rpc_set_flag(0xdaedffff); // STOP AUDIO HAS_CHECK
+    printk(KERN_INFO "[RTK_RPC] Enter %s\n", __func__);
+    rpc_set_flag(0xdaedffff); // STOP AUDIO HAS_CHECK
 
-	while ((rpc_get_flag() != 0x0) && (MaxCount > 0)) {
-		mdelay(1);
-		MaxCount--;
-	}
+    while ((rpc_get_flag() != 0x0) && (MaxCount > 0)) {
+        mdelay(1);
+        MaxCount--;
+    }
 
     rpc_event_notify(NULL,AVCPU_SUSPEND,NULL); // STOP SYSTEM RPC
 
     DC_RESET_BIT(rpc_int_flag,RPC_AUDIO_SET_NOTIFY); // Disable Interrupt
 //    rtk_rpc_wmb(rpc_common_base, RPC_COMM_SIZE);
 
-#ifdef CONFIG_RTK_IR
-	venus_irtx_getscancode(116, &uScancode, &uScancode_msk);					// where 116 is linux,code for KEY_POWER
-	rpc_set_ir_wakeup_key(uScancode, uScancode_msk);
+#ifdef CONFIG_REALTEK_IR
+    venus_irtx_getscancode(116, &uScancode, &uScancode_msk);					// where 116 is linux,code for KEY_POWER
+    rpc_set_ir_wakeup_key(uScancode, uScancode_msk);
 #endif
 
-	rpc_set_flag(0xdeadffff); // WAIT AUDIO RPC SUSPEND READY
+    rpc_set_flag(0xdeadffff); // WAIT AUDIO RPC SUSPEND READY
 
-	while ((rpc_get_flag() != 0x0) && (MaxCount > 0)) {
-		mdelay(1);
-		MaxCount--;
-	}
+    while ((rpc_get_flag() != 0x0) && (MaxCount > 0)) {
+        mdelay(1);
+        MaxCount--;
+    }
 
-	printk(KERN_INFO "[RTK_RPC] Wait %d ms\n", (500 - MaxCount));
+    printk(KERN_INFO "[RTK_RPC] Wait %d ms\n", (500 - MaxCount));
 
 #else
     writel(RPC_INT_SA, rpc_int_base+RPC_SB2_INT_EN);
@@ -627,7 +610,7 @@ static int venus_rpc_pm_suspend(struct device *dev) {
     //rtd_outl(REG_SB2_CPU_INT_EN, RPC_INT_SV2);
 #endif
 
-	printk(KERN_INFO "[RTK_RPC] Exit %s\n", __func__);
+    printk(KERN_INFO "[RTK_RPC] Exit %s\n", __func__);
 
     return 0;
 }
@@ -635,12 +618,12 @@ static int venus_rpc_pm_suspend(struct device *dev) {
 static int venus_rpc_pm_resume(struct device *dev) {
     // Enable the interrupt from system to audio & video
 
-	printk(KERN_INFO "[RTK_RPC] Enter %s\n", __func__);
+    printk(KERN_INFO "[RTK_RPC] Enter %s\n", __func__);
 
 #if 1
     DC_SET_BIT(rpc_int_flag,RPC_AUDIO_SET_NOTIFY);
 //    rtk_rpc_wmb(rpc_common_base, RPC_COMM_SIZE);
-	rpc_set_flag(0xffffffff);
+    rpc_set_flag(0xffffffff);
 #else
     writel((RPC_INT_SA | RPC_INT_WRITE_1), rpc_int_base+RPC_SB2_INT_EN);
     //writel((RPC_INT_SV | RPC_INT_WRITE_1), (void *)REG_SB2_CPU_INT_EN);
@@ -660,13 +643,19 @@ static int venus_rpc_pm_resume(struct device *dev) {
 static const struct dev_pm_ops venus_rpc_pm_ops = {
     .suspend_late    = venus_rpc_pm_suspend,
     .resume_early     = venus_rpc_pm_resume,
-    .poweroff   =  venus_rpc_pm_suspend,
 #ifdef CONFIG_HIBERNATION
     .freeze     =  venus_rpc_pm_suspend,
     .thaw       =  venus_rpc_pm_resume,
+    .poweroff   =  venus_rpc_pm_suspend,
     .restore    =  venus_rpc_pm_resume,
 #endif
 };
+
+static void venus_rpc_shutdown(struct device *dev)
+{
+ 	venus_rpc_pm_suspend(dev);
+}
+
 
 #endif
 
@@ -679,16 +668,18 @@ __maybe_unused static struct of_device_id rtk_rpc_ids[] = {
 
 // Change device_driver to platform_driver.
 static struct platform_driver venus_rpc_driver = {
-  .probe  = rtk_rpc_probe,
-  .remove = rtk_rpc_remove,
+    .probe  = rtk_rpc_probe,
+    .remove = rtk_rpc_remove,
     .driver = {
         .name       = "Realtek,rtk-rpc",
         .bus        = &platform_bus_type,
-    #ifdef CONFIG_PM
+#ifdef CONFIG_PM
         .pm         = &venus_rpc_pm_ops,
     #endif
       .of_match_table = rtk_rpc_ids,
-	  .shutdown = venus_rpc_pm_suspend,
+#ifdef CONFIG_PM	  
+	  .shutdown = venus_rpc_shutdown,
+#endif	  
     },
 };
 // +++ cyhuang (2011/03/23)
@@ -696,7 +687,7 @@ static struct platform_driver venus_rpc_driver = {
 // Destructor of this module.
 void RPC_cleanup_module(void)
 {
-    int i;
+    //int i;
 
     if (venus_rpc_devs != 0) {
         if (venus_rpc_devs->dev.driver != 0)
@@ -732,7 +723,7 @@ void RPC_cleanup_module(void)
 int RPC_init_module(void)
 {
     int result;
-    int i;
+    //int i;
 
     if ((result = platform_driver_register(&venus_rpc_driver)) != 0) {
         pr_err("Can't register RPC device driver...");

@@ -1,14 +1,3 @@
-/*
- * Realtek SDIO wrapper driver
- *
- * Authors:
- * Copyright (C) 2015 Realtek Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-
 #include <linux/err.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -27,9 +16,10 @@
 #include <linux/of_address.h>
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
+#include <linux/version.h>
 
 #include "sdhci-pltfm.h"
-#include "sdhci-rtk.h"
+
 #include <soc/realtek/rtd129x_lockapi.h>
 
 #include <linux/clkdev.h>   // clk_get
@@ -76,6 +66,7 @@ struct timing_phase_path {
         int len;
 };
 
+#if 0
 void set_SDIO_version(int version)
 {
         SDIO_version=version;
@@ -87,66 +78,8 @@ int get_SDIO_version(void)
         return SDIO_version;
 }
 EXPORT_SYMBOL(get_SDIO_version);
-
-#ifdef CONFIG_RTK_SDIO_CLK_ADJUST
-
-void rtk_adjust_clock_for_wifi(unsigned int channel, unsigned int offset, unsigned int bwmode)
-{
-	wifi_sdio_clk_tbl rtk_wifi_sdio_clk_tbl[] = {
-		{ 1, 1, 0, {{0x3011893, 0x534388}, {0, 0}}},
-		{ 2, 1, 0, {{0xc1893  , 0x554388}, {0, 0}}},
-		{ 3, 1, 0, {{0x3fc1893, 0x544388}, {0, 0}}},
-		{ 4, 1, 0, {{0x3fc1893, 0x534388}, {0, 0}}},
-		{ 5, 1, 1, {{0xd11893 , 0x534388}, {0x3011893, 0x534388}}},
-		{ 6, 1, 1, {{0x11893  , 0x544388}, {0x3fd1893, 0x564388}}},
-		{ 7, 1, 1, {{0x3FD1893, 0x554388}, {0x3fd1893, 0x554388}}},
-		{ 8, 1, 1, {{0x51893  , 0x554388}, {0x3fd1893, 0x554388}}},
-		{ 9, 1, 1, {{0x7d1893 , 0x544388}, {0x3fd1893, 0x554388}}},
-		{10, 0, 1, {{0, 0}, {0x10c1893, 0x554388}}},
-		{11, 0, 1, {{0, 0}, {0x11893  , 0x554388}}},
-		{12, 0, 1, {{0, 0}, {0x111893 , 0x554388}}},
-		{13, 0, 1, {{0, 0}, {0x11893  , 0x554388}}},
-	};
-	int i, ret = -1, idx=0;
-	u32 value = 0;
-
-	printk("%s: channel=%d, offset=%d, bwmode=%d\n", __func__, channel, offset, bwmode);
-
-	for (i=0; i < ARRAY_SIZE(rtk_wifi_sdio_clk_tbl); i++) {
-		if (channel == rtk_wifi_sdio_clk_tbl[i].channel) {
-			if ((offset == PRI_CH_OFFSET_LOWER && rtk_wifi_sdio_clk_tbl[i].lower)
-				|| (offset == PRI_CH_OFFSET_DONT_CARE && rtk_wifi_sdio_clk_tbl[i].lower))
-				idx=0;
-			else if ((offset == PRI_CH_OFFSET_UPPER && rtk_wifi_sdio_clk_tbl[i].upper)
-				|| (offset == PRI_CH_OFFSET_DONT_CARE && rtk_wifi_sdio_clk_tbl[i].upper))
-				idx=1;
-			else
-				break;
-
-			printk("%d: 0x%08x,0x%08x\n", rtk_wifi_sdio_clk_tbl[i].channel, rtk_wifi_sdio_clk_tbl[i].map[idx].reg1a4,
-				rtk_wifi_sdio_clk_tbl[i].map[idx].reg1a8);
-
-			value = readl(crt_membase + 0x10a58);
-			if (value & 0x40000000)
-				writel(value & ~(0x40000000), crt_membase + 0x10a58);
-			else
-				writel(value | 0x40000000, crt_membase + 0x10a58);
-			writel(rtk_wifi_sdio_clk_tbl[i].map[idx].reg1a4, crt_membase + 0x01A4);
-			mdelay(2);
-			writel(rtk_wifi_sdio_clk_tbl[i].map[idx].reg1a8, crt_membase + 0x01A8);
-			mdelay(2);
-			writel(value, crt_membase + 0x10a58);
-
-			ret = 0;
-			break;
-		}
-	}
-
-	if (ret)
-		printk("invalid settings: ch=%u, offset=%u, bwmode=%u\n", channel, offset, bwmode);
-}
-EXPORT_SYMBOL_GPL(rtk_adjust_clock_for_wifi);
 #endif
+
 static void rtk_sdhci_buswidth(struct sdhci_host *host, int bus_width)
 {
     u32 ctrl = 0;
@@ -353,10 +286,11 @@ out:
     host->clock = clock;
 }
 
-void rtk_register_set(void)
+void rtk_register_set(struct mmc_host *host)
 {
 	unsigned long flags2;
-	if(get_SDIO_version()==4) {
+	//if(get_SDIO_version()==4) {
+	if(host->rtk_sdio_info.version==4) {
 		printk(KERN_ERR "SDIO SDR104 mode\n");
 		if(readl(crt_membase+0x1a204)==0x00) {
 			writel(0x00000006, crt_membase + 0x01AC);
@@ -375,7 +309,8 @@ void rtk_register_set(void)
 			writel(0x00000000, crt_membase+ 0x10a58);
 		}
 	}
-	else if(get_SDIO_version()==3) {
+	//else if(get_SDIO_version()==3) {
+	else if(host->rtk_sdio_info.version==3) {
 		writel(0x0000003b, crt_membase + 0x01A0);
 
                 rtk_lockapi_lock(flags2, __FUNCTION__);
@@ -390,7 +325,8 @@ void rtk_register_set(void)
 			printk(KERN_ERR "SDIO 3.0 A01 version\n");
 		}
 	}
-	else if(get_SDIO_version()==2){
+	//else if(get_SDIO_version()==2){
+	else if(host->rtk_sdio_info.version==2) {
 		writel(0x00000003, crt_membase + 0x01A0);
 
 		if(readl(crt_membase+0x1a204)==0x00) {
@@ -655,7 +591,7 @@ finish:
     return final_phase;
 }
 
-static int rtk_sdhci_tuning_rx(struct sdhci_host *host)
+static int rtk_sdhci_tuning_rx(struct sdhci_host *host, u32 opcode)
 {
     int sample_point = 0;
     int ret = 0;
@@ -669,7 +605,11 @@ static int rtk_sdhci_tuning_rx(struct sdhci_host *host)
     for(sample_point = 0 ; sample_point <= MAX_PHASE ; sample_point++){
         for(i = 0 ; i < TUNING_CNT ; i++){
             rtk_sdhci_change_rx_phase((u8)sample_point);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
+            ret = mmc_send_tuning(mmc, opcode, NULL);
+#else
             ret = mmc_send_tuning(mmc);
+#endif
             if (ret==0)
                 raw_phase_map[i] |= (1 << sample_point);
         }
@@ -717,9 +657,8 @@ static int rtk_sdhci_execute_tuning(struct sdhci_host *host, u32 opcode)
     reg_tmp2 = readl(crt_membase + 0x01A4); //disable spectrum
     writel((reg_tmp2 & 0xFFFF1FFF), crt_membase + 0x01A4); //PLL_SD2 clear [15:13]
 
-    //ret = rtk_sdhci_tuning_rx(host);
     do{
-        ret = rtk_sdhci_tuning_rx(host);
+        ret = rtk_sdhci_tuning_rx(host, opcode);
         if(ret){
             reg_tmp = readl(crt_membase + 0x01A8);
             reg_tuned3318 = (reg_tmp & 0x03FF0000) >> 16;
@@ -841,6 +780,9 @@ static int sdhci_rtk_probe(struct platform_device *pdev)
                       MMC_CAP_NONREMOVABLE ;
 
     host->mmc->pm_caps = MMC_PM_KEEP_POWER | MMC_PM_WAKE_SDIO_IRQ;
+    
+    host->mmc->rtk_sdio_info.register_set = rtk_register_set;
+    host->mmc->rtk_sdio_info.close_clk = rtk_sdhci_close_clk;
 
     rc = sdhci_add_host(host);
 
@@ -872,6 +814,7 @@ static int sdhci_rtk_remove(struct platform_device *pdev)
     return 0;
 }
 
+#ifdef CONFIG_PM
 static int sdhci_rtk_suspend(struct device *dev){
     printk(KERN_ERR "[SDIO] sdhci_rtk_suspend start\n");
     if(clock_enable==true) {
@@ -901,7 +844,8 @@ static int sdhci_rtk_resume(struct device *dev){
     	addr = crt_membase + SDIO_CLKEN_REGOFF;
 
 //#ifdef CONFIG_MMC_SDHCI_RTK_SDIO30 //SDIO 3.0 support 
-    if(get_SDIO_version()==3 || get_SDIO_version()==4) {
+    //if(get_SDIO_version()==3 || get_SDIO_version()==4) {
+    if(host->mmc->rtk_sdio_info.version==3 || host->mmc->rtk_sdio_info.version==4) {
 	unsigned long flags2;
 	if(readl(crt_membase+0x1a204)==0x00) {
 		//printk(KERN_ERR "SDIO 3.0 A00\n");
@@ -912,7 +856,8 @@ static int sdhci_rtk_resume(struct device *dev){
                 writel(0xbbbbbbbb, crt_membase + 0x12640);
                 rtk_lockapi_unlock(flags2, __FUNCTION__);
 		
-		if(get_SDIO_version()==3) {
+		//if(get_SDIO_version()==3) {
+		if(host->mmc->rtk_sdio_info.version==3) {
 			writel(0x00000001, crt_membase + 0x0018);
 			writel(0x00000006, crt_membase + 0x01AC);
 			writel(0x04517893, crt_membase + 0x01A4);
@@ -952,7 +897,8 @@ static int sdhci_rtk_resume(struct device *dev){
                 writel(0x0000bbbb, crt_membase + 0x1263c);
                 writel(0xbbbbbbbb, crt_membase + 0x12640);
                 rtk_lockapi_unlock(flags2, __FUNCTION__);
-		if(get_SDIO_version()==3) {
+		//if(get_SDIO_version()==3) {
+		if(host->mmc->rtk_sdio_info.version==3) {
 			writel(0x40000000, crt_membase+ 0x10a58);
 			writel(0x00000006, crt_membase + 0x01AC);
 			writel(0x04517893, crt_membase + 0x01A4);
@@ -1045,14 +991,17 @@ const struct dev_pm_ops sdhci_rtk_pmops = {
     .suspend = sdhci_rtk_suspend,
     .resume = sdhci_rtk_resume,
 };
+#endif //#ifdef CONFIG_PM
 
 static struct platform_driver sdhci_rtk_driver = {
     .driver = {
         .name = DRIVER_NAME,
         .owner = THIS_MODULE,
         .of_match_table = sdhci_rtk_dt_match,
+#ifdef CONFIG_PM
         //.pm    = SDHCI_PLTFM_PMOPS,
         .pm = &sdhci_rtk_pmops,
+#endif
     },
     .probe = sdhci_rtk_probe,
     .remove = sdhci_rtk_remove,
@@ -1061,3 +1010,4 @@ static struct platform_driver sdhci_rtk_driver = {
 module_platform_driver(sdhci_rtk_driver);
 
 MODULE_DESCRIPTION("SDHCI host driver for Realtek");
+MODULE_LICENSE("GPL");

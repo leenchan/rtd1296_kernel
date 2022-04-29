@@ -74,7 +74,6 @@ static const struct drm_plane_funcs rtk_plane_funcs = {
 };
 
 int rtk_prepare_plane_fb(struct drm_plane *plane,
-        struct drm_framebuffer *fb,
         const struct drm_plane_state *new_state)
 {
     DRM_DEBUG_KMS("[%s:%d]\n", __FUNCTION__, __LINE__);
@@ -82,7 +81,6 @@ int rtk_prepare_plane_fb(struct drm_plane *plane,
 }
 
 void rtk_cleanup_plane_fb(struct drm_plane *plane,
-        struct drm_framebuffer *fb,
         const struct drm_plane_state *old_state)
 {
     DRM_DEBUG_KMS("[%s:%d]\n", __FUNCTION__, __LINE__);

@@ -7,8 +7,3 @@ config RTK_THERMAL_CPU_CORE_COOLING
     tristate "Realtek cpu_core cooling"
     depends on RTK_THERMAL && HOTPLUG_CPU 
     default y
-
-config RTK_THERMAL_EOH
-	tristate "Realtek thermal EOH"
-	depends on RTK_THERMAL
-	default y

@@ -1,17 +1,9 @@
-/*
- * Realtek I2C driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- */
-
 #ifndef __I2C_VENUS_H__
 #define __I2C_VENUS_H__
 
+#ifdef CONFIG_ARCH_RTD129X
+#include <soc/realtek/venus_gpio.h>
+#endif
 #include "../algos/i2c-algo-phoenix.h"
 #include "i2c-rtk-priv.h"
 
@@ -105,21 +97,31 @@ typedef struct
 #define I2C_COMP_TYPE           0x00fc
 
 #define ISO_ISR_I2C0	(0x00000001 << 8)
+#ifdef CONFIG_ARCH_RTD129X
 #define ISO_ISR_I2C1    (0x00000001 << 11)
+#endif
 #define ISO_ISR_I2C6	(0x00000001 << 10)
 
+#ifdef CONFIG_ARCH_RTD119X
+#define MIS_ISR_I2C1        (0x00000001 << 4)
+#endif
 #define MIS_ISR_I2C2     	(0x00000001 << 26)
 #define MIS_ISR_I2C3     	(0x00000001 << 23)
 #define MIS_ISR_I2C4     	(0x00000001 << 15)
 #define MIS_ISR_I2C5     	(0x00000001 << 14)
 
+#ifdef CONFIG_ARCH_RTD119X
+#define MIS_I2C1_SDA_DEL    0x0088
+#endif
 #define MIS_I2C2_SDA_DEL	0x008C
 #define MIS_I2C3_SDA_DEL	0x0090
 #define MIS_I2C4_SDA_DEL	0x0094
 #define MIS_I2C5_SDA_DEL	0x0098
 
 #define ISO_I2C0_SDA_DEL	0x0084
+#ifdef CONFIG_ARCH_RTD129X
 #define ISO_I2C1_SDA_DEL	0x0080
+#endif
 #define ISO_I2C6_SDA_DEL	0x00c0
 
 //IC_CON

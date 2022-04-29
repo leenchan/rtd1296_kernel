@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT 2012-2015 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2012-2015, 2017 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -70,7 +70,6 @@ static void __resource_set_release(struct kref *ref)
 int kds_callback_init(struct kds_callback *cb, int direct, kds_callback_fn user_cb)
 {
 	int ret = 0;
-//printk(KERN_ALERT "[KDS %s %d] direct %d\n", __FUNCTION__, __LINE__, direct);
 
 	cb->direct = direct;
 	cb->user_cb = user_cb;
@@ -92,7 +91,6 @@ EXPORT_SYMBOL(kds_callback_init);
 
 void kds_callback_term(struct kds_callback *cb)
 {
-//printk(KERN_ALERT "[KDS %s %d]\n", __FUNCTION__, __LINE__);
 	if (!cb->direct)
 	{
 		BUG_ON(!cb->wq);
@@ -139,7 +137,6 @@ static void kds_callback_perform(struct kds_resource_set *rset)
 
 void kds_resource_init(struct kds_resource * const res)
 {
-//printk(KERN_ALERT "[KDS %s %d] res %p\n", __FUNCTION__, __LINE__, res);
 	BUG_ON(!res);
 	INIT_LIST_HEAD(&res->waiters.link);
 	res->waiters.parent = KDS_RESOURCE;
@@ -149,7 +146,6 @@ EXPORT_SYMBOL(kds_resource_init);
 int kds_resource_term(struct kds_resource *res)
 {
 	unsigned long lflags;
-//printk(KERN_ALERT "[KDS %s %d]\n", __FUNCTION__, __LINE__);
 	BUG_ON(!res);
 	spin_lock_irqsave(&kds_lock, lflags);
 	if (!list_empty(&res->waiters.link))
@@ -177,8 +173,7 @@ int kds_async_waitall(
 	unsigned long lflags;
 	int i;
 	int triggered;
-	int err = -EFAULT;
-//printk(KERN_ALERT "[KDS %s %d]\n", __FUNCTION__, __LINE__);
+
 	BUG_ON(!pprset);
 	BUG_ON(!resource_list);
 	BUG_ON(!cb);
@@ -266,11 +261,10 @@ roll_back:
 	{
 		list_del(&rset->resources[i].link);
 	}
-	err = -EINVAL;
 
 	spin_unlock_irqrestore(&kds_lock, lflags);
 	kfree(rset);
-	return err;
+	return -EINVAL;
 }
 EXPORT_SYMBOL(kds_async_waitall);
 
@@ -511,7 +505,6 @@ void kds_resource_set_release(struct kds_resource_set **pprset)
 	struct kds_resource_set *rset;
 	int queued;
 
-//printk(KERN_ALERT "[KDS %s %d]\n", __FUNCTION__, __LINE__);
 	rset = cmpxchg(pprset, *pprset, NULL);
 
 	if (!rset)

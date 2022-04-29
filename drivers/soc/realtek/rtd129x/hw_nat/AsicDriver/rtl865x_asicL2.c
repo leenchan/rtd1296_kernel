@@ -6,11 +6,6 @@
 *	PHY/MII/Port/STP/QOS
 * Abstract :
 * Author : hyking (hyking_liu@realsil.com.cn)
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
 */
 #include <net/rtl/rtl_types.h>
 #include <net/rtl/rtl_glue.h>
@@ -7304,8 +7299,8 @@ int32 rtl865x_initAsicL2(rtl8651_tblAsic_InitPara_t *para)
 #elif defined(CONFIG_RTL_8197F)
 	#if defined(CONFIG_RTD_1295_HWNAT)
 	REG32(LEDCR0) = (REG32(LEDCR0) & ~(LEDTOPOLOGY_MASK | (3 << 10))) |
-			((hwnat_led_mode & 3) << 10) |
-			((hwnat_led_mode & 4) ? LEDMODE_DIRECT : LEDMODE_SCAN);
+		((hwnat_led_mode & 3) << 10) |
+		((hwnat_led_mode & 4) ? LEDMODE_DIRECT : LEDMODE_SCAN);
 	#else /* CONFIG_RTD_1295_HWNAT */
 	#if !defined(CONFIG_RTL_8367R_SUPPORT)
 	{
@@ -7322,7 +7317,7 @@ int32 rtl865x_initAsicL2(rtl8651_tblAsic_InitPara_t *para)
 	REG32(PIN_MUX_SEL15) = ((REG32(PIN_MUX_SEL15)&(0xFFFFFF00)) | (0x77));
 #endif
 	REG32(LEDCR0) = (REG32(LEDCR0) & ~LEDTOPOLOGY_MASK) | LEDMODE_DIRECT;
-	#endif /* CONFIG_RTD_1295_HWNAT */
+	#endif /*CONFIG_RTD_1295_HWNAT)*/
 #endif
 #endif
 

@@ -53,9 +53,6 @@ static const struct usb_device_id usb_quirk_list[] = {
 	/* Microsoft LifeCam-VX700 v2.0 */
 	{ USB_DEVICE(0x045e, 0x0770), .driver_info = USB_QUIRK_RESET_RESUME },
 
-	/* Microsoft Wireless Mouse 5000 */
-	{ USB_DEVICE(0x045e, 0x0745), .driver_info = USB_QUIRK_RESET },
-
 	/* Logitech HD Pro Webcams C920 and C930e */
 	{ USB_DEVICE(0x046d, 0x082d), .driver_info = USB_QUIRK_DELAY_INIT },
 	{ USB_DEVICE(0x046d, 0x0843), .driver_info = USB_QUIRK_DELAY_INIT },
@@ -87,9 +84,6 @@ static const struct usb_device_id usb_quirk_list[] = {
 
 	/* Logitech Harmony 700-series */
 	{ USB_DEVICE(0x046d, 0xc122), .driver_info = USB_QUIRK_DELAY_INIT },
-
-	/* Logitech Wireless Mouse M705 */
-	{ USB_DEVICE(0x046d, 0xc52b), .driver_info = USB_QUIRK_RESET },
 
 	/* Philips PSC805 audio device */
 	{ USB_DEVICE(0x0471, 0x0155), .driver_info = USB_QUIRK_RESET_RESUME },
@@ -133,9 +127,6 @@ static const struct usb_device_id usb_quirk_list[] = {
 
 	{ USB_DEVICE(0x04f3, 0x016f), .driver_info =
 			USB_QUIRK_DEVICE_QUALIFIER },
-
-	{ USB_DEVICE(0x04f3, 0x0381), .driver_info =
-			USB_QUIRK_NO_LPM },
 
 	{ USB_DEVICE(0x04f3, 0x21b8), .driver_info =
 			USB_QUIRK_DEVICE_QUALIFIER },
@@ -208,12 +199,6 @@ static const struct usb_device_id usb_quirk_list[] = {
 	{ USB_DEVICE(0x1a0a, 0x0200), .driver_info =
 			USB_QUIRK_LINEAR_UFRAME_INTR_BINTERVAL },
 
-	/* RTK WiFi dongle ; hcy added */
-	{ USB_DEVICE(0x0bda, 0x8813), .driver_info = USB_QUIRK_U3_RESET },
-
-	/* RTK 5411 hub ; hcy added */
-	{ USB_DEVICE(0x0bda, 0x0411), .driver_info = USB_QUIRK_DEVICE_PROBE },
-	
 	/* Acer C120 LED Projector */
 	{ USB_DEVICE(0x1de1, 0xc102), .driver_info = USB_QUIRK_NO_LPM },
 
@@ -222,23 +207,6 @@ static const struct usb_device_id usb_quirk_list[] = {
 
 	/* Blackmagic Design UltraStudio SDI */
 	{ USB_DEVICE(0x1edb, 0xbd4f), .driver_info = USB_QUIRK_NO_LPM },
-
-#ifdef CONFIG_USB_PATCH_ON_RTK
-	/* Kingston DataTraveler 3.0 G4 */
-	{ USB_DEVICE_VER(0x0951, 0x1666, 0, 0x1100), .driver_info = USB_QUIRK_RESET_RESUME },
-
-	/* Kingston DataTraveler 3.0 G4 no support lpm */
-	{ USB_DEVICE(0x0951, 0x1666), .driver_info = USB_QUIRK_NO_LPM },
-
-	/* Toshiba no support lpm */
-	{ USB_DEVICE(0x0930, 0x6545), .driver_info = USB_QUIRK_NO_LPM },
-
-	/* CyberSLIM S1-U3H */
-	{ USB_DEVICE(0x2109, 0x3431), .driver_info = USB_QUIRK_DELAY_INIT },
-
-	/* WD (Western Digital) Elements 25A2 */
-	{ USB_DEVICE(0x1058, 0x25a2), .driver_info = USB_QUIRK_NO_LPM },
-#endif
 
 	/* INTEL VALUE SSD */
 	{ USB_DEVICE(0x8086, 0xf1a5), .driver_info = USB_QUIRK_RESET_RESUME },

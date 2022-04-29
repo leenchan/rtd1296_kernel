@@ -1,14 +1,3 @@
-/*
- * hdmiEDID.c - RTK hdmi rx driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include <linux/string.h>
 #include <linux/types.h>
 
@@ -28,29 +17,9 @@ extern int hdmitx_switch_get_state(void);
 #endif
 /*======================================================*/
 
-static void hotplug_pulses_work_fun(struct work_struct *work);
-static DECLARE_WORK(hotplug_pulses_work, hotplug_pulses_work_fun);
-
 HDMIRX_DTS_EDID_TBL_T hdmirx_edid;
 HDMIRX_DTS_EDID_TBL_T hdmirx_edid2p0;
 static int rx_edid_version=0;// 0:HDMI 1.4 , 1:HDMI 2.0
-
-static void hotplug_pulses_work_fun(struct work_struct *work)
-{
-	HDMIRX_INFO("Set hotplug pulse");
-
-	Hdmi_SetHPD(0);
-	msleep(1000);
-	Hdmi_SetHPD(1);
-}
-
-void HdmiRx_hotplug_pulses(void)
-{
-	if(!mipi_top.hdmi_rx_init)
-		return;
-
-	schedule_work(&hotplug_pulses_work);
-}
 
 char EDIDIsValid(unsigned char* EDID)
 {
@@ -99,75 +68,61 @@ void drvif_EDID_DDC12_AUTO_Enable(char enable)
 
 unsigned char HdmiRx_change_edid_physical_addr(unsigned char byteMSB, unsigned char byteLSB)
 {
-	unsigned int i;
-	unsigned int sum;
-	unsigned char ret = false;
-	unsigned char block_tag;
-	unsigned char block_size;
-	unsigned char oui_third;
-	unsigned char offset;
-	unsigned char offset_max;
+	unsigned char ret=false;
+	unsigned char block_tag=0,block_size,offset,offset_max;
+	unsigned int i,sum=0;
 	HDMIRX_DTS_EDID_TBL_T *EDID_table;
 
-	if ((rx_edid_version == 1)&&(hdmirx_edid2p0.valid == true))
+	if((rx_edid_version==1)&&(hdmirx_edid2p0.valid==true))
 		EDID_table = &hdmirx_edid2p0;
 	else
 		EDID_table = &hdmirx_edid;
 
-	offset = 0x84;/* First data block */
+	offset = 0x84;//First data block
 	offset_max = 0x80+EDID_table->EDID[0x82];
 
-	block_tag = 0;
-	oui_third = 0;
-	while (offset < offset_max) {
-
-		block_tag = EDID_table->EDID[offset]>>5;
-		block_size = EDID_table->EDID[offset] & 0x1F;
-		HDMIRX_DEBUG("block_tag=%u, block_size=%u", block_tag, block_size);
-
-		/* OUI third two hex digits */
-		if (block_tag == 3)
-			oui_third = EDID_table->EDID[offset+1];
-
-		if ((block_tag == 3)&&(oui_third == 3)) {
-			/* Set Physical Address offset */
-			offset += 4;
+	while(offset < offset_max)
+	{
+		block_tag = EDID_table->EDID[offset]>>4;
+		block_size = EDID_table->EDID[offset] & 0xF;
+		if(block_tag==6)
+		{
+			offset += 4;//Physical Address offset
 			break;
-		} else {
-			/* Next block */
-			offset = offset + block_size +1;
 		}
+		else
+			offset = offset + block_size +1;//Next block
 	}
 
-	/* Make sure found VSDB1.4 */
-	if ((block_tag != 3)||(oui_third != 3)) {
-		HDMIRX_ERROR("Change EDID physical addr fail, couldn't find vendor specific data block");
+	if(block_tag != 6)//Make sure found VSDB
+	{
+		HDMIRX_ERROR(" Change EDID physical addr fail, couldn't find vendor specific data block\n");
 		return false;
 	}
 
-	/* Repeater PA Increment */
-	if ((byteMSB&0x0F) == 0x0) {
+	//Repeater PA Increment
+	if((byteMSB&0x0F) == 0x0)
 		byteMSB = byteMSB | 0x1;
-	} else if ((byteLSB&0xF0) == 0x0) {
+	else if((byteLSB&0xF0) == 0x0)
 		byteLSB = byteLSB | 0x10;
-	} else if ((byteLSB&0x0F) == 0x0) {
+	else if((byteLSB&0x0F) == 0)
 		byteLSB = byteLSB | 0x1;
-	} else {
+	else
+	{
 		byteMSB = 0xFF;
 		byteLSB = 0xFF;
 	}
 
-	HDMIRX_INFO("Set Physical Addr = 0x%02x%02x, offset=%u", byteMSB, byteLSB, offset);
+	HDMIRX_INFO("Set Physical Addr = 0x%02x%02x",byteMSB,byteLSB);
 	EDID_table->EDID[offset] = byteMSB;
 	EDID_table->EDID[offset+1] = byteLSB;
 
-	/* Calculate and set checksum */
-	sum = 0;
-	for (i = 0x80; i < 0xFF; i++)
+	//Calculate and set checksum
+	for(i=0x80;i<0xFF;i++)
 		sum += EDID_table->EDID[i];
 	EDID_table->EDID[0xFF] = (0x100-(sum&0xFF))&0xFF;
 
-	/* Reload EDID table */
+	//Reload EDID table
 	ret = drvif_EDIDLoad(EDID_table->EDID, 256);
 
 	return ret;
@@ -183,10 +138,13 @@ void HdmiRx_save_tx_physical_addr(unsigned char byteMSB, unsigned char byteLSB)
 
 	if(mipi_top.hdmi_rx_init)
 	{
+		Hdmi_SetHPD(0);
+
 		if((byteMSB!=0xEE)||(byteLSB!=0xEE))
 			HdmiRx_change_edid_physical_addr(byteMSB, byteLSB);
 
-		schedule_work(&hotplug_pulses_work);
+		HDMI_DELAYMS(1000);
+		Hdmi_SetHPD(1);
 	}
 }
 
@@ -239,10 +197,7 @@ void HdmiRx_SetEDID_version(int version)
 		HDMIRX_INFO("Change EDID to %s version",rx_edid_version?"2.0":"1.4");
 
 		if(mipi_top.hdmi_rx_init)
-		{
 			Hdmi_SetHPD(0);
-			drvif_Hdmi2p0_Scdc_Reset();
-		}
 
 		if((EDID_table->tx_phy_addr[0]!=0xEE)||(EDID_table->tx_phy_addr[1]!=0xEE))
 			HdmiRx_change_edid_physical_addr(EDID_table->tx_phy_addr[0], EDID_table->tx_phy_addr[1]);
@@ -262,14 +217,14 @@ void HdmiRx_ChangeCurrentEDID(unsigned char *edid)
 
 	if(rx_edid_version)
 	{
-		memcpy( hdmirx_edid.EDID, edid, 256);
+		memcpy( hdmirx_edid2p0.EDID, edid, 256);
 		hdmirx_edid.valid = true;
 		HdmiRx_SetEDID_version(0);
 	}
 	else
 	{
-		memcpy( hdmirx_edid2p0.EDID, edid, 256);
-		hdmirx_edid2p0.valid = true;
+		memcpy( hdmirx_edid.EDID, edid, 256);
+		hdmirx_edid.valid = true;
 		HdmiRx_SetEDID_version(1);
 	}
 }

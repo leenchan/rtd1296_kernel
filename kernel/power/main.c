@@ -20,6 +20,8 @@
 
 DEFINE_MUTEX(pm_mutex);
 
+extern int rtk_set_suspend_mode(const char *buf, int n);
+
 #ifdef CONFIG_PM_SLEEP
 
 /* Routines for PM-transition notifications */
@@ -272,7 +274,23 @@ static inline void pm_print_times_init(void)
 {
 	pm_print_times_enabled = !!initcall_debug;
 }
-#else /* !CONFIG_PP_SLEEP_DEBUG */
+
+static ssize_t pm_wakeup_irq_show(struct kobject *kobj,
+					struct kobj_attribute *attr,
+					char *buf)
+{
+	return pm_wakeup_irq ? sprintf(buf, "%u\n", pm_wakeup_irq) : -ENODATA;
+}
+
+static ssize_t pm_wakeup_irq_store(struct kobject *kobj,
+					struct kobj_attribute *attr,
+					const char *buf, size_t n)
+{
+	return -EINVAL;
+}
+power_attr(pm_wakeup_irq);
+
+#else /* !CONFIG_PM_SLEEP_DEBUG */
 static inline void pm_print_times_init(void) {}
 #endif /* CONFIG_PM_SLEEP_DEBUG */
 
@@ -354,26 +372,18 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 		goto out;
 	}
 
-    /* hijack the following power states: 
-     *   standby -> mem [suspend_mode=wfi]
-     *   mem     -> mem [suspend_mode=ram]
-     *   off     -> mem [suspend_mode=coolboot]
-     *
-     * These states will be set as mem, but suspend_mode will 
-     *   be set to relative value.
-     */
-    do {
-        int rtk_set_suspend_mode(const char *buf, int n);
-        int ret = rtk_set_suspend_mode(buf, n);
+	/* hijack the following power states:
+	*   standby -> mem [suspend_mode=wfi]
+	*   mem     -> mem [suspend_mode=ram]
+	*   off     -> mem [suspend_mode=coolboot]
+	*
+	* These states will be set as mem, but suspend_mode will
+	*   be set to relative value.
+	*/
 
-        if (ret == 0) {
-            strcpy((char *)buf, "mem\n");
-            n = strlen(buf);
-        } else if (ret == -EPERM) {
-            error = ret;
-            goto out;
-        }
-    } while (0);
+#if defined(CONFIG_ARCH_RTD119X) || defined(CONFIG_ARCH_RTD129X)
+	n = rtk_set_suspend_mode(buf, n);
+#endif
 
 	state = decode_state(buf, n);
 	if (state < PM_SUSPEND_MAX)
@@ -629,6 +639,7 @@ static struct attribute * g[] = {
 #endif
 #ifdef CONFIG_PM_SLEEP_DEBUG
 	&pm_print_times_attr.attr,
+	&pm_wakeup_irq_attr.attr,
 #endif
 #endif
 #ifdef CONFIG_FREEZER

@@ -8,6 +8,7 @@
 #ifndef _ASM_ELF_H
 #define _ASM_ELF_H
 
+#include <linux/auxvec.h>
 #include <linux/fs.h>
 #include <uapi/linux/elf.h>
 
@@ -224,9 +225,9 @@ struct mips_elf_abiflags_v0 {
 #define elf_check_arch(hdr)						\
 ({									\
 	int __res = 1;							\
-	struct elfhdr *__h = (hdr);					\
+	typeof(*(hdr)) *__h = (hdr);					\
 									\
-	if (__h->e_machine != EM_MIPS)					\
+	if (!mips_elf_check_machine(__h))				\
 		__res = 0;						\
 	if (__h->e_ident[EI_CLASS] != ELFCLASS32)			\
 		__res = 0;						\
@@ -255,9 +256,9 @@ struct mips_elf_abiflags_v0 {
 #define elf_check_arch(hdr)						\
 ({									\
 	int __res = 1;							\
-	struct elfhdr *__h = (hdr);					\
+	typeof(*(hdr)) *__h = (hdr);					\
 									\
-	if (__h->e_machine != EM_MIPS)					\
+	if (!mips_elf_check_machine(__h))				\
 		__res = 0;						\
 	if (__h->e_ident[EI_CLASS] != ELFCLASS64)			\
 		__res = 0;						\
@@ -283,6 +284,11 @@ struct mips_elf_abiflags_v0 {
 #define ELF_ARCH	EM_MIPS
 
 #endif /* !defined(ELF_ARCH) */
+
+#define mips_elf_check_machine(x) ((x)->e_machine == EM_MIPS)
+
+#define vmcore_elf32_check_arch mips_elf_check_machine
+#define vmcore_elf64_check_arch mips_elf_check_machine
 
 struct mips_abi;
 
@@ -382,7 +388,9 @@ do {									\
    instruction set this cpu supports.  This could be done in userspace,
    but it's not easy, and we've already done it here.  */
 
-#define ELF_HWCAP	(0)
+#define ELF_HWCAP	(elf_hwcap)
+extern unsigned int elf_hwcap;
+#include <asm/hwcap.h>
 
 /*
  * This yields a string that ld.so will use to load implementation
@@ -416,6 +424,12 @@ extern const char *__elf_platform;
 #ifndef ELF_ET_DYN_BASE
 #define ELF_ET_DYN_BASE		(TASK_SIZE / 3 * 2)
 #endif
+
+#define ARCH_DLINFO							\
+do {									\
+	NEW_AUX_ENT(AT_SYSINFO_EHDR,					\
+		    (unsigned long)current->mm->context.vdso);		\
+} while (0)
 
 #define ARCH_HAS_SETUP_ADDITIONAL_PAGES 1
 struct linux_binprm;

@@ -42,25 +42,20 @@
 #define SATURN_MIS_I2C4_SDA_DEL                 0x1b094
 #define SATURN_MIS_I2C5_SDA_DEL                 0x1b098
 
-#define I2C_SDA_DEL_MASK                        (0x1FF)
-#define I2C_SDA_DEL_EN(x)                       (0x00000001<<8)
-#define I2C_SDA_DEL_SEL(x)                      ((x & 0x1F)) /* Delay time: (unit 518ns) */
-#define SDA_DEL_518NS							(1)
-#define SDA_DEL_1036NS							(2)
-#define SDA_DEL_1554NS							(3)
-#define SDA_DEL_2072NS							(4)
-#define SDA_DEL_2590NS							(5)
+  #define I2C_SDA_DEL_MASK                        (0x1FF)
+  #define I2C_SDA_DEL_EN(x)                       (0x00000001<<8)
+  #define I2C_SDA_DEL_SEL(x)                      ((x & 0x1F))          // Delay time: (unit 518ns)
         
 #define SATURN_MIS_PWM_OCD                      0x1b400
 #define SATURN_MIS_PWM_CD                       0x1b404
 #define SATURN_MIS_PWM_CSD                      0x1b408
 
-#define PWM_OUTPUT_DIV(i, val)      ((val & 0xFF) << (i<<3))
-#define PWM_OUTPUT_DIV_MASK(i)      ((0xFF) << (i<<3))
-#define PWM_CLK_DUTY(i, val)        ((val & 0xFF) << (i<<3))
-#define PWM_CLK_DUTY_MASK(i)        ((0xFF) << (i<<3))
-#define PWM_SCLK_DIV(i, val)        ((val & 0xF) << (i<<2))
-#define PWM_SCLK_DIV_MASK(i)        ((0xF) << (i<<2))
+  #define PWM_OUTPUT_DIV(i, val)      ((val & 0xFF) << (i<<3))
+  #define PWM_OUTPUT_DIV_MASK(i)      ((0xFF) << (i<<3))
+  #define PWM_CLK_DUTY(i, val)        ((val & 0xFF) << (i<<3))
+  #define PWM_CLK_DUTY_MASK(i)        ((0xFF) << (i<<3))
+  #define PWM_SCLK_DIV(i, val)        ((val & 0xF) << (i<<2))
+  #define PWM_SCLK_DIV_MASK(i)        ((0xF) << (i<<2))
 
 
 /*-------------------------------------------------------------

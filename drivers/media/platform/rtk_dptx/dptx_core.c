@@ -19,7 +19,6 @@
 #include <linux/uaccess.h>
 
 #include <linux/clk.h>
-#include <linux/clk-provider.h>
 #include <linux/reset.h>
 
 #include <linux/delay.h>
@@ -31,13 +30,13 @@
 
 #include "dptx_core.h"
 #define LINK_TRAIN_RETRY 50
+static int dptxHpdDetect = 0;
 
-#ifdef SELF_TEST
 static void rtk_dptx_powerchk(struct rtk_dptx_device *dptx_dev)
 {
 	void __iomem *chk_reg;
 	unsigned int reg;
-	
+
 	chk_reg = ioremap(0x98000190, 0x1);
 	reg = readl(chk_reg);
 	if(reg==0xbf)
@@ -47,102 +46,9 @@ static void rtk_dptx_powerchk(struct rtk_dptx_device *dptx_dev)
 
 	iounmap(chk_reg);
 }
-#endif
-static int rtk_tveint_en(struct rtk_dptx_device *dptx_dev, int en)
-{
-	struct device *dev = dptx_dev->dev;
-	void  __iomem *tve_reg;
-	void  __iomem *vdac_reg;
-	unsigned int reg, reg1;
-	bool clken;
-	int ret = -1;
-
-	/* check tve clock enable or not */
-	clken = __clk_is_enabled(dptx_dev->clks[0]);
-	if(!clken) {
-		dev_info(dev, "tve clock is disable, ignore\n");
-		return ret;
-	}
-
-	tve_reg = ioremap(0x9801801c, 0x1);
-	vdac_reg = ioremap(0x980183a0, 0x1);
-	reg = readl(tve_reg);
-
-	if((reg & 0x4) && !en) {
-		reg1 = readl(vdac_reg);
-		reg1 = reg1 & ~0x40000000;
-		writel(reg1, vdac_reg);
-		writel(0x4, tve_reg);
-		ret = 0;
-	} else if(!(reg & 0x4) && en) {
-		writel(0x5, tve_reg);
-		ret = 0;
-	}
-	iounmap(tve_reg);
-	iounmap(vdac_reg);
-	if(ret < 0)
-		dev_info(dev, "tve interrupt = 0x%x, ignore\n", reg);
-	return ret;
-}
-
-#ifdef SELF_TEST
-static void rtk_hdmi_power_on(void)
-{
-	void __iomem *chk_reg;
-	unsigned int i;
-
-	chk_reg = ioremap(0x98000190, 0x1);
-	writel(0x11a, chk_reg);
-	for(i = 0; i < 4096 ; i++);
-	writel(0x1be, chk_reg);
-	for(i = 0; i < 4096 ; i++);
-	writel(0xbf, chk_reg);
-	for(i = 0; i < 4096 ; i++);
-	iounmap(chk_reg);
-}
-
-static void rtk_disp_reset_on(void)
-{
-	void __iomem *chk_reg;
-	unsigned int reg;
-
-	chk_reg = ioremap(0x98000050, 0x1);
-	reg = readl(chk_reg);
-	reg = reg | 0x00008000;
-	writel(reg, chk_reg);
-	iounmap(chk_reg);
-}
-
-static void rtk_dptx_close(struct rtk_dptx_device *dptx_dev)
-{
-	dptx_close_phy(&dptx_dev->hwinfo);
-	reset_control_assert(dptx_dev->rstc[0]);
-	dptx_close_pll(&dptx_dev->hwinfo);
-}
-#endif
-static void rtk_dptx_initial(struct rtk_dptx_device *dptx_dev)
-{
-	int ret;
-
-	ret = rtk_tveint_en(dptx_dev, 0);
-	msleep(20);
-
-	DpTxPixelPLLSetting(&dptx_dev->hwinfo);
-	DpTxDpPLLSetting(&dptx_dev->hwinfo);
-	DpTxInitial(&dptx_dev->hwinfo);
-
-	if(ret == 0)
-		rtk_tveint_en(dptx_dev, 1);
-}
 
 static void rtk_dptx_reinit(struct rtk_dptx_device *dptx_dev)
 {
-	int ret;
-
-	ret = rtk_tveint_en(dptx_dev, 0);
-	dptx_lvdsint_en(&dptx_dev->hwinfo, 0);
-	msleep(20);
-
 	dptx_close_phy(&dptx_dev->hwinfo);
 	reset_control_assert(dptx_dev->rstc[0]);
 	dptx_close_pll(&dptx_dev->hwinfo);
@@ -151,9 +57,6 @@ static void rtk_dptx_reinit(struct rtk_dptx_device *dptx_dev)
 	reset_control_deassert(dptx_dev->rstc[0]);
 	DpTxDpPLLSetting(&dptx_dev->hwinfo);
 	DpTxInitial(&dptx_dev->hwinfo);
-
-	if(ret == 0)
-		rtk_tveint_en(dptx_dev, 1);
 }
 
 int rtk_dptx_open(struct inode *inode, struct file *filp)
@@ -165,7 +68,7 @@ int rtk_dptx_open(struct inode *inode, struct file *filp)
 		return -ENODEV;
 
 	filp->private_data = dptx_dev;
-	
+
 	return 0;
 }
 
@@ -228,26 +131,27 @@ static long rtk_dptx_ioctl(struct file* filp,unsigned int cmd, unsigned long arg
 	struct rtk_dptx_device *dptx_dev = (struct rtk_dptx_device *)filp->private_data;
 	asoc_dptx_t* cap = &dptx_dev->cap;
 	struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM tv_system;
+	int value = 0;
 	int ret=0;
 	int mode;
 	struct rtk_dptx_hwinfo *hwinfo = &dptx_dev->hwinfo;
 
 	switch(cmd) {
-	case DPTX_GET_SINK_CAPABILITY:
-		if(!(cap->sink_cap_available)) {
-			DPTX_ERR("[%s]sink cap is not available\n", __FUNCTION__);
-			ret = -ENOMSG;
-		}
-		if(copy_to_user((void __user *)arg, &cap->sink_cap, sizeof(cap->sink_cap))) {
-			DPTX_ERR("[%s]failed to copy to user !\n", __FUNCTION__);
-			ret = -EFAULT;
-		}
-		return ret;
-	case DPTX_CONFIG_TV_SYSTEM:
-		if (copy_from_user(&tv_system, (void __user *)arg, sizeof(tv_system))) {
-			DPTX_ERR("[%s]failed to copy from user !\n", __FUNCTION__);
-			return -EFAULT;
-		}
+		case DPTX_GET_SINK_CAPABILITY:
+			if(!(cap->sink_cap_available)) {
+				DPTX_ERR("[%s]sink cap is not available\n", __FUNCTION__);
+				ret = -ENOMSG;
+			}
+			if(copy_to_user((void __user *)arg, &cap->sink_cap, sizeof(cap->sink_cap))) {
+				DPTX_ERR("[%s]failed to copy to user !\n", __FUNCTION__);
+				ret = -EFAULT;
+			}
+			return ret;
+		case DPTX_CONFIG_TV_SYSTEM:
+			if (copy_from_user(&tv_system, (void __user *)arg, sizeof(tv_system))) {
+				DPTX_ERR("[%s]failed to copy from user !\n", __FUNCTION__);
+				return -EFAULT;
+			}
 		mode = tv_system.videoInfo.pedType;
 		switch(mode) {
 		case VO_STANDARD_DP_FORMAT_1920_1080P_60:
@@ -265,27 +169,47 @@ static long rtk_dptx_ioctl(struct file* filp,unsigned int cmd, unsigned long arg
 		case VO_STANDARD_DP_FORMAT_1024_768P_60:
 			hwinfo->out_type = DP_FORMAT_1024_768;
 			break;
-		case VO_STANDARD_DP_FORMAT_1280_800P_60:
-			hwinfo->out_type = DP_FORMAT_1280_800;
-			break;
-		case VO_STANDARD_DP_FORMAT_1440_768P_60:
-			hwinfo->out_type = DP_FORMAT_1440_768;
-			break;
-		case VO_STANDARD_DP_FORMAT_1440_900P_60:
-			hwinfo->out_type = DP_FORMAT_1440_900;
-			break;
-		case VO_STANDARD_DP_FORMAT_960_544P_60:
-			hwinfo->out_type = DP_FORMAT_960_544;
-			break;
 		}
 		rtk_dptx_reinit(dptx_dev);
 		ret = dptx_config_tv_system(&dptx_dev->hwinfo);
 		if(ret>=0)
 			RPC_TOAGENT_DPTX_Config_TV_System(dptx_dev->rpc_ion_client, &tv_system);
 		return ret;
-	default:
-		DPTX_ERR(" Unknown ioctl cmd %08x", cmd);
-		return -EFAULT;
+		case DPTX_GET_LINK_STATUS:
+			value = dptx_switch_get_state(&dptx_dev->swdev);
+			if (copy_to_user((void __user *)arg, &value ,sizeof(value))) {
+				DPTX_ERR("%s:failed to copy to user !", __func__);
+				return -EFAULT;
+			}
+			return ret;
+		case DPTX_HOTPLUG_DETECTION:
+                	if (copy_from_user(&value, (void __user *)arg, sizeof(value))) {
+                		DPTX_ERR("%s:failed to copy from user !", __func__);
+                		return -EFAULT;
+                	}
+
+                	dptxHpdDetect = value;
+                	if(value == 0)
+			{
+				dptx_dev->isr_signal = true;
+                		wake_up_interruptible(&dptx_dev->hpd_wait);
+			}
+			return ret;
+		case DPTX_WAIT_HOTPLUG:
+			value = dptx_switch_get_state(&dptx_dev->swdev);
+			wait_event_interruptible(dptx_dev->hpd_wait, (((dptx_dev->isr_signal == true)&&(value!=switch_get_state(&dptx_dev->swdev.sw))) || (!dptxHpdDetect)));
+			dptx_dev->isr_signal = false;
+			value = dptx_switch_get_state(&dptx_dev->swdev);
+			if (copy_to_user((void __user *)arg,&value,sizeof(value))) {
+				DPTX_ERR("%s:failed to copy to user ! ", __func__);
+				return -EFAULT;
+			}
+
+			return ret;
+
+		default:
+			DPTX_ERR(" Unknown ioctl cmd %08x", cmd);
+			return -EFAULT;
 	}
 	return 0;
 }
@@ -317,21 +241,19 @@ static struct file_operations dptx_fops = {
 static irqreturn_t rtk_dptx_isr(int irq, void *dev_id)
 {
 	struct rtk_dptx_device *dptx_dev = (struct rtk_dptx_device *)dev_id;
-	
+
 	DpTxIRQHandle(&dptx_dev->hwinfo);
 
 	return IRQ_HANDLED;
 }
 
+extern struct ion_device *rtk_phoenix_ion_device;
 static int rtk_dptx_probe(struct platform_device *pdev)
 {
 	struct rtk_dptx_device *dptx_dev;
 	struct device *dev = &pdev->dev;
 	int i;
-#ifdef SELF_TEST
-	rtk_hdmi_power_on();
-	rtk_disp_reset_on();
-#endif
+
 	dptx_dev = devm_kzalloc(dev, sizeof(struct rtk_dptx_device), GFP_KERNEL);
 	if(!dptx_dev) {
 		dev_err(dev, "[%s] devm_kzalloc fail\n", __FUNCTION__);
@@ -342,9 +264,10 @@ static int rtk_dptx_probe(struct platform_device *pdev)
 	dptx_dev->dev = dev;
 	dev->platform_data = dptx_dev;
 
-	dptx_dev->rpc_ion_client = get_ion_client("dptx_driver");
+	//dptx_dev->rpc_ion_client = get_ion_client("dptx_driver");
+	dptx_dev->rpc_ion_client = ion_client_create(rtk_phoenix_ion_device, "dptx_driver");
 
-//	rtk_dptx_powerchk(dptx_dev);
+	rtk_dptx_powerchk(dptx_dev);
 
 	// get and initialize hardware information
 	sema_init(&dptx_dev->hwinfo.sem, 0);
@@ -353,16 +276,16 @@ static int rtk_dptx_probe(struct platform_device *pdev)
 	dptx_dev->hwinfo.lvds_base = of_iomap(dev->of_node, 2);
 	dptx_dev->hwinfo.vo_base = of_iomap(dev->of_node, 3);
 
-	// get clock and reset 
+	// get clock and reset
 	dptx_dev->rstc[0] = reset_control_get(dev, "lvds");
 	dptx_dev->rstc[1] = reset_control_get(dev, "vo");
 	dptx_dev->rstc[2] = reset_control_get(dev, "dp");
 	dptx_dev->rstc[3] = reset_control_get(dev, "tve");
 
 	dptx_dev->hwinfo.out_type = DP_FORMAT_720P_60;
+	DpTxPixelPLLSetting(&dptx_dev->hwinfo);
 
-	dptx_dev->clks[0] = of_clk_get(dev->of_node, 0);
-	for(i=1; i<DPTX_MAX_CLKS; i++) {
+	for(i=0; i<DPTX_MAX_CLKS; i++) {
 		dptx_dev->clks[i] = of_clk_get(dev->of_node, i);
 		if(IS_ERR(dptx_dev->clks)) {
 			dev_err(dev, "[%s] of_clk_get fail\n", __FUNCTION__);
@@ -372,7 +295,7 @@ static int rtk_dptx_probe(struct platform_device *pdev)
 	}
 
 	for(i=0; i<DPTX_MAX_RESET; i++) {
-		if (IS_ERR_OR_NULL(dptx_dev->rstc[i])) 
+		if (IS_ERR_OR_NULL(dptx_dev->rstc[i]))
 			dev_warn(dev, "[%s] reset_control_get %d fail\n",
 				__FUNCTION__, i);
 		else
@@ -399,13 +322,16 @@ static int rtk_dptx_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 	
-	rtk_dptx_initial(dptx_dev);
+	DpTxDpPLLSetting(&dptx_dev->hwinfo);
+	DpTxInitial(&dptx_dev->hwinfo);
 	
 	register_dptx_switch(dptx_dev);
+	dptx_dev->isr_signal = false;
+	init_waitqueue_head(&dptx_dev->hpd_wait);
+
 	return 0;
 }
 
-#ifdef CONFIG_PM
 static int rtk_dptx_suspend(struct device *dev)
 {
 	struct rtk_dptx_device *dptx_dev;
@@ -416,11 +342,6 @@ static int rtk_dptx_suspend(struct device *dev)
 	rtk_dptx_switch_suspend(dptx_dev);
 
 	return 0;
-}
-
-static void rtk_dptx_shutdown(struct platform_device *pdev)
-{
-	rtk_dptx_suspend(&pdev->dev);
 }
 
 static int rtk_dptx_resume(struct device *dev)
@@ -439,7 +360,6 @@ static int rtk_dptx_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
 static const struct of_device_id rtk_dptx_dt_ids[] = {
 	{ .compatible = "Realtek,rtk129x-dptx", },
@@ -447,29 +367,21 @@ static const struct of_device_id rtk_dptx_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, rtk_dptx_dt_ids);
 
-#ifdef CONFIG_PM
 static const struct dev_pm_ops rtk_dptx_pm_ops = {
 	.suspend    = rtk_dptx_suspend,
 	.resume     = rtk_dptx_resume,
 };
-#else
-static const struct dev_pm_ops rtk_dptx_pm_ops = {};
-#endif
 
 static struct platform_driver rtk_dptx_driver = {
 	.probe = rtk_dptx_probe,
 	.driver = {
 		.name = "rtk_dptx",
-		.owner = THIS_MODULE, 
+		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(rtk_dptx_dt_ids),
 #ifdef CONFIG_PM
-		.pm = &rtk_dptx_pm_ops,
+	.pm = &rtk_dptx_pm_ops,
 #endif
 	},
-#ifdef CONFIG_PM
-	.shutdown = rtk_dptx_shutdown,
-#endif
-
 };
 static int __init rtk_dptx_init(void)
 {

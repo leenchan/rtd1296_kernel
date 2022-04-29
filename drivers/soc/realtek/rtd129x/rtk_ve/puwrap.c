@@ -276,6 +276,11 @@ static int pu_probe(struct platform_device *pdev)
     void __iomem *iobase;
     struct device_node *node = pdev->dev.of_node;
 
+#if 1//__LINUX_MEDIA_NAS__
+	if (!of_device_is_available(pdev->dev.of_node))
+		return -ENODEV;
+#endif
+
     of_address_to_resource(node, 0, &res);
     iobase = of_iomap(node, 0);
 

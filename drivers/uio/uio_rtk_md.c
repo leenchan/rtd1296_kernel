@@ -1,285 +1,261 @@
-/*
- * Copyright (C) 2015-2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-
-#include <linux/clk.h>
-#include <linux/delay.h>
-#include <linux/interrupt.h>
-#include <linux/io.h>
+#include <linux/device.h>
+#include <linux/file.h>
+#include <linux/fs.h>
+#include <linux/err.h>
 #include <linux/module.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
+#include <linux/moduleparam.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
+
+#include <linux/miscdevice.h>
+
+#include <linux/interrupt.h>
+#include <linux/io.h>
+#include <linux/uaccess.h>
 #include <linux/uio_driver.h>
+
 #include "reg_md.h"
 #include "uio_rtk_md.h"
 
-struct md_uio_info {
-	struct uio_info info;
-	struct device *dev;
-	void __iomem *base;
-	struct clk *clk;
-	int irq;
-};
+struct uio_info    *md_uio_info = NULL;
+struct md_hw       *md_hw = NULL;
+struct md_resource *md_resource = NULL;  //md irq and register area
 
-enum {
-	MdClearWriteData = 0,
-	MdWriteData = BIT(0),
-	MdGo = BIT(1),
-	MdEndianSwap = BIT(2),
-};
+//struct semaphore sem_checkfinish;
 
-static inline void rtk_md_init_reg(struct device *dev)
+typedef enum {
+	MdClearWriteData	= 0,
+	MdWriteData			= BIT(0),
+	MdGo				= BIT(1),
+	MdEndianSwap		= BIT(2),
+} MD_CTRL_REG;
+
+inline void InitMdReg(void)
 {
-	struct md_uio_info *priv = dev_get_drvdata(dev);
-	struct uio_info *info = &priv->info;
-	struct md_hw *md_hw = info->mem[1].internal_addr;
 	int i;
+	volatile MDREG_INFO  *MdRegInfo = (volatile MDREG_INFO  *)md_resource->base;
 
-	 MDREG_INFO *reg_info = (MDREG_INFO *)priv->base;
+	for(i=0; i<MD_NUM_ENGINES; i++){
+		//Stop Moving Data
+		MdRegInfo->MdCtrl[i].Value            = (MdGo | MdEndianSwap | MdClearWriteData);
+		MdRegInfo->MdCtrl[i].Value            = (MdEndianSwap | MdWriteData);
+		MdRegInfo->MdCmdBase[i].Value         = (uint32_t) md_hw->engine[i].CmdBase;
+		MdRegInfo->MdCmdReadPtr[i].Value      = (uint32_t) md_hw->engine[i].CmdBase;
+		MdRegInfo->MdCmdWritePtr[i].Value     = (uint32_t) md_hw->engine[i].CmdBase;
+		MdRegInfo->MdCmdLimit[i].Value        = (uint32_t) md_hw->engine[i].CmdLimit;
+		MdRegInfo->MdInstCnt[i].Value        = 0;
 
-	for (i = 0 ; i < MD_NUM_ENGINES ; i++) {
-		/* Stop Moving Data */
-		reg_info->MdCtrl[i].Value =
-			(MdGo | MdEndianSwap | MdClearWriteData);
-		reg_info->MdCtrl[i].Value = (MdEndianSwap | MdWriteData);
-		reg_info->MdCmdBase[i].Value = md_hw->engine[i].CmdBase;
-		reg_info->MdCmdReadPtr[i].Value = md_hw->engine[i].CmdBase;
-		reg_info->MdCmdWritePtr[i].Value = md_hw->engine[i].CmdBase;
-		reg_info->MdCmdLimit[i].Value = md_hw->engine[i].CmdLimit;
-		reg_info->MdInstCnt[i].Value = 0;
+		pr_info("Engine[%d] Ctrl:%08x Base:%08x ReadPtr:%08x WritePtr:%08x Limit:%08x\n",
+				i,
+				MdRegInfo->MdCtrl[i].Value,
+				MdRegInfo->MdCmdBase[i].Value,
+				MdRegInfo->MdCmdReadPtr[i].Value,
+				MdRegInfo->MdCmdWritePtr[i].Value,
+				MdRegInfo->MdCmdLimit[i].Value);
 
-		dev_info(dev, "[MD] Engine[%d] Ctrl:%08x Base:%08x ReadPtr:%08x WritePtr:%08x Limit:%08x\n",
-			i,
-			reg_info->MdCtrl[i].Value,
-			reg_info->MdCmdBase[i].Value,
-			reg_info->MdCmdReadPtr[i].Value,
-			reg_info->MdCmdWritePtr[i].Value,
-			reg_info->MdCmdLimit[i].Value);
-
-		md_hw->engine[i].CmdWritePtr = md_hw->engine[i].CmdBase;
+		md_hw->engine[i].CmdWritePtr      = md_hw->engine[i].CmdBase;
 	}
 }
 
-static inline void rtk_md_enable_icg(struct device *dev)
+//static irqreturn_t md_irq_handler(int irq, void* dev_id)
+static irqreturn_t md_irq_handler(int irq, struct uio_info *dev_info)
 {
-	struct md_uio_info *priv = dev_get_drvdata(dev);
-	unsigned int val;
-
-	val = readl(priv->base + 0x180);
-	val |= 0x0000000f;
-	writel(val, priv->base + 0x180);
-}
-
-static void rtk_md_init_drv(struct device *dev)
-{
-	struct md_uio_info *priv = dev_get_drvdata(dev);
-	struct uio_info *info = &priv->info;
-	struct md_hw *md_hw = info->mem[1].internal_addr;
+//	struct md_dev *dev = dev_id;
+	volatile MDREG_INFO *MdRegInfo = (volatile MDREG_INFO*)md_resource->base;
 	int i;
-	void *virt = info->mem[2].internal_addr;
-	dma_addr_t phys = info->mem[2].addr;
 
-	for (i = 0 ; i < MD_NUM_ENGINES ; i++) {
-		struct md_engine *eng = &md_hw->engine[i];
-
-		eng->CmdBuf   = (unsigned long)virt + MD_CMDBUF_SIZE * i;
-		eng->CmdBase  = phys + MD_CMDBUF_SIZE * i;
-		eng->CmdLimit = eng->CmdBase + MD_CMDBUF_SIZE;
-		eng->BufSize  = MD_CMDBUF_SIZE;
-	}
-
-	rtk_md_init_reg(dev);
-	rtk_md_enable_icg(dev);
-}
-
-static irqreturn_t md_irq_handler(int irq, struct uio_info *info)
-{
-	struct md_uio_info *priv = container_of(info, struct md_uio_info, info);
-	int i;
-	MDREG_INFO *reg_info = (MDREG_INFO *)priv->base;
-
-	pr_debug("[MD] interrupt...\n");
-
-	for (i = 0 ; i < MD_NUM_ENGINES ; i++) {
-		if (reg_info->MdInte[i].Fields.smq_empty_en &&
-			reg_info->MdInts[i].Fields.smq_empty) {
-
-			pr_debug("[MD] smq empty interrupt...\n");
-			reg_info->MdInte[i].Value = 0x8;
+	pr_debug("%s:%d interrupt. ...\n", __func__, __LINE__);
+	for(i=0; i<MD_NUM_ENGINES; i++){
+		if(MdRegInfo->MdInte[i].Fields.smq_empty_en && MdRegInfo->MdInts[i].Fields.smq_empty) {
+			pr_debug("%s:%d md smq empty interrupt. ...\n", __func__, __LINE__);
+			MdRegInfo->MdInte[i].Value = 0x8;//inte.Value;  //disable smq_empty interrupt
+			//MdRegInfo->MdInts[i].Value = 0x8;//ints.Value;  //clear smq_empty interrupt status
+			/*
+			if((MdRegInfo->MdCtrl[i].Value & 0x2) && ((MdRegInfo->SeIdle[i].Value & 0x1) == 0)) {
+				//dbg_info("se is not idle");
+			}
+			*/
 		}
 	}
 
 	return IRQ_HANDLED;
 }
 
+/*
+static const struct file_operations se_fops = {
+	.owner			= THIS_MODULE,
+	.open			= se_open,
+	.release		= se_release,
+	.unlocked_ioctl	= se_ioctl,
+	.write			= se_write,
+	.mmap			= se_mmap,
+};
+*/
 
-static inline void print_uio_mem(struct device *dev, struct uio_info *info,
-	int index)
+void md_drv_init(struct device *dev)
 {
-	struct uio_mem *umem = &info->mem[index];
+	int i;
+	void *virt = md_uio_info->mem[2].internal_addr;
+	dma_addr_t phys = md_uio_info->mem[2].addr;
 
-	dev_info(dev,
-		"mem[%d] phys:0x%pa virt:0x%p size:0x%pa type:%d name:%s\n",
-		index, &umem->addr, umem->internal_addr, &umem->size,
-		umem->memtype, umem->name);
+	for(i=0; i<MD_NUM_ENGINES; i++){
+		md_hw->engine[i].CmdBuf = (unsigned long)virt + MD_CMDBUF_SIZE * i;
+		md_hw->engine[i].CmdBase = phys + MD_CMDBUF_SIZE * i;
+		md_hw->engine[i].CmdLimit = md_hw->engine[i].CmdBase + MD_CMDBUF_SIZE;
+		md_hw->engine[i].BufSize = MD_CMDBUF_SIZE;
+	}
+
+	InitMdReg();
+
+//	if (request_irq(se_resource->irq, se_irq_handler, IRQF_SHARED, "se", (void*)md_hw)) {
+//		dbg_err("se: cannot register IRQ %d", se_resource->irq);
+//	}
 }
 
 
 static int rtk_md_probe(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
-	struct md_uio_info *priv;
-	struct uio_info *info;
 	int ret;
 	size_t size = 0;
 	void *virt = NULL;
 	dma_addr_t phys = 0;
 	struct resource res;
 
-	dev_info(dev, "[MD] %s\n", __func__);
-
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
-	if (!priv)
-		return -ENOMEM;
-
-	priv->clk = clk_get(dev, NULL);
-	if (IS_ERR(priv->clk)) {
-		dev_warn(dev, "failed to get clk: %ld.\n", PTR_ERR(priv->clk));
-		priv->clk = NULL;
+	//dbg_info("%s %s:%d",__FILE__, __func__, __LINE__);
+	//md_hw = kzalloc(ALIGN(sizeof(struct md_dev), PAGE_SIZE), GFP_KERNEL);
+	//if (unlikely(!md_hw))
+	//	return -ENOMEM;
+	if (pdev->dev.of_node) {
+		if (!of_device_is_available(pdev->dev.of_node))
+			return -ENODEV;
 	}
 
+	md_uio_info = (struct uio_info *)kzalloc(sizeof(struct uio_info), GFP_KERNEL);
+
+	//md register space
 	ret = of_address_to_resource(pdev->dev.of_node, 0, &res);
-	if (ret) {
-		dev_err(dev, "failed to get resource.\n");
-		goto free_priv;
-	}
+	md_uio_info->mem[0].name = "MD reg space";
+	md_uio_info->mem[0].addr = res.start;
+	md_uio_info->mem[0].size = ALIGN(res.end - res.start + 1, PAGE_SIZE);
+	md_uio_info->mem[0].internal_addr = ioremap(md_uio_info->mem[0].addr, md_uio_info->mem[0].size);
+	md_uio_info->mem[0].memtype = UIO_MEM_PHYS;
+	pr_info("%s: res.start=0x%p res.end=0x%p\n", __func__,  (void *)res.start, (void *)res.end);
+	pr_info("%s: mem[%d] phys:0x%p virt:0x%p size:0x%llx type:%d name:%s\n", __func__, 0, (void *)md_uio_info->mem[0].addr, md_uio_info->mem[0].internal_addr, md_uio_info->mem[0].size, md_uio_info->mem[0].memtype, md_uio_info->mem[0].name);
 
-	ret = platform_get_irq(pdev, 0);
-	if (ret < 0) {
-		dev_err(dev, "failed to get irq.\n");
-		goto free_priv;
-	}
-	priv->irq = ret;
-	priv->dev = dev;
-	priv->base = ioremap(res.start, resource_size(&res));
-
-	dev_info(dev, "resouce: %pr\n", &res);
-	dev_info(dev, "irq: %d\n", priv->irq);
-
-	info = &priv->info;
-
-	/* md register space */
-	info->mem[0].name = "MD reg space";
-	info->mem[0].addr = res.start;
-	info->mem[0].size = ALIGN(resource_size(&res), PAGE_SIZE);
-	info->mem[0].internal_addr = priv->base;
-	info->mem[0].memtype = UIO_MEM_PHYS;
-	print_uio_mem(dev, info, 0);
-
-	/* md driver data */
+	//md driver data
 	size = ALIGN(sizeof(struct md_hw), PAGE_SIZE);
-	virt = dma_alloc_coherent(dev, size, &phys, GFP_KERNEL);
-	if (!virt) {
-		ret = -ENOMEM;
-		goto free_base;
-	}
-	info->mem[1].name = "MD driver data";
-	info->mem[1].addr = phys;
-	info->mem[1].size = size;
-	info->mem[1].internal_addr = virt;
-	info->mem[1].memtype = UIO_MEM_PHYS;
-	print_uio_mem(dev, info, 1);
+	virt = dma_alloc_coherent(&pdev->dev, size, &phys, GFP_KERNEL);
+	md_hw = virt;
+	md_uio_info->mem[1].name = "MD driver data";
+	md_uio_info->mem[1].addr = phys;
+	md_uio_info->mem[1].size = size;
+	md_uio_info->mem[1].internal_addr = virt;
+	md_uio_info->mem[1].memtype = UIO_MEM_PHYS;
+	pr_info("%s: mem[%d] phys:0x%p virt:0x%p size:0x%llx type:%d name:%s\n", __func__, 1, (void *)md_uio_info->mem[1].addr, md_uio_info->mem[1].internal_addr, md_uio_info->mem[1].size, md_uio_info->mem[1].memtype, md_uio_info->mem[1].name);
 
-	/* md command queue */
+	//md command queue
 	size = ALIGN(MD_CMDBUF_SIZE * MD_NUM_ENGINES, PAGE_SIZE);
-	virt = dma_alloc_coherent(dev, size, &phys, GFP_KERNEL | GFP_DMA);
-	if (!virt) {
-		ret = -ENOMEM;
-		goto free_drv_data;
-	}
-	info->mem[2].name = "MD command queue";
-	info->mem[2].addr = phys;
-	info->mem[2].size = size;
-	info->mem[2].internal_addr = virt;
-	info->mem[2].memtype = UIO_MEM_PHYS;
-	print_uio_mem(dev, info, 2);
+	virt = dma_alloc_coherent(&pdev->dev, size, &phys, GFP_KERNEL);
+	md_uio_info->mem[2].name = "MD command queue";
+	md_uio_info->mem[2].addr = phys;
+	md_uio_info->mem[2].size = size;
+	md_uio_info->mem[2].internal_addr = virt;
+	md_uio_info->mem[2].memtype = UIO_MEM_PHYS;
+	pr_info("%s: mem[%d] phys:0x%p virt:0x%p size:0x%llx type:%d name:%s\n", __func__, 2, (void *)md_uio_info->mem[2].addr, md_uio_info->mem[2].internal_addr, md_uio_info->mem[2].size, md_uio_info->mem[2].memtype, md_uio_info->mem[2].name);
 
 #ifdef CONFIG_UIO_ASSIGN_MINOR
-	info->minor = 252;
+	md_uio_info->minor = 252;
 #endif
-	info->version = "0.0.1";
-	info->name = "RTK-MD";
-	info->irq = priv->irq;
-	info->irq_flags = IRQF_SHARED;
-	info->handler = md_irq_handler;
-
-	ret = uio_register_device(dev, info);
-	if (ret) {
-		dev_err(dev, "failed to register uio device.\n");
-		goto free_cmd_queue;
+    md_uio_info->version = "0.0.1";
+    md_uio_info->name = "RTK-MD";
+    md_uio_info->irq = platform_get_irq(pdev, 0);
+	md_uio_info->irq_flags = IRQF_SHARED;
+	md_uio_info->handler = md_irq_handler;
+	pr_info("%s: irq=%ld\n", __func__, md_uio_info->irq);
+	if (uio_register_device(&pdev->dev, md_uio_info))
+	{
+		iounmap(md_uio_info->mem[0].internal_addr);
+		dma_free_coherent(&pdev->dev, md_uio_info->mem[1].size, md_uio_info->mem[1].internal_addr, md_uio_info->mem[1].addr);
+		dma_free_coherent(&pdev->dev, md_uio_info->mem[2].size, md_uio_info->mem[2].internal_addr, md_uio_info->mem[2].addr);
+		pr_err("uio_register failed\n");
+		return -ENODEV;
 	}
+	platform_set_drvdata(pdev, md_uio_info);
 
-	clk_prepare_enable(priv->clk);
-
-	platform_set_drvdata(pdev, priv);
-
-	rtk_md_init_drv(dev);
+	md_drv_init(&pdev->dev);
 
 	return 0;
-free_cmd_queue:
-	dma_free_coherent(dev, info->mem[2].size, info->mem[2].internal_addr,
-		info->mem[2].addr);
-free_drv_data:
-	dma_free_coherent(dev, info->mem[1].size, info->mem[1].internal_addr,
-		info->mem[1].addr);
-free_base:
-	iounmap(priv->base);
-	clk_put(priv->clk);
-free_priv:
-	kfree(priv);
-
-	return ret;
 }
 
 static int rtk_md_remove(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
-	struct md_uio_info *priv = platform_get_drvdata(pdev);
-	struct uio_info *info = &priv->info;
+	struct uio_info *info = platform_get_drvdata(pdev);
 
-	dev_info(dev, "[MD] %s\n", __func__);
-
+	//dbg_info("%s %s",__FILE__, __func__);
 	uio_unregister_device(info);
 	platform_set_drvdata(pdev, NULL);
-	dma_free_coherent(dev, info->mem[2].size, info->mem[2].internal_addr,
-		info->mem[2].addr);
-	dma_free_coherent(dev, info->mem[1].size, info->mem[1].internal_addr,
-		info->mem[1].addr);
 	iounmap(info->mem[0].internal_addr);
-	clk_put(priv->clk);
-	kfree(priv);
+	dma_free_coherent(&pdev->dev, info->mem[1].size, info->mem[1].internal_addr, info->mem[1].addr);
+	dma_free_coherent(&pdev->dev, info->mem[2].size, info->mem[2].internal_addr, info->mem[2].addr);
+	kfree(info);
+	kfree(md_hw);
 
 	return 0;
 }
 
 static const struct of_device_id rtk_md_ids[] = {
-	{ .compatible = "realtek,md" },
-	{}
+	{ .compatible = "Realtek,rtk1295-md" },
+	{ /* Sentinel */ },
 };
 
 static struct platform_driver rtk_md_driver = {
-	.probe = rtk_md_probe,
-	.remove = rtk_md_remove,
-	.driver = {
-		.name = "rtk-md",
-		.owner = THIS_MODULE,
+	.probe		= rtk_md_probe,
+	.remove		= rtk_md_remove,
+	.driver		= {
+		.name	= "rtk-md",
+		.owner	= THIS_MODULE,
 		.of_match_table = rtk_md_ids,
 	},
 };
-module_platform_driver_probe(rtk_md_driver, rtk_md_probe);
+
+static int __init rtk_md_init(void)
+{
+	int ret=0;
+	struct device_node *np;
+
+	//dbg_info("%s %s",__FILE__, __func__);
+
+	md_resource = kzalloc(sizeof(struct md_resource), GFP_KERNEL);
+	if (!md_resource)
+		return -ENOMEM;
+	
+	np = of_find_matching_node(NULL, rtk_md_ids);
+	if (!np)
+		panic("No MD device node");
+
+	//md register space and irq for driver access
+	md_resource->base = of_iomap(np, 0);
+	md_resource->irq = irq_of_parse_and_map(np, 0);
+	//dbg_info("base:0x%x irq:%d", (unsigned int)md_resource->base, md_resource->irq);
+
+	ret = platform_driver_register(&rtk_md_driver);
+	return ret;
+}
+
+static void __exit rtk_md_exit(void)
+{
+	//dbg_info("%s %s",__FILE__, __func__);
+
+	platform_driver_unregister(&rtk_md_driver);
+//	misc_deregister(&md_resource->dev);
+	kfree(md_resource);
+}
+
+module_init(rtk_md_init);
+module_exit(rtk_md_exit);
+//module_platform_driver_probe(rtk_md_driver, rtk_md_probe);
+

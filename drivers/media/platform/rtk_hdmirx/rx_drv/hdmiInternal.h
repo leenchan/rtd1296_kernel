@@ -1,14 +1,3 @@
-/*
- * hdmiInternal.h - RTK hdmi rx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #ifndef __HDMI_INTERNAL_H_
 #define __HDMI_INTERNAL_H_
 
@@ -71,12 +60,11 @@ typedef enum {
 #define HDMI_PHY_IDLE_PATCH_COUNT 15
 
 //hdmi_z0_set
-#define LN_Z300POW	0x10
-#define LN_CK	0x08
-#define LN_B	0x04
-#define LN_G	0x02
-#define LN_R	0x01
-#define LN_ALL (LN_Z300POW|LN_CK|LN_B|LN_G|LN_R)
+#define LN_CK 0x08
+#define LN_B   0x04
+#define LN_G   0x02
+#define LN_R   0x01
+#define LN_ALL (LN_CK|LN_B|LN_G|LN_R)
 
 #define HDMI_ABS(x, y)		((x > y) ? (x-y) : (y-x))
 
@@ -370,7 +358,6 @@ typedef struct {
 	HDMI_COLOR_SPACE_T color;
 	HDMI_COLORIMETRY_T	colorimetry;
 	char progressive;		   // 0 --> interlaced ; 1 --> progressive
-	unsigned int dvi_fps;
 	HDMI_3D_T hdmi_3dformat;
 
 	unsigned int v_total;
@@ -449,10 +436,6 @@ typedef struct {
 	HDCP_KEY_T * hdcpkey;
 #endif
 
-#ifdef CONFIG_RTK_HDCP1x_REPEATER
-	unsigned char tx_hdcp_state;
-#endif
-
 	HDMI_TIMING_T  tx_timing;
 	HDMI_TIMING_T  gen_timing;
 	HDMI_TIMING_T  vodma_timing;
@@ -489,24 +472,13 @@ typedef struct {
 	// HPD
 	int rx_5v_state;
 	int gpio_hpd_ctrl;
-	int gpio_sel;
 	int gpio_5v_det;
 
 	unsigned int audio_freq;
 	unsigned char spdif_type; // 0:LPCM,1:Non-LPCM
 } HDMI_INFO_T;
 
-#ifdef CONFIG_RTK_HDCP1x_REPEATER
-#define HDCP_Aksv_SIZE 5
-#define KSVLIST_SIZE   640
-struct hdcp_ksvlist_info {
-	uint8_t Aksv[HDCP_Aksv_SIZE];
-	uint8_t ksvlist[KSVLIST_SIZE];
-	uint8_t bstatus[2];
-	uint32_t device_count;
-	uint8_t Bksv[HDCP_Aksv_SIZE];
-};
-#endif
+
 /****************************************************************************
 
 						HDMI Driver Private MARCO
@@ -576,21 +548,10 @@ HDMI_ERR_T Hdmi_MeasureActiveSpace(HDMI_TIMING_T *tx_timing, HDMI_TIMING_T *gen_
 HDMI_3D_T Hdmi_Get3DInfo(HDMI_MS_MODE_T mode);
 unsigned char Hdmi_Get3DExtInfo(void);
 void Hdmi_Get3DGenTiming(HDMI_TIMING_T *tx_timing, HDMI_TIMING_T *gen_timing);
-
-/*=================== hdmirx_hdcp ===================*/
 void Hdmi_HdcpInit(void);
-unsigned char Is_HdmiRx_hdcp1x_enabled(void);
-
-/*================== hdmirx_hdcp2p2 ==================*/
-unsigned char Is_HdmiRx_hdcp2p2_enabled(void);
-
-/*=================== hdmiHdmi ===================*/
-unsigned char drvif_Hdmi_AVI_VIC(void);
 #if HDMI2p0
-void drvif_Hdmi2p0_Scdc_Reset(void);
 void drvif_Hdmi2p0_Error_Count(void);
 void TMDS_6G_Recovery(void);
 #endif
-
 
 #endif//__HDMI_INTERNAL_H_

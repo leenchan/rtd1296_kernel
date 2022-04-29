@@ -1043,71 +1043,6 @@ void xhci_copy_ep0_dequeue_into_input_ctx(struct xhci_hcd *xhci,
 	virt_dev = xhci->devs[udev->slot_id];
 	ep0_ctx = xhci_get_ep_ctx(xhci, virt_dev->in_ctx, 0);
 	ep_ring = virt_dev->eps[0].ring;
-
-#ifdef CONFIG_USB_PATCH_ON_RTK
-#if 1
-	/* [DEV_FIX]xhci control tranfer will error occasionally (1/45)
-	 * commit 0d2ae2abc867c1a31b7d280dc6429d18ba3770c5
-	 */
-	{
-		int i = 0;
-		struct xhci_ring *ring = ep_ring;
-		union xhci_trb *next;
-		union xhci_trb *trb;
-
-		ring->enq_seg = ring->first_seg;
-		ring->enqueue = ring->first_seg->trbs;
-		next = ring->enqueue;
-		wmb();
-		for (i = 0; i < (TRBS_PER_SEGMENT); i++) {
-			trb = &ring->first_seg->trbs[i];
-			trb->generic.field[3] &= cpu_to_le32(~TRB_CYCLE);
-		}
-		for (i = 0; i < (TRBS_PER_SEGMENT); i++) {
-			trb = &ring->first_seg->next->trbs[i];
-			trb->generic.field[3] &= cpu_to_le32(~TRB_CYCLE);
-		}
-		ring->cycle_state = 1;
-		wmb();
-	}
-#else
-	/* [DEV_FIx]set address fail after warm/hot reset
-	 * commit e7afd2f2d0093553379a9e2d6874ef11897a394f
-	 */
-	/* Fixed : USB reset issue, which will cause set address fail.
-	 * by Ted.
-	 */
-	{
-		int i = 0;
-		struct xhci_ring *ring = ep_ring;
-		union xhci_trb *next;
-		union xhci_trb *trb;
-		ring->enq_seg = ring->first_seg;
-		ring->enqueue = ring->first_seg->trbs;
-		next = ring->enqueue;
-		wmb();
-		for (i = 0; i < (TRBS_PER_SEGMENT -1); ++i) {
-			trb = &ring->first_seg->trbs[i];
-			trb->generic.field[0] = 0x0;
-			trb->generic.field[1] = 0x0;
-			trb->generic.field[2] = 0x0;
-			trb->generic.field[3] = 0x0;
-		}
-		wmb();
-
-		for (i = 0; i < (TRBS_PER_SEGMENT -1); ++i) {
-			trb = &ring->first_seg->next->trbs[i];
-			trb->generic.field[0] = 0x0;
-			trb->generic.field[1] = 0x0;
-			trb->generic.field[2] = 0x0;
-			trb->generic.field[3] = 0x0;
-		}
-		ring->cycle_state = 1;
-		wmb();
-	}
-#endif
-#endif
-
 	/*
 	 * FIXME we don't keep track of the dequeue pointer very well after a
 	 * Set TR dequeue pointer, so we're setting the dequeue pointer of the
@@ -1486,16 +1421,8 @@ int xhci_endpoint_init(struct xhci_hcd *xhci,
 
 	type = usb_endpoint_type(&ep->desc);
 	/* Set up the endpoint ring */
-#ifdef DWC_BULK_WA
-	if (udev->speed == USB_SPEED_HIGH && usb_endpoint_xfer_bulk(&ep->desc) &&
-			usb_endpoint_dir_in(&ep->desc))
-		virt_dev->eps[ep_index].new_ring =
-			xhci_ring_alloc(xhci, (DWC_BULK_NOPS + 1) * 64, 1, type,
-					mem_flags);
-	else
-#endif
-		virt_dev->eps[ep_index].new_ring =
-			xhci_ring_alloc(xhci, 2, 1, type, mem_flags);
+	virt_dev->eps[ep_index].new_ring =
+		xhci_ring_alloc(xhci, 2, 1, type, mem_flags);
 	if (!virt_dev->eps[ep_index].new_ring) {
 		/* Attempt to use the ring cache */
 		if (virt_dev->num_rings_cached == 0)
@@ -1901,24 +1828,20 @@ void xhci_mem_cleanup(struct xhci_hcd *xhci)
 	for (i = 1; i < MAX_HC_SLOTS; ++i)
 		xhci_free_virt_device(xhci, i);
 
-	if (xhci->segment_pool)
-		dma_pool_destroy(xhci->segment_pool);
+	dma_pool_destroy(xhci->segment_pool);
 	xhci->segment_pool = NULL;
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init, "Freed segment pool");
 
-	if (xhci->device_pool)
-		dma_pool_destroy(xhci->device_pool);
+	dma_pool_destroy(xhci->device_pool);
 	xhci->device_pool = NULL;
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init, "Freed device context pool");
 
-	if (xhci->small_streams_pool)
-		dma_pool_destroy(xhci->small_streams_pool);
+	dma_pool_destroy(xhci->small_streams_pool);
 	xhci->small_streams_pool = NULL;
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init,
 			"Freed small stream array pool");
 
-	if (xhci->medium_streams_pool)
-		dma_pool_destroy(xhci->medium_streams_pool);
+	dma_pool_destroy(xhci->medium_streams_pool);
 	xhci->medium_streams_pool = NULL;
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init,
 			"Freed medium stream array pool");
@@ -2151,14 +2074,23 @@ static void xhci_add_in_port(struct xhci_hcd *xhci, unsigned int num_ports,
 {
 	u32 temp, port_offset, port_count;
 	int i;
+	struct xhci_hub *rhub;
 
-	if (major_revision > 0x03) {
+	temp = readl(addr);
+
+	if (XHCI_EXT_PORT_MAJOR(temp) == 0x03) {
+		rhub = &xhci->usb3_rhub;
+	} else if (XHCI_EXT_PORT_MAJOR(temp) <= 0x02) {
+		rhub = &xhci->usb2_rhub;
+	} else {
 		xhci_warn(xhci, "Ignoring unknown port speed, "
 				"Ext Cap %p, revision = 0x%x\n",
 				addr, major_revision);
 		/* Ignoring port protocol we can't understand. FIXME */
 		return;
 	}
+	rhub->maj_rev = XHCI_EXT_PORT_MAJOR(temp);
+	rhub->min_rev = XHCI_EXT_PORT_MINOR(temp);
 
 	/* Port offset and count in the third dword, see section 7.2 */
 	temp = readl(addr + 2);
@@ -2173,6 +2105,33 @@ static void xhci_add_in_port(struct xhci_hcd *xhci, unsigned int num_ports,
 		/* WTF? "Valid values are ‘1’ to MaxPorts" */
 		return;
 
+	rhub->psi_count = XHCI_EXT_PORT_PSIC(temp);
+	if (rhub->psi_count) {
+		rhub->psi = kcalloc(rhub->psi_count, sizeof(*rhub->psi),
+				    GFP_KERNEL);
+		if (!rhub->psi)
+			rhub->psi_count = 0;
+
+		rhub->psi_uid_count++;
+		for (i = 0; i < rhub->psi_count; i++) {
+			rhub->psi[i] = readl(addr + 4 + i);
+
+			/* count unique ID values, two consecutive entries can
+			 * have the same ID if link is assymetric
+			 */
+			if (i && (XHCI_EXT_PORT_PSIV(rhub->psi[i]) !=
+				  XHCI_EXT_PORT_PSIV(rhub->psi[i - 1])))
+				rhub->psi_uid_count++;
+
+			xhci_dbg(xhci, "PSIV:%d PSIE:%d PLT:%d PFD:%d LP:%d PSIM:%d\n",
+				  XHCI_EXT_PORT_PSIV(rhub->psi[i]),
+				  XHCI_EXT_PORT_PSIE(rhub->psi[i]),
+				  XHCI_EXT_PORT_PLT(rhub->psi[i]),
+				  XHCI_EXT_PORT_PFD(rhub->psi[i]),
+				  XHCI_EXT_PORT_LP(rhub->psi[i]),
+				  XHCI_EXT_PORT_PSIM(rhub->psi[i]));
+		}
+	}
 	/* cache usb2 port capabilities */
 	if (major_revision < 0x03 && xhci->num_ext_caps < max_caps)
 		xhci->ext_caps[xhci->num_ext_caps++] = temp;

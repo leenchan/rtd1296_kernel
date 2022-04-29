@@ -25,13 +25,6 @@
  */
 unsigned int __read_mostly freeze_timeout_msecs = 20 * MSEC_PER_SEC;
 
-#ifdef CONFIG_USB_PATCH_ON_RTK
-/* [DEV_FIX]force stop khubd
- * commit 7d5b6f8c2fcb18f0b238c85ac904225bfaf6413f
- */
-bool freeze_khubd_stop = 0;
-#endif
-
 static int try_to_freeze_tasks(bool user_only)
 {
 	struct task_struct *g, *p;
@@ -61,25 +54,8 @@ static int try_to_freeze_tasks(bool user_only)
 			if (p == current || !freeze_task(p))
 				continue;
 
-#ifdef CONFIG_USB_PATCH_ON_RTK
-			/* [DEV_FIX]force stop khubd
-			 * commit 7d5b6f8c2fcb18f0b238c85ac904225bfaf6413f
-			 */
-			if (!freezer_should_skip(p)) {
-				/* hcy modified for freeze khubd */
-				if (!strcmp(p->comm , "khubd")) {
-					if (!freeze_khubd_stop)
-						printk(KERN_ERR "force khubd stop");
-					/* we cant use kthread_stop in atomic , so use global variable */
-					freeze_khubd_stop = 1;
-				}
-
-				todo++;
-			}
-#else
 			if (!freezer_should_skip(p))
 				todo++;
-#endif
 		}
 		read_unlock(&tasklist_lock);
 
@@ -110,13 +86,6 @@ static int try_to_freeze_tasks(bool user_only)
 		if (sleep_usecs < 8 * USEC_PER_MSEC)
 			sleep_usecs *= 2;
 	}
-
-#ifdef CONFIG_USB_PATCH_ON_RTK
-	/* [DEV_FIX]force stop khubd
-	 * commit 7d5b6f8c2fcb18f0b238c85ac904225bfaf6413f
-	 */
-	freeze_khubd_stop = 0;
-#endif
 
 	do_gettimeofday(&end);
 	elapsed_msecs64 = timeval_to_ns(&end) - timeval_to_ns(&start);

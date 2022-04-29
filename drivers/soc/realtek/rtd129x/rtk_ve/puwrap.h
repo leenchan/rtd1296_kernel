@@ -17,6 +17,7 @@
 #define PLL_CLK_648 (0x10C166)
 #define PLL_CLK_594 (0x10C146)
 #define PLL_CLK_567 (0x10C136)
+#define PLL_CLK_540 (0x10C126)
 #define PLL_CLK_337 (0x12C176)
 #define PLL_CLK_297 (0x12C146)
 

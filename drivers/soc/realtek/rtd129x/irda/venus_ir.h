@@ -1,14 +1,3 @@
-/*
- *  venus_ir.h - RTK irda driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #ifndef __VENUS_IR_RTK__H__
 #define __VENUS_IR_RTK__H__
 
@@ -62,7 +51,6 @@
 //#define VENUS_IR_IOC_MAXNR			10
 	
 #define VENUS_IRTX_IOC_SET_TX_TABLE		_IOW(VENUS_IR_IOC_MAGIC, 11, int)
-#define VENUS_IRRX_RAW_STOP			_IOW(VENUS_IR_IOC_MAGIC, 12, int)
 //#define VENUS_IRTX_IOC_MAXNR			1
 
 #define LIBRA_MS_CUSTOMER_CODE			0x08F7
@@ -100,8 +88,6 @@ enum {
 	TOSHIBA = 13, // add for Toshiba, is similar to NEC
 	RAW_DIRECTTV = 14,
 	RAW_COMCAST = 15,
-	RAW_MOTO = 16,
-	RAW_CISCO = 17,
 };
 
 enum {

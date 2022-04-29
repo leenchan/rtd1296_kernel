@@ -1,19 +1,9 @@
-/*
- * reg_sb2.h - bus debug driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- */
-
 #ifndef _REG_SB2_H_INCLUDED_
 #define _REG_SB2_H_INCLUDED_
 
 #define SB2_OFFSET						0x0001A000
 
-#define	CHIP_ID							0x00000200
+#define CHIP_ID							0x00000200
 #define CHIP_REV						0x00000204
 
 #define RBUS_SB2_BASE_PHYS		(RBUS_BASE_PHYS + SB2_OFFSET)
@@ -24,9 +14,9 @@
 #define get_cpu_id()		readl(SB2_IO_ADDR(CHIP_ID))
 #define get_cpu_revision()	readl(SB2_IO_ADDR(CHIP_REV))
 
-#define is_revinfo_0			(get_cpu_revision()==0x00000000)
-#define is_revinfo_1			(get_cpu_revision()==0x00010000)
-#define is_revinfo_2			(get_cpu_revision()==0x00020000)
+#define is_revinfo_0			(get_cpu_revision() == 0x00000000)
+#define is_revinfo_1			(get_cpu_revision() == 0x00010000)
+#define is_revinfo_2			(get_cpu_revision() == 0x00020000)
 
 #define SB2_INV_INTEN		(iobase + 0x004)
 #define SB2_INV_INTSTAT		(iobase + 0x008)
@@ -34,15 +24,15 @@
 #define SB2_DEBUG_REG		(iobase + 0x010)
 
 #define SWCIVAIRQ_EN		(1<<6)
-#define ACIVAIRQ_EN 		(1<<3)
+#define ACIVAIRQ_EN		(1<<3)
 #define SCIVAIRQ_EN             (1<<1)
 
 #define SWCIVA_INT		(1<<4)
 #define ACIVA_INT		(1<<3)
 #define SCIVA_INT		(1<<1)
 
-#define WRITE_DATA_1 		(1<<0)
-#define WRITE_DATA_0 		(0<<0)
+#define WRITE_DATA_1		(1<<0)
+#define WRITE_DATA_0		(0<<0)
 
 
 

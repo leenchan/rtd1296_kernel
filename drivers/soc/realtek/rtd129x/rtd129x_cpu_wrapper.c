@@ -1,13 +1,3 @@
-/*
- * rtd129x_cpu_wrapper.c
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- */
-
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -158,8 +148,6 @@ void rtk_cpu_power_down(int cpu)
 {
     u32 tmp = 0;
 
-
-    mdelay(5);
     // Step 1 to 6 is done in rtd129x_cpu_hotplug.S
     // Wait for WFI in step 6.
     tmp = readl(scpu_wrap_addr + 0x104);
@@ -212,7 +200,9 @@ irqreturn_t scpu_wrapper_isr(int irq, void *reg_base)
 
 		sprintf(buf, "[SCUP] Memory 0x%08x trashed with %s\n", addr,
 				(cause & 1) ? "W" : "R");
+#ifndef CONFIG_PROC_VMCORE
 		die(buf, regs, 0);
+#endif
 
         return IRQ_HANDLED;
     }

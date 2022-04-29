@@ -48,7 +48,6 @@ static int  option_probe(struct usb_serial *serial,
 			const struct usb_device_id *id);
 static int option_attach(struct usb_serial *serial);
 static void option_release(struct usb_serial *serial);
-static int option_send_setup(struct usb_serial_port *port);
 static void option_instat_callback(struct urb *urb);
 
 /* Vendor and product IDs */
@@ -235,8 +234,6 @@ static void option_instat_callback(struct urb *urb);
 
 #define QUALCOMM_VENDOR_ID			0x05C6
 
-#define SIERRA_VENDOR_ID			0x1199
-
 #define CMOTECH_VENDOR_ID			0x16d8
 #define CMOTECH_PRODUCT_6001			0x6001
 #define CMOTECH_PRODUCT_CMU_300			0x6002
@@ -276,13 +273,6 @@ static void option_instat_callback(struct urb *urb);
 #define TELIT_PRODUCT_LE922_USBCFG5		0x1045
 #define TELIT_PRODUCT_LE920			0x1200
 #define TELIT_PRODUCT_LE910			0x1201
-#define TELIT_PRODUCT_LE910_USBCFG4		0x1206
-#define TELIT_PRODUCT_LE920A4_1207		0x1207
-#define TELIT_PRODUCT_LE920A4_1208		0x1208
-#define TELIT_PRODUCT_LE920A4_1211		0x1211
-#define TELIT_PRODUCT_LE920A4_1212		0x1212
-#define TELIT_PRODUCT_LE920A4_1213		0x1213
-#define TELIT_PRODUCT_LE920A4_1214		0x1214
 
 /* ZTE PRODUCTS */
 #define ZTE_VENDOR_ID				0x19d2
@@ -528,12 +518,6 @@ static void option_instat_callback(struct urb *urb);
 #define VIATELECOM_VENDOR_ID			0x15eb
 #define VIATELECOM_PRODUCT_CDS7			0x0001
 
-/* WeTelecom products */
-#define WETELECOM_VENDOR_ID			0x22de
-#define WETELECOM_PRODUCT_WMD200		0x6801
-#define WETELECOM_PRODUCT_6802			0x6802
-#define WETELECOM_PRODUCT_WMD300		0x6803
-
 struct option_blacklist_info {
 	/* bitmask of interface numbers blacklisted for send_setup */
 	const unsigned long sendsetup;
@@ -641,16 +625,6 @@ static const struct option_blacklist_info telit_le910_blacklist = {
 static const struct option_blacklist_info telit_le920_blacklist = {
 	.sendsetup = BIT(0),
 	.reserved = BIT(1) | BIT(5),
-};
-
-static const struct option_blacklist_info sierra_mc73xx_blacklist = {
-	.sendsetup = BIT(0) | BIT(2),
-	.reserved = BIT(8) | BIT(10) | BIT(11),
-};
-
-static const struct option_blacklist_info telit_le920a4_blacklist_1 = {
-	.sendsetup = BIT(0),
-	.reserved = BIT(1),
 };
 
 static const struct option_blacklist_info telit_le922_blacklist_usbcfg0 = {
@@ -1167,10 +1141,6 @@ static const struct usb_device_id option_ids[] = {
 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, 0x6613)}, /* Onda H600/ZTE MF330 */
 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, 0x0023)}, /* ONYX 3G device */
 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, 0x9000)}, /* SIMCom SIM5218 */
-	{ USB_DEVICE_INTERFACE_CLASS(SIERRA_VENDOR_ID, 0x68c0, 0xff),
-	  .driver_info = (kernel_ulong_t)&sierra_mc73xx_blacklist }, /* MC73xx */
-	{ USB_DEVICE_INTERFACE_CLASS(SIERRA_VENDOR_ID, 0x9041, 0xff),
-	  .driver_info = (kernel_ulong_t)&sierra_mc73xx_blacklist }, /* MC7305/MC7355 */
 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, 0x9003), /* Quectel UC20 */
 	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
 	{ USB_DEVICE(CMOTECH_VENDOR_ID, CMOTECH_PRODUCT_6001) },
@@ -1228,20 +1198,8 @@ static const struct usb_device_id option_ids[] = {
 		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg0 },
 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE910),
 		.driver_info = (kernel_ulong_t)&telit_le910_blacklist },
-	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE910_USBCFG4),
-		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg3 },
 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920),
 		.driver_info = (kernel_ulong_t)&telit_le920_blacklist },
-	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1207) },
-	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1208),
-		.driver_info = (kernel_ulong_t)&telit_le920a4_blacklist_1 },
-	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1211),
-		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg3 },
-	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1212),
-		.driver_info = (kernel_ulong_t)&telit_le920a4_blacklist_1 },
-	{ USB_DEVICE_INTERFACE_CLASS(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1213, 0xff) },
-	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1214),
-		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg3 },
 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, ZTE_PRODUCT_MF622, 0xff, 0xff, 0xff) }, /* ZTE WCDMA products */
 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0002, 0xff, 0xff, 0xff),
 		.driver_info = (kernel_ulong_t)&net_intf1_blacklist },
@@ -2005,13 +1963,9 @@ static const struct usb_device_id option_ids[] = {
 	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
 	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e01, 0xff, 0xff, 0xff) }, /* D-Link DWM-152/C1 */
 	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e02, 0xff, 0xff, 0xff) }, /* D-Link DWM-156/C1 */
-	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x7e11, 0xff, 0xff, 0xff) }, /* D-Link DWM-156/A3 */
 	{ USB_DEVICE_INTERFACE_CLASS(0x2020, 0x4000, 0xff) },                /* OLICARD300 - MT6225 */
 	{ USB_DEVICE(INOVIA_VENDOR_ID, INOVIA_SEW858) },
 	{ USB_DEVICE(VIATELECOM_VENDOR_ID, VIATELECOM_PRODUCT_CDS7) },
-	{ USB_DEVICE_AND_INTERFACE_INFO(WETELECOM_VENDOR_ID, WETELECOM_PRODUCT_WMD200, 0xff, 0xff, 0xff) },
-	{ USB_DEVICE_AND_INTERFACE_INFO(WETELECOM_VENDOR_ID, WETELECOM_PRODUCT_6802, 0xff, 0xff, 0xff) },
-	{ USB_DEVICE_AND_INTERFACE_INFO(WETELECOM_VENDOR_ID, WETELECOM_PRODUCT_WMD300, 0xff, 0xff, 0xff) },
 	{ } /* Terminating entry */
 };
 MODULE_DEVICE_TABLE(usb, option_ids);
@@ -2051,10 +2005,6 @@ static struct usb_serial_driver option_1port_device = {
 
 static struct usb_serial_driver * const serial_drivers[] = {
 	&option_1port_device, NULL
-};
-
-struct option_private {
-	u8 bInterfaceNumber;
 };
 
 module_usb_serial_driver(serial_drivers, option_ids);
@@ -2100,29 +2050,19 @@ static int option_attach(struct usb_serial *serial)
 	struct usb_interface_descriptor *iface_desc;
 	const struct option_blacklist_info *blacklist;
 	struct usb_wwan_intf_private *data;
-	struct option_private *priv;
 
 	data = kzalloc(sizeof(struct usb_wwan_intf_private), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
-
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
-	if (!priv) {
-		kfree(data);
-		return -ENOMEM;
-	}
 
 	/* Retrieve blacklist info stored at probe. */
 	blacklist = usb_get_serial_data(serial);
 
 	iface_desc = &serial->interface->cur_altsetting->desc;
 
-	priv->bInterfaceNumber = iface_desc->bInterfaceNumber;
-	data->private = priv;
-
 	if (!blacklist || !test_bit(iface_desc->bInterfaceNumber,
 						&blacklist->sendsetup)) {
-		data->send_setup = option_send_setup;
+		data->use_send_setup = 1;
 	}
 	spin_lock_init(&data->susp_lock);
 
@@ -2134,9 +2074,7 @@ static int option_attach(struct usb_serial *serial)
 static void option_release(struct usb_serial *serial)
 {
 	struct usb_wwan_intf_private *intfdata = usb_get_serial_data(serial);
-	struct option_private *priv = intfdata->private;
 
-	kfree(priv);
 	kfree(intfdata);
 }
 
@@ -2183,7 +2121,7 @@ static void option_instat_callback(struct urb *urb)
 	} else if (status == -ENOENT || status == -ESHUTDOWN) {
 		dev_dbg(dev, "%s: urb stopped: %d\n", __func__, status);
 	} else
-		dev_err(dev, "%s: error %d\n", __func__, status);
+		dev_dbg(dev, "%s: error %d\n", __func__, status);
 
 	/* Resubmit urb so we continue receiving IRQ data */
 	if (status != -ESHUTDOWN && status != -ENOENT) {
@@ -2193,40 +2131,6 @@ static void option_instat_callback(struct urb *urb)
 			dev_dbg(dev, "%s: resubmit intr urb failed. (%d)\n",
 				__func__, err);
 	}
-}
-
-/** send RTS/DTR state to the port.
- *
- * This is exactly the same as SET_CONTROL_LINE_STATE from the PSTN
- * CDC.
-*/
-static int option_send_setup(struct usb_serial_port *port)
-{
-	struct usb_serial *serial = port->serial;
-	struct usb_wwan_intf_private *intfdata = usb_get_serial_data(serial);
-	struct option_private *priv = intfdata->private;
-	struct usb_wwan_port_private *portdata;
-	int val = 0;
-	int res;
-
-	portdata = usb_get_serial_port_data(port);
-
-	if (portdata->dtr_state)
-		val |= 0x01;
-	if (portdata->rts_state)
-		val |= 0x02;
-
-	res = usb_autopm_get_interface(serial->interface);
-	if (res)
-		return res;
-
-	res = usb_control_msg(serial->dev, usb_sndctrlpipe(serial->dev, 0),
-				0x22, 0x21, val, priv->bInterfaceNumber, NULL,
-				0, USB_CTRL_SET_TIMEOUT);
-
-	usb_autopm_put_interface(serial->interface);
-
-	return res;
 }
 
 MODULE_AUTHOR(DRIVER_AUTHOR);

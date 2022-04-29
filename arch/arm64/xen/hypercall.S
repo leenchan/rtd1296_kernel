@@ -82,10 +82,6 @@ HYPERCALL3(vcpu_op);
 HYPERCALL1(tmem_op);
 HYPERCALL2(multicall);
 
-#ifdef CONFIG_RTK_XEN_HYPERCALL
-HYPERCALL2(rtk_hypercall_op);
-#endif
-
 ENTRY(privcmd_call)
 	mov x16, x0
 	mov x0, x1

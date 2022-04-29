@@ -48,6 +48,11 @@
 
 #define UETH__VERSION	"29-May-2008"
 
+/* Experiments show that both Linux and Windows hosts allow up to 16k
+ * frame sizes. Set the max size to 15k+52 to prevent allocating 32k
+ * blocks and still have efficient handling. */
+#define GETHER_MAX_ETH_FRAME_LEN 15412
+
 static struct workqueue_struct	*uether_wq;
 
 struct eth_dev {
@@ -156,7 +161,7 @@ static int ueth_change_mtu(struct net_device *net, int new_mtu)
 	spin_lock_irqsave(&dev->lock, flags);
 	if (dev->port_usb)
 		status = -EBUSY;
-	else if (new_mtu <= ETH_HLEN || new_mtu > ETH_FRAME_LEN)
+	else if (new_mtu <= ETH_HLEN || new_mtu > GETHER_MAX_ETH_FRAME_LEN)
 		status = -ERANGE;
 	else
 		net->mtu = new_mtu;
@@ -241,7 +246,7 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 	if (dev->port_usb->is_fixed)
 		size = max_t(size_t, size, dev->port_usb->fixed_out_len);
 
-	DBG(dev, "%s: size: %d\n", __func__, size);
+	DBG(dev, "%s: size: %zd\n", __func__, size);
 	skb = alloc_skb(size + NET_IP_ALIGN, gfp_flags);
 	if (skb == NULL) {
 		DBG(dev, "no rx skb\n");
@@ -304,7 +309,6 @@ static void rx_complete(struct usb_ep *ep, struct usb_request *req)
 		} else {
 			skb_queue_tail(&dev->rx_frames, skb);
 		}
-
 		if (!status)
 			queue = 1;
 		break;
@@ -859,8 +863,6 @@ static int eth_stop(struct net_device *net)
 
 /*-------------------------------------------------------------------------*/
 
-static u8 host_ethaddr[ETH_ALEN];
-
 static int get_ether_addr(const char *str, u8 *dev_addr)
 {
 	if (str) {
@@ -889,17 +891,6 @@ static int get_ether_addr_str(u8 dev_addr[ETH_ALEN], char *str, int len)
 
 	snprintf(str, len, "%pM", dev_addr);
 	return 18;
-}
-
-static int get_host_ether_addr(u8 *str, u8 *dev_addr)
-{
-	memcpy(dev_addr, str, ETH_ALEN);
-	if (is_valid_ether_addr(dev_addr))
-		return 0;
-
-	random_ether_addr(dev_addr);
-	memcpy(str, dev_addr, ETH_ALEN);
-	return 1;
 }
 
 static const struct net_device_ops eth_netdev_ops = {
@@ -959,11 +950,9 @@ struct eth_dev *gether_setup_name(struct usb_gadget *g,
 	if (get_ether_addr(dev_addr, net->dev_addr))
 		dev_warn(&g->dev,
 			"using random %s ethernet address\n", "self");
-
-	if (get_host_ether_addr(host_ethaddr, dev->host_mac))
-		dev_warn(&g->dev, "using random %s ethernet address\n", "host");
-	else
-		dev_warn(&g->dev, "using previous %s ethernet address\n", "host");
+	if (get_ether_addr(host_addr, dev->host_mac))
+		dev_warn(&g->dev,
+			"using random %s ethernet address\n", "host");
 
 	if (ethaddr)
 		memcpy(ethaddr, dev->host_mac, ETH_ALEN);
@@ -1023,10 +1012,8 @@ struct net_device *gether_setup_name_default(const char *netname)
 
 	eth_random_addr(dev->dev_mac);
 	pr_warn("using random %s ethernet address\n", "self");
-	if (get_host_ether_addr(host_ethaddr, dev->host_mac))
-		pr_warn("using random %s ethernet address\n", "host");
-        else
-		pr_warn("using previous %s ethernet address\n", "host");
+	eth_random_addr(dev->host_mac);
+	pr_warn("using random %s ethernet address\n", "host");
 
 	net->netdev_ops = &eth_netdev_ops;
 
@@ -1327,7 +1314,6 @@ void gether_disconnect(struct gether *link)
 		spin_lock(&dev->req_lock);
 	}
 	spin_unlock(&dev->req_lock);
-	link->in_ep->driver_data = NULL;
 	link->in_ep->desc = NULL;
 
 	usb_ep_disable(link->out_ep);
@@ -1348,7 +1334,6 @@ void gether_disconnect(struct gether *link)
 		dev_kfree_skb_any(skb);
 	spin_unlock(&dev->rx_frames.lock);
 
-	link->out_ep->driver_data = NULL;
 	link->out_ep->desc = NULL;
 
 	/* finish forgetting about this USB link episode */

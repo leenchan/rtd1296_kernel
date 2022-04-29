@@ -1,14 +1,3 @@
-/*
- * hdmitx_core.c - RTK hdmitx driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include <linux/module.h>
 #include <linux/uaccess.h>
 #include <linux/kernel.h>
@@ -146,14 +135,11 @@ static long hdmitx_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case HDMI_SEND_VOUT_EDID_DATA:
 		return ops_send_vout_edid_data((void __user *)arg);
 
-	case HDMI_GET_EDID_SUPPORT_LIST:
-		return ops_get_edid_support_list((void __user *)arg, tx_data);
+	case HDMI_HOTPLUG_DETECTION:
+		return ops_set_hotplug_detection((void __user *)arg, dev);
 
-	case HDMI_SET_OUTPUT_FORMAT:
-		return ops_set_output_format((void __user *)arg);
-
-	case HDMI_GET_OUTPUT_FORMAT:
-		return ops_get_output_format((void __user *)arg);
+	case HDMI_WAIT_HOTPLUG:
+		return ops_wait_hotplug((void __user *)arg, dev);
 
 	default:
 		HDMI_DEBUG(" Unknown ioctl cmd %08x", cmd);
@@ -191,7 +177,8 @@ int register_hdmitx_miscdev(hdmitx_device_t *device)
 
 int deregister_hdmitx_miscdev(hdmitx_device_t *device)
 {
-	return misc_deregister(&device->miscdev);
+	misc_deregister(&device->miscdev);
+	return 0;
 }
 
 static int rtk_hdmitx_suspend(struct device *dev)
@@ -212,10 +199,6 @@ static int rtk_hdmitx_resume(struct device *dev)
 	int ret_val;
 
 	HDMI_INFO("Enter %s", __func__);
-
-	/* bpi, sel_gpio external pull high in sleep mode, change back to low level */
-	if(tx_dev.sel_gpio > 0)
-		gpio_direction_output(tx_dev.sel_gpio, 0);
 
 	hdmitx_scdcrr_resume();
 	ret_val = rtk_hdmitx_switch_resume();
@@ -254,37 +237,14 @@ static int rtk_hdmi_probe(struct platform_device *pdev)
 		"gpio-hpd-detect", 0);
 
 	if (tx_dev.hpd_gpio < 0) {
-		HDMI_ERROR("Could not get hpd gpio from of");
+		HDMI_ERROR("Could not get gpio from of");
 		goto end;
 	} else {
 		HDMI_INFO("hotplug gpio(%d)", tx_dev.hpd_gpio);
-
-		if (gpio_is_valid(tx_dev.hpd_gpio)) {
-			if (gpio_request(tx_dev.hpd_gpio, pdev->dev.of_node->name))
-				HDMI_ERROR("Request hpd gpio(%d) fail", tx_dev.hpd_gpio);
-		}
 	}
 
-	/* Initial ts3dv642 sel2 gpio */
-	tx_dev.sel_gpio = of_get_named_gpio(pdev->dev.of_node,
-		"gpio-hdmitx-sel", 0);
-	if (tx_dev.sel_gpio < 0) {
-		HDMI_ERROR("Could not get sel gpio from of");
-		/*goto end;*/
-	} else {
-		HDMI_INFO("sel gpio(%d)", tx_dev.sel_gpio);
-
-		if (gpio_is_valid(tx_dev.sel_gpio)) {
-			if (gpio_request(tx_dev.sel_gpio, "hdmitx_sel")) {
-				HDMI_ERROR("Request sel gpio(%d) fail", tx_dev.sel_gpio);
-				tx_dev.sel_gpio = -1;
-			}
-		}
-		else {
-			HDMI_ERROR("sel gpio %d is not valid", tx_dev.sel_gpio);
-			tx_dev.sel_gpio = -1;
-		}
-	}
+	if (gpio_request(tx_dev.hpd_gpio, pdev->dev.of_node->name))
+		HDMI_ERROR("Request gpio(%d) fail", tx_dev.hpd_gpio);
 
 	/* Get hotplug gpio irq */
 	tx_dev.hpd_irq = gpio_to_irq(tx_dev.hpd_gpio);
@@ -299,7 +259,7 @@ static int rtk_hdmi_probe(struct platform_device *pdev)
 		HDMI_ERROR("Could not register_hdmitx_switchdev");
 		goto err_register;
 	}
-
+	init_waitqueue_head(&tx_dev.hpd_wait);
 	setup_mute_gpio(pdev->dev.of_node);
 
 	/* Initial SCDC read request */
@@ -312,8 +272,6 @@ static int rtk_hdmi_probe(struct platform_device *pdev)
 
 	/* Register sysfs */
 	register_hdmitx_sysfs(&pdev->dev);
-	register_config_tv_system_sysfs(&pdev->dev);
-	register_support_list_sysfs(&pdev->dev);
 
 	/* HDMI clock always on if DisplayPort exist */
 	dptx_np = of_find_compatible_node(NULL, NULL, "Realtek,rtk129x-dptx");

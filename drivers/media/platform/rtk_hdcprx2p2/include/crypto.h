@@ -33,5 +33,3 @@ H2status Sha1(const H2uint8 *pIn, int length, H2uint8 *pOut);
 H2status MGF1_SHA256(H2uint8 *mask, H2uint32 length, const H2uint8 *seed, int seedLen);
 H2status crypt_xor(const uint8_t *s1, const uint8_t *s2, uint8_t *d,
 		    int len);
-H2status Compute_Vprime_22(unsigned char *kd, unsigned char *receiver_id, unsigned char *temp_rxinfor, unsigned char *temp_seq_num, unsigned char *Vprime);
-H2status Compute_Mprime_22(unsigned char *kd, unsigned char *bstream_id_type,unsigned char *bseq_num_M, unsigned char *Mprime);

@@ -3,9 +3,6 @@
 #include <hdcp2_messages.h>
 #include <hdcp2_interface.h>
 #include <crypto.h>
-#ifdef CONFIG_RTK_HDCPRX_2P2_TEE   // TEE_EN
-#include <hdcp2_TEE_TA.h>
-#endif
 
 #ifdef TEST_HDCP2_2_RX_DRIVER
 
@@ -20,7 +17,6 @@ static enum {
 } gPairingState = PAIRING_INIT;
 static H2bool gbNoStoredEkm;
 
-extern unsigned char bhdcp_repeater_get_state ;
 /**
  * Functions to process incoming messages
  */
@@ -345,16 +341,14 @@ static int processLcInit(unsigned char *message, unsigned int length)
 	return rc;
 }
 
-#define HDCP_REPEATER 1
+#define HDCP_REPEATER 0
 static int processSkeSendEks(unsigned char *message, unsigned int length)
 {
 	int rc = -1;
 	static H2_SKESendEksPayLoad payload;
-   #if HDCP_REPEATER
-   static H2_RepeaterAuthSendRxIdList_PayLoad sendPayload = {0};
+   /*static H2_RepeaterAuthSendRxIdList_PayLoad sendPayload = {0};
    static H2uint8 ksvs[RECEIVERID_SIZE*MAX_DEVICECOUNT];
-   static unsigned int outgoingLength = 0;
-   #endif
+   static unsigned int outgoingLength = 0;*/
 
 	do {
       /** Check state! */
@@ -398,52 +392,26 @@ static int processSkeSendEks(unsigned char *message, unsigned int length)
 		    /*
 		     * Don't send KSV if we're not a repeater.
 		     */
-if(bhdcp_repeater_get_state ==0x01)
-{
 #if (HDCP_REPEATER == 1)
       H2uint8 DeviceCount;
       H2uint8 Depth;
       H2uint8 DepthExceeded;
       H2uint8 DevicesExceeded;
-      H2uint8 HDCP2_0_repeater_downstream_flag;
-      H2uint8 b_HDCP1_device_downstream;
 
-      hdcp2_Rx_GetKsvInfo( &DeviceCount, &Depth, &DevicesExceeded, &DepthExceeded, ksvs ,&HDCP2_0_repeater_downstream_flag,&b_HDCP1_device_downstream);
+      hdcp2_Rx_GetKsvInfo( &DeviceCount, &Depth, &DevicesExceeded, &DepthExceeded, ksvs );
 
       H2DBGLOG((LOCALDBG, "DeviceCount: %d DepthExceeded: %d DevicesExceeded: %d\n",
          DeviceCount, DepthExceeded, DevicesExceeded ));
 
       if ( DeviceCount || DepthExceeded || DevicesExceeded )
       {
-/*
+
          hdcp2_Rx_GetKsvInfo( &sendPayload.deviceCount, &sendPayload.depth,
                &sendPayload.maxDevsExceeded, &sendPayload.maxCascadeExceeded ,
                (H2uint8 *)ksvs );
-               */
-         //
-         #if 1//REAPETER_2p2_TEST_CMD       // for test PAY load
-	  sendPayload.maxDevsExceeded =DevicesExceeded;
-	  sendPayload.maxCascadeExceeded =DepthExceeded;
-	  sendPayload.deviceCount =DeviceCount ;
-	  sendPayload.depth = Depth ;
-	  sendPayload.HDCP2_0_repeater_downstream = HDCP2_0_repeater_downstream_flag ;
-	 if (sendPayload.depth >4 )   sendPayload.maxCascadeExceeded = 1;
-	 if (sendPayload.deviceCount >31)  sendPayload.maxDevsExceeded =1 ;
-	  sendPayload.HDCP1_device_downstream = b_HDCP1_device_downstream ;
 
-	//  pr_err("Depth =%x   DeviceCount = %x \n",Depth , DeviceCount);
-	  sendPayload.Rxinfo[0]=( ((sendPayload.deviceCount&0x10)>>4)<<0)|((sendPayload.depth&0x7)<<1);// Rxinfor[15:8]
-	  sendPayload.Rxinfo[1] = ( (sendPayload.deviceCount&0xf)<<4) |( (sendPayload.maxDevsExceeded&0x1)<<3)|( (sendPayload.maxCascadeExceeded&0x1)<<2) |( (sendPayload.HDCP2_0_repeater_downstream&0x1)<<1)|( (sendPayload.HDCP1_device_downstream&0x1)<<0); //Rxinfor[7:0]
-
-	 //pr_err("sendPayload.Rxinfo[0]= 0x%x  sendPayload.Rxinfo[1] = 0x%x ", sendPayload.Rxinfo[0],sendPayload.Rxinfo[1]);
-         sendPayload.Seq_num[0]= 0 ;
-	  sendPayload.Seq_num[1]= 0 ;
-	  sendPayload.Seq_num[2]= 0 ;
-	 #endif
-	 //cloud add
-	 DownStream_done();
-	 hdcp2_Rx_CalvPrime(ksvs,&sendPayload.Rxinfo[0],&sendPayload.Seq_num[0],sendPayload.VPrime);
          /** Copy Vprime into the outgoing message */
+         hdcp2_Rx_GetvPrime( sendPayload.VPrime, sizeof( sendPayload.VPrime ) );
 
          if ( 0 != h2MsgRepeaterAuthSendReceiverIdListPack( message, &length, &sendPayload, ksvs ))
          {
@@ -465,32 +433,9 @@ if(bhdcp_repeater_get_state ==0x01)
          rc = STATUS_OK;
       }
 #endif
-}
       /** State is B4 */
 		gState = H2_STATE_B4_AUTHENTICATED;
 	} while (0);
-	return rc;
-}
-
-static int processRepeaterAuthStreamManage(unsigned char *message, unsigned int length)
-{
-	int rc = -1;
-	static H2_RepeaterAuthStreamManage_PayLoad payload;
-	static H2_RepeaterAuthStreamReady_PayLoad sendPayload = {0};
-
-	if (h2MsgRepeaterAuthStraeamManageUnpack(message, length, &payload) != 0) {
-			H2DBGLOG((LOCALDBG, "Error unpacking message!\r\n"));
-			rc = -1;
-		}
-
-	hdcp2_Rx_CalMPrime(&payload.Stream_Type[0],&payload.seq_num_M[0],&sendPayload.MPrime[0]);
-
-         if ( 0 != h2MsgRepeaterAuthStreamReadyPack( message, &length, &sendPayload ))
-         {
-            H2DBGLOG(( LOCALDBG, "Error packing Rx Id list\r\n"));
-            rc = -1;
-         }
-
 	return rc;
 }
 
@@ -538,11 +483,7 @@ int h2MessagePoll(unsigned char *message, unsigned int length)
 	{
 		static H2_AKESendPairingInfoPayLoad sendPayload;
 		H2DBGLOG((LOCALDBG, "Getting Pairing Info\r\n"));
-		#ifdef CONFIG_RTK_HDCPRX_2P2_TEE   // TEE_EN
-		CA_hdcp2_Rx_GetEKhKm(sendPayload.Ekh_Km, sizeof(sendPayload.Ekh_Km));
-		#else
 		hdcp2_Rx_GetEKhKm(sendPayload.Ekh_Km, sizeof(sendPayload.Ekh_Km));
-		#endif
 	//	printk("TEST Ekh_km:\n");
 	//	spu_print(sendPayload.Ekh_Km, sizeof(sendPayload.Ekh_Km));
 
@@ -591,59 +532,25 @@ int h2MessageParse(unsigned char *message, unsigned int length)
 	* TX -> RX messages
 	*/
 		case AKE_INIT:
-			#ifdef CONFIG_RTK_HDCPRX_2P2_TEE//TEE_CA_EN
-			//TEE_HDCP_DEBUG("AKE_INIT TA message [0]0x%x [1] 0x%x  [2]0x%x  [3] 0x%x  [4]0x%x [5] 0x%x  [6]0x%x  [7] 0x%x  [8]0x%x [9] 0x%x  [10]0x%x  [11] 0x%x  ",message[0],message[1],message[2],message[3],message[4],message[5],message[6],message[7],message[8],message[9],message[10],message[11]);
-			CA_processAkeInit(message, length);
-
-			drvif_Hdmi_HDCP2_2_Write_Data_to_TX(Message_BACK_id3,534);
-			message[0] = Message_BACK_id3[0];
-		//	TEE_HDCP_DEBUG("AKE_INIT 123TA message [0]%x [1] %x  [2]%x  [3] %x",Message_BACK_id3[0],Message_BACK_id3[1],Message_BACK_id3[2],Message_BACK_id3[3]);
-			#else
 			rc = processAkeInit(message, length);
-			#endif
 			break;
 		case AKE_NO_STORED_EKM:
-			#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-			CA_processAkeNoStoredEkm(message, length);
-			drvif_Hdmi_HDCP2_2_Write_Data_to_TX(Message_BACK_id7,33);
-			#else
 			rc = processAkeNoStoredEkm(message, length);
 
-                     #endif
 	/** Start pairing process */
 			 gPairingState = PAIRING_SEND_HPRIME;
 			break;
 		case AKE_STORED_EKM:
-			#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-			CA_processAkeStoredEkm(message, length);
-			drvif_Hdmi_HDCP2_2_Write_Data_to_TX(Message_BACK_id7,33);
-		//	TEE_HDCP_DEBUG("AKE_STORED_EKM TA message [0]%x [1] %x  [2]%x  [3] %x",Message_BACK_id7[0],Message_BACK_id7[1],Message_BACK_id7[2],Message_BACK_id7[3]);
-			#else
 			rc = processAkeStoredEkm(message, length);
-			#endif
 			gPairingState = PAIRING_SEND_HPRIME;
 			break;
 		case LC_INIT:
-			#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-			CA_processLcInit(message, length);
-			drvif_Hdmi_HDCP2_2_Write_Data_to_TX(Message_BACK_id10,33);
-			TEE_HDCP_DEBUG("TA message [0]%x [1] %x  [2]%x  [3] %x",Message_BACK_id10[0],Message_BACK_id10[1],Message_BACK_id10[2],Message_BACK_id10[3]);
-			#else
 			rc = processLcInit(message, length);
-			#endif
 			break;
 		case SKE_SEND_EKS:
-			#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-			CA_processSkeSendEks(message, length);
-			TEE_HDCP_DEBUG("TA message [0]%x [1] %x  [2]%x  [3] %x",Message_BACK_id10[0],Message_BACK_id10[1],Message_BACK_id10[2],Message_BACK_id10[3]);
-			#else
 			rc = processSkeSendEks(message, length);
-			#endif
 			break;
-              case REPEATERAUTH_STREAM_MANAGE:
 
-			rc = processRepeaterAuthStreamManage(message, length);
-			break;
 	/**
 	* RX -> TX messages. We should not receive these!
 	*/

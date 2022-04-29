@@ -57,7 +57,6 @@
 #include <linux/kthread.h>
 #include <linux/mutex.h>
 #include <linux/utsname.h>
-#include <linux/usb/quirks.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_cmnd.h>
@@ -76,6 +75,8 @@
 #if IS_ENABLED(CONFIG_USB_UAS)
 #include "uas-detect.h"
 #endif
+
+#define DRV_NAME "usb-storage"
 
 /* Some informational data */
 MODULE_AUTHOR("Matthew Dharm <mdharm-usb@one-eyed-alien.net>");
@@ -564,9 +565,6 @@ void usb_stor_adjust_quirks(struct usb_device *udev, unsigned long *fflags)
 		case 'w':
 			f |= US_FL_NO_WP_DETECT;
 			break;
-		case 'y':
-			f |= US_FL_SNPS_XHCI_WA;
-			break;
 		/* Ignore unrecognized flag characters */
 		}
 	}
@@ -598,9 +596,6 @@ static int get_device_info(struct us_data *us, const struct usb_device_id *id,
 		dev_info(pdev, "device ignored\n");
 		return -ENODEV;
 	}
-
-	if (us->fflags & US_FL_SNPS_XHCI_WA)
-		dev->quirks |= USB_QUIRK_SNPS_XHCI_WA;
 
 	/*
 	 * This flag is only needed when we're in high-speed, so let's
@@ -934,7 +929,8 @@ static unsigned int usb_stor_sg_tablesize(struct usb_interface *intf)
 int usb_stor_probe1(struct us_data **pus,
 		struct usb_interface *intf,
 		const struct usb_device_id *id,
-		struct us_unusual_dev *unusual_dev)
+		struct us_unusual_dev *unusual_dev,
+		struct scsi_host_template *sht)
 {
 	struct Scsi_Host *host;
 	struct us_data *us;
@@ -946,7 +942,7 @@ int usb_stor_probe1(struct us_data **pus,
 	 * Ask the SCSI layer to allocate a host structure, with extra
 	 * space at the end for our private us_data structure.
 	 */
-	host = scsi_host_alloc(&usb_stor_host_template, sizeof(*us));
+	host = scsi_host_alloc(sht, sizeof(*us));
 	if (!host) {
 		dev_warn(&intf->dev, "Unable to allocate the scsi host\n");
 		return -ENOMEM;
@@ -1083,6 +1079,8 @@ void usb_stor_disconnect(struct usb_interface *intf)
 }
 EXPORT_SYMBOL_GPL(usb_stor_disconnect);
 
+static struct scsi_host_template usb_stor_host_template;
+
 /* The main probe routine for standard devices */
 static int storage_probe(struct usb_interface *intf,
 			 const struct usb_device_id *id)
@@ -1123,7 +1121,8 @@ static int storage_probe(struct usb_interface *intf,
 			id->idVendor, id->idProduct);
 	}
 
-	result = usb_stor_probe1(&us, intf, id, unusual_dev);
+	result = usb_stor_probe1(&us, intf, id, unusual_dev,
+				 &usb_stor_host_template);
 	if (result)
 		return result;
 
@@ -1134,7 +1133,7 @@ static int storage_probe(struct usb_interface *intf,
 }
 
 static struct usb_driver usb_storage_driver = {
-	.name =		"usb-storage",
+	.name =		DRV_NAME,
 	.probe =	storage_probe,
 	.disconnect =	usb_stor_disconnect,
 	.suspend =	usb_stor_suspend,
@@ -1147,4 +1146,4 @@ static struct usb_driver usb_storage_driver = {
 	.soft_unbind =	1,
 };
 
-module_usb_driver(usb_storage_driver);
+module_usb_stor_driver(usb_storage_driver, usb_stor_host_template, DRV_NAME);

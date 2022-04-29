@@ -16,8 +16,6 @@
 #include <linux/usb/quirks.h>
 #include "usb.h"
 
-#define IOMEM(x)        ((void __force __iomem *)(x))
-
 /* Active configuration fields */
 #define usb_actconfig_show(field, format_string)			\
 static ssize_t field##_show(struct device *dev,				\
@@ -533,6 +531,44 @@ static ssize_t usb2_lpm_besl_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(usb2_lpm_besl);
 
+static ssize_t usb3_hardware_lpm_u1_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct usb_device *udev = to_usb_device(dev);
+	const char *p;
+
+	usb_lock_device(udev);
+
+	if (udev->usb3_lpm_u1_enabled)
+		p = "enabled";
+	else
+		p = "disabled";
+
+	usb_unlock_device(udev);
+
+	return sprintf(buf, "%s\n", p);
+}
+static DEVICE_ATTR_RO(usb3_hardware_lpm_u1);
+
+static ssize_t usb3_hardware_lpm_u2_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct usb_device *udev = to_usb_device(dev);
+	const char *p;
+
+	usb_lock_device(udev);
+
+	if (udev->usb3_lpm_u2_enabled)
+		p = "enabled";
+	else
+		p = "disabled";
+
+	usb_unlock_device(udev);
+
+	return sprintf(buf, "%s\n", p);
+}
+static DEVICE_ATTR_RO(usb3_hardware_lpm_u2);
+
 static struct attribute *usb2_hardware_lpm_attr[] = {
 	&dev_attr_usb2_hardware_lpm.attr,
 	&dev_attr_usb2_lpm_l1_timeout.attr,
@@ -542,6 +578,16 @@ static struct attribute *usb2_hardware_lpm_attr[] = {
 static struct attribute_group usb2_hardware_lpm_attr_group = {
 	.name	= power_group_name,
 	.attrs	= usb2_hardware_lpm_attr,
+};
+
+static struct attribute *usb3_hardware_lpm_attr[] = {
+	&dev_attr_usb3_hardware_lpm_u1.attr,
+	&dev_attr_usb3_hardware_lpm_u2.attr,
+	NULL,
+};
+static struct attribute_group usb3_hardware_lpm_attr_group = {
+	.name	= power_group_name,
+	.attrs	= usb3_hardware_lpm_attr,
 };
 
 static struct attribute *power_attrs[] = {
@@ -566,6 +612,10 @@ static int add_power_attributes(struct device *dev)
 		if (udev->usb2_hw_lpm_capable == 1)
 			rc = sysfs_merge_group(&dev->kobj,
 					&usb2_hardware_lpm_attr_group);
+		if (udev->speed == USB_SPEED_SUPER &&
+				udev->lpm_capable == 1)
+			rc = sysfs_merge_group(&dev->kobj,
+					&usb3_hardware_lpm_attr_group);
 	}
 
 	return rc;
@@ -678,183 +728,6 @@ static ssize_t remove_store(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_IGNORE_LOCKDEP(remove, S_IWUSR, NULL, remove_store);
 
-#ifdef CONFIG_USB_RTK_HCD_TEST_MODE
-#include <linux/slab.h>
-#include <linux/usb/ch11.h>
-#include <linux/usb/hcd.h>
-
-extern int get_hub_descriptor_port(struct usb_device *hdev, void *data, int size, int port1);
-
-// copy from hub.c and rename
-/*
- * USB 2.0 spec Section 11.24.2.2
- */
-static int hub_clear_port_feature(struct usb_device *hdev, int port1, int feature)
-{
-	return usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-			ClearPortFeature, USB_RT_PORT, feature, port1,
-			NULL, 0, 1000);
-}
-
-/*
- * USB 2.0 spec Section 11.24.2.13
- */
-static int hub_set_port_feature(struct usb_device *hdev, int port1, int feature)
-{
-	return usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-			SetPortFeature, USB_RT_PORT, feature, port1,
-			NULL, 0, 1000);
-}
-
-/* use a short timeout for hub/port status fetches */
-#define	USB_STS_TIMEOUT		1000
-#define	USB_STS_RETRIES		5
-
-static int get_port_status(struct usb_device *hdev, int port1,
-		struct usb_port_status *data)
-{
-	int i, status = -ETIMEDOUT;
-
-	for (i = 0; i < USB_STS_RETRIES &&
-			(status == -ETIMEDOUT || status == -EPIPE); i++) {
-		printk("get_port_status at port %d ...\n", port1);
-		status = usb_control_msg(hdev, usb_rcvctrlpipe(hdev, 0),
-			USB_REQ_GET_STATUS, USB_DIR_IN | USB_RT_PORT, 0, port1,
-			data, sizeof(*data), USB_STS_TIMEOUT);
-	}
-	return status;
-}
-
-enum {
-	TEST_RESET = 0,
-	TEST_TEST_J,
-	TEST_TEST_K,
-	TEST_TEST_SE0_NAK,
-	TEST_TEST_PACKET,
-	TEST_TEST_FORCE_ENABLE,
-	TEST_SUSPEND_RESUME,
-	TEST_SINGLE_STEP_GET_DEVICE_DESCRIPTOR,
-	TEST_PORT_RESET,
-	MAX_CTS_TEST_CASE,
-};
-
-static ssize_t  show_runTestMode (struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct usb_device *udev = udev = to_usb_device (dev);
-	struct usb_host_config *actconfig;
-
-	if(udev->descriptor.bDeviceClass != USB_CLASS_HUB)
-		return sprintf (buf, "This node is not a HUB\n");
-
-	return sprintf (buf, "%s to runTestMode\n"
-						 "echo %d to run HC_RESET command\n"
-						 "echo %d to run TEST_J command\n"
-						 "echo %d ro run TEST_K command\n"
-						 "echo %d to run TEST_SE0_NAK command\n"
-						 "echo %d to run TEST_PACKET command\n"
-						 "echo %d to run TEST_FORCE_ENABLE command\n"
-						 "echo %d to run SUSPEND/RESUME command\n"
-						 "echo %d to run SINGLE_STEP_GET_DEVICE_DESCRIPTOR command\n"
-						 "echo %d to run PORT_RESET command\n",
-						 dev_name(dev),
-						 TEST_RESET, TEST_TEST_J, TEST_TEST_K, TEST_TEST_SE0_NAK, TEST_TEST_PACKET,
-						 TEST_TEST_FORCE_ENABLE, TEST_SUSPEND_RESUME, TEST_SINGLE_STEP_GET_DEVICE_DESCRIPTOR,
-						 TEST_PORT_RESET);
-
-	return 0;
-}
-
-static ssize_t
-set_runTestMode (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct usb_device	*udev = udev = to_usb_device (dev);
-	int value, test_case;
-	unsigned int		port1 = 1;
-
-	if ((value = sscanf (buf, "%u", &test_case)) != 1)
-		return -EINVAL;
-
-	if(udev->descriptor.bDeviceClass != USB_CLASS_HUB)
-		return value;
-
-	switch (test_case) {
-	case TEST_RESET:
-		printk("run HC_RESET (%d) to port %d ...\n", test_case, port1);
-		if (udev->bus != NULL) {
-			struct usb_hcd *hcd = bus_to_hcd(udev->bus);
-			int ret;
-			if (hcd != NULL && hcd->driver != NULL && hcd->driver->reset)
-				ret = hcd->driver->reset(hcd);
-			if (ret)
-				printk("run HC_RESET fail ...\n");
-		}
-
-	break;
-	case TEST_TEST_J:
-	case TEST_TEST_K:
-	case TEST_TEST_SE0_NAK:
-	case TEST_TEST_PACKET:
-	case TEST_TEST_FORCE_ENABLE:
-		printk("run USB_PORT_FEAT_TEST mode %d to port %d ...\n", test_case, port1);
-		hub_set_port_feature(udev,(test_case << 8) | port1, USB_PORT_FEAT_TEST);
-
-	break;
-	case TEST_SUSPEND_RESUME:
-		printk("run TEST_SUSPEND_RESUME to the port %d of the hub ...\n", port1);
-		msleep(15000);
-		printk("set USB_PORT_FEAT_SUSPEND to the port %d of the hub ...\n", port1);
-		hub_set_port_feature(udev, port1, USB_PORT_FEAT_SUSPEND);
-		printk("set OK !!!\n");
-		msleep(15000);
-		printk("clear USB_PORT_FEAT_SUSPEND to the port %d of the hub ...\n", port1);
-		hub_clear_port_feature(udev, port1, USB_PORT_FEAT_SUSPEND);
-		printk("clear OK !!!\n");
-		{
-			printk("get_port_status port %d of the hub ...\n", port1);
-			struct usb_port_status data;
-			msleep(USB_RESUME_TIMEOUT);
-			get_port_status(udev, port1, &data);
-		}
-	break;
-	case TEST_SINGLE_STEP_GET_DEVICE_DESCRIPTOR:
-		printk("run SINGLE_STEP_GET_DEVICE_DESCRIPTOR to the port %d of the hub ...\n", port1);
-		int i, size = 0x12;
-		unsigned char		*data;
-		data = (unsigned char*)kmalloc(size, GFP_KERNEL);
-		if (!data)
-			return -ENOMEM;
-		memset (data, 0, size);
-		get_hub_descriptor_port(udev, data, size, port1);
-
-		printk(" get device descriptor\n");
-		for( i = 0; i < size; i++)
-		{
-			printk(" %.2x", data[i]);
-			if((i % 15) == 0 && (i != 0))
-				printk("\n<1>");
-		}
-		printk("\n");
-
-		kfree(data);
-
-	break;
-	case TEST_PORT_RESET:
-		printk("run PORT_RESET (%d) to port %d ...\n", test_case, port1);
-		hub_clear_port_feature(udev, port1, USB_PORT_FEAT_POWER);
-		msleep(1000);
-		hub_set_port_feature(udev, port1, USB_PORT_FEAT_POWER);
-
-	break;
-	default:
-		printk("error test_case %d !!!\n", test_case);
-	break;
-	}
-
-	return (value < 0) ? value : count;
-}
-static DEVICE_ATTR(runTestMode, S_IRUGO | S_IWUSR,
-		show_runTestMode, set_runTestMode);
-#endif /* CONFIG_USB_RTK_HCD_TEST_MODE */
 
 static struct attribute *dev_attrs[] = {
 	/* current configuration's attributes */
@@ -885,9 +758,6 @@ static struct attribute *dev_attrs[] = {
 	&dev_attr_remove.attr,
 	&dev_attr_removable.attr,
 	&dev_attr_ltm_capable.attr,
-#ifdef CONFIG_USB_RTK_HCD_TEST_MODE
-	&dev_attr_runTestMode.attr,
-#endif // CONFIG_USB_RTK_HCD_TEST_MODE
 	NULL,
 };
 static struct attribute_group dev_attr_grp = {
@@ -1108,6 +978,41 @@ static ssize_t supports_autosuspend_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(supports_autosuspend);
 
+/*
+ * interface_authorized_show - show authorization status of an USB interface
+ * 1 is authorized, 0 is deauthorized
+ */
+static ssize_t interface_authorized_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct usb_interface *intf = to_usb_interface(dev);
+
+	return sprintf(buf, "%u\n", intf->authorized);
+}
+
+/*
+ * interface_authorized_store - authorize or deauthorize an USB interface
+ */
+static ssize_t interface_authorized_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct usb_interface *intf = to_usb_interface(dev);
+	bool val;
+
+	if (strtobool(buf, &val) != 0)
+		return -EINVAL;
+
+	if (val)
+		usb_authorize_interface(intf);
+	else
+		usb_deauthorize_interface(intf);
+
+	return count;
+}
+static struct device_attribute dev_attr_interface_authorized =
+		__ATTR(authorized, S_IRUGO | S_IWUSR,
+		interface_authorized_show, interface_authorized_store);
+
 static struct attribute *intf_attrs[] = {
 	&dev_attr_bInterfaceNumber.attr,
 	&dev_attr_bAlternateSetting.attr,
@@ -1117,6 +1022,7 @@ static struct attribute *intf_attrs[] = {
 	&dev_attr_bInterfaceProtocol.attr,
 	&dev_attr_modalias.attr,
 	&dev_attr_supports_autosuspend.attr,
+	&dev_attr_interface_authorized.attr,
 	NULL,
 };
 static struct attribute_group intf_attr_grp = {
@@ -1177,50 +1083,3 @@ void usb_remove_sysfs_intf_files(struct usb_interface *intf)
 	device_remove_file(&intf->dev, &dev_attr_interface);
 	intf->sysfs_files_created = 0;
 }
-
-#ifdef CONFIG_USB_PATCH_ON_RTK
-/* [DEV_FIX]1. USB reset mechanism allows only 3 times after Boot or Resume
- * commit 3e6a470b06ea6e37edded163aa814c8c24f04ced
- */
-/* hcy modified below */
-static struct delayed_work reset_delayed_work;
-extern void reset_usb_func(struct work_struct *work);
-extern bool freeze_khubd_stop;
-static ssize_t bus_reset_store(struct bus_type *bus, const char *buf, size_t count)
-{
-	unsigned long val;
-
-	if (kstrtoul(buf, 0, &val) < 0)
-	//if kstrtoul if (strict_strtoul(buf, 0, &val) < 0)
-		return -EINVAL;
-
-	if (val) {
-		if (!freeze_khubd_stop) {
-			INIT_DELAYED_WORK(&reset_delayed_work, reset_usb_func);
-			schedule_delayed_work(&reset_delayed_work, msecs_to_jiffies(1));
-			freeze_khubd_stop = 1;
-		} else {
-			printk(KERN_ERR "please wait seconds and try again ..... !! \n");
-			return -EINVAL;
-		}
-
-	}
-	return count;
-}
-static BUS_ATTR(reset, (S_IWUSR|S_IWGRP), NULL, bus_reset_store);
-
-static struct attribute *usb_gbus_attrs[] = {
-	&bus_attr_reset.attr,
-	NULL,
-};
-
-static const struct attribute_group usb_gbus_group = {
-	.attrs = usb_gbus_attrs,
-};
-
-const struct attribute_group *usb_gbus_groups[] = {
-	&usb_gbus_group,
-	NULL,
-};
-
-#endif

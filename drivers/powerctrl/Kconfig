@@ -9,13 +9,18 @@ config POWER_CONTROL
 config POWER_CONTROL_DEBUGFS
     bool "DebugFs fpr Power Control"
     depends on POWER_CONTROL
+    default n
+
+
+config POWER_CONTROL_RTD129X
+    bool "Power Control for RTD192x"
+    depends on POWER_CONTROL
     default y
+    
 
-
-config POWER_CONTROL_RTD129x
-	bool "Power Control for RTD129x"
-	depends on POWER_CONTROL
-	select PM_GENERIC_DOMAINS
-	default y
+config POWER_CONTROL_RTD129X_DEBUGFS
+    bool "DebugFs for RTD192x Power Control"
+    depends on POWER_CONTROL_RTD129X
+    default y
 
 endmenu

@@ -43,7 +43,9 @@
 #include <linux/suspend.h>
 
 #ifdef CONFIG_USB_PATCH_ON_RTK
+#ifdef CONFIG_ARCH_RTD129X
 #include <soc/realtek/rtd129x_cpu.h>
+#endif
 #endif
 
 #include "platform_data.h"
@@ -89,7 +91,7 @@ static int dwc3_core_soft_reset(struct dwc3 *dwc)
 	reg |= DWC3_GUSB2PHYCFG_PHYSOFTRST;
 	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 
-#ifndef CONFIG_USB_DWC3_RTK
+#if !IS_ENABLED(CONFIG_USB_DWC3_RTK)
 	/* fixed kernel panic when init usb2_phy
 	 * move to the end of function
 	 */
@@ -124,7 +126,7 @@ static int dwc3_core_soft_reset(struct dwc3 *dwc)
 	reg &= ~DWC3_GCTL_CORESOFTRESET;
 	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
 
-#ifdef CONFIG_USB_DWC3_RTK
+#if IS_ENABLED(CONFIG_USB_DWC3_RTK)
 	dev_dbg(dwc->dev, "[bug fixed] late to init usb2_phy");
 	usb_phy_init(dwc->usb2_phy);
 	mdelay(100);
@@ -459,42 +461,6 @@ static void dwc3_phy_setup(struct dwc3 *dwc)
 	mdelay(100);
 }
 
-#ifdef CONFIG_USB_PATCH_ON_RTK
-extern void rtk_usb3_phy_toggle(struct usb_phy *usb3_phy, bool isConnect);
-
-void RTK_dwc3_usb3_phy_toggle(struct device *hcd_dev, bool isConnect) {
-	struct device *dwc3_dev = NULL;
-	struct dwc3 *dwc = NULL;
-	if (hcd_dev == NULL) return;
-
-	dwc3_dev = hcd_dev->parent;
-	if (dwc3_dev == NULL) return;
-
-	dwc = dev_get_drvdata(dwc3_dev);
-	dev_dbg(dwc3_dev, "%s\n", __func__);
-	if (dwc != NULL)
-		rtk_usb3_phy_toggle(dwc->usb3_phy, isConnect);
-}
-
-extern void rtk_usb2_phy_toggle(struct usb_phy *usb3_phy, bool isConnect);
-
-int RTK_dwc3_usb2_phy_toggle(struct device *hcd_dev, bool isConnect) {
-	struct device *dwc3_dev = NULL;
-	struct dwc3 *dwc = NULL;
-	if (hcd_dev == NULL) return -1;
-
-	dwc3_dev = hcd_dev->parent;
-	if (dwc3_dev == NULL) return -1;
-
-	dwc = dev_get_drvdata(dwc3_dev);
-	if (dwc == NULL) return -1;
-
-	dev_dbg(dwc3_dev, "%s\n", __func__);
-	rtk_usb2_phy_toggle(dwc->usb2_phy, isConnect);
-	return 0;
-}
-#endif
-
 /**
  * dwc3_core_init - Low-level initialization of DWC3 Core
  * @dwc: Pointer to our controller context structure
@@ -636,7 +602,7 @@ static int dwc3_core_init(struct dwc3 *dwc)
 	if (ret)
 		goto err2;
 
-#ifdef CONFIG_USB_DWC3_RTK
+#if IS_ENABLED(CONFIG_USB_DWC3_RTK)
 	/* workaround: to avoid transaction error and cause port reset
 	 * we enable threshold control for TX/RX
 	 * [Dev_Fix] Enable DWC3 threshold control for USB compatibility issue
@@ -657,15 +623,25 @@ static int dwc3_core_init(struct dwc3 *dwc)
 	dwc3_writel(dwc->regs, DWC3_GUCTL,
 					dwc3_readl(dwc->regs, DWC3_GUCTL) | (1<<14));   // enable auto retry
 
-	/* disable SS park modde */
-	if (dwc->dis_ss_park_mode)
-		dwc3_writel(dwc->regs, DWC3_GUCTL1,
-				dwc3_readl(dwc->regs, DWC3_GUCTL1) | (1<<17));
-
 #ifdef CONFIG_USB_PATCH_ON_RTK
 	if (dwc->revision >= DWC3_REVISION_300A)
 		dwc3_writel(dwc->regs, DWC3_DEV_IMOD,
 					dwc3_readl(dwc->regs, DWC3_DEV_IMOD) | DWC3_DEVICE_IMODI(0x1));
+#endif
+
+#ifdef CONFIG_ARCH_RTD129X
+	if (get_rtd129x_cpu_revision() == RTD129x_CHIP_REVISION_A00) {
+		/* USB2.0 cannot connect to device if port 0(USB3, type C port) is disconnected from a device
+		 * If no device is connected to USB port 0, the USB macro will enter suspend mode.
+		 * This leads to other ports not connecting to devices.
+		 * Kernel SW workaround can force port 0 not to enter suspend mode
+		 * even when no device is connected for A00
+ 		 */
+		reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+		reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
+		dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
+		dev_info(dwc->dev, "[bug fixed] 1295 A00: add workaround to disable phy suspend");
+	}
 #endif
 
 #endif
@@ -874,7 +850,7 @@ static int dwc3_probe(struct platform_device *pdev)
 
 	res->start += DWC3_GLOBALS_REGS_START;
 
-#ifdef CONFIG_USB_DWC3_RTK
+#if IS_ENABLED(CONFIG_USB_DWC3_RTK)
 	/* due to rtk dwc3 ip DWC3_GLOBALS_REGS_START is not standard (0xc100)
 	 * we need to fixed it
 	 */
@@ -894,7 +870,7 @@ static int dwc3_probe(struct platform_device *pdev)
 	}
 
 	dwc->regs	= regs;
-#ifdef CONFIG_USB_DWC3_RTK
+#if IS_ENABLED(CONFIG_USB_DWC3_RTK)
 	/* due to rtk dwc3 ip DWC3_GLOBALS_REGS_START is not standard (0xc100)
 	 * we need to fixed it
 	 */
@@ -952,10 +928,6 @@ static int dwc3_probe(struct platform_device *pdev)
 				"snps,dis_u3_susphy_quirk");
 		dwc->dis_u2_susphy_quirk = of_property_read_bool(node,
 				"snps,dis_u2_susphy_quirk");
-#ifdef CONFIG_USB_DWC3_RTK
-		dwc->dis_ss_park_mode = of_property_read_bool(node,
-				"snps,dis_ss_park_mode");
-#endif
 
 		dwc->tx_de_emphasis_quirk = of_property_read_bool(node,
 				"snps,tx_de_emphasis_quirk");
@@ -1216,7 +1188,7 @@ static int dwc3_resume(struct device *dev)
 	dev_info(dev,  "[USB] %s Suspend mode\n", __func__);
 #endif
 
-#ifdef CONFIG_USB_DWC3_RTK
+#if IS_ENABLED(CONFIG_USB_DWC3_RTK)
 	/* workaround: to avoid transaction error and cause port reset
 	 * we enable threshold control for TX/RX
 	 * [Dev_Fix] Enable DWC3 threshold control for USB compatibility issue
@@ -1241,6 +1213,22 @@ static int dwc3_resume(struct device *dev)
 	if (dwc->revision >= DWC3_REVISION_300A)
 		dwc3_writel(dwc->regs, DWC3_DEV_IMOD,
 					dwc3_readl(dwc->regs, DWC3_DEV_IMOD) | DWC3_DEVICE_IMODI(0x1));
+#endif
+
+#ifdef CONFIG_ARCH_RTD129X
+	if (get_rtd129x_cpu_revision() == RTD129x_CHIP_REVISION_A00) {
+		/* USB2.0 cannot connect to device if port 0(USB3, type C port) is disconnected from a device
+		 * If no device is connected to USB port 0, the USB macro will enter suspend mode.
+		 * This leads to other ports not connecting to devices.
+		 * Kernel SW workaround can force port 0 not to enter suspend mode
+		 * even when no device is connected for A00
+ 		 */
+		u32 reg;
+		reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+		reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
+		dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
+		dev_info(dev, "[bug fixed] 1295 A00: add workaround to disable phy suspend");
+	}
 #endif
 
 #endif

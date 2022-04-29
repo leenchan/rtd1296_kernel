@@ -1,14 +1,3 @@
-/*
- * Realtek I2C driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- */
-
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
@@ -16,10 +5,8 @@
 #include <linux/interrupt.h>
 #include <linux/completion.h>
 #include <linux/platform_device.h>
-//#include <linux/clk.h>
 #include <linux/io.h>
 #include <linux/of.h>
-//#include <linux/of_i2c.h>
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/of_address.h>
@@ -30,11 +17,12 @@
 
 #include "i2c-rtk.h"
 #include "i2c-rtk-priv.h"
-#include "../algos/i2c-algo-phoenix.h"
 
 #include <linux/clkdev.h>   // clk_get
+#include <linux/clk.h>   // clk_get
 #include <linux/clk-provider.h>
 #include "i2c-venus-config-saturn.h"
+
 
 #define VENUS_MASTER_7BIT_ADDR  0x24
 
@@ -249,8 +237,7 @@ void rtk_i2c_dump_register(struct rtk_i2c_dev *i2c_dev){
 */
 
 static void rtk_i2c_setup_reg_base(struct rtk_i2c_dev *i2c_dev){
-
-//	u32 base = (u32)i2c_dev->base;
+#ifdef CONFIG_ARCH_RTD129X
 	unsigned long long base = (unsigned long long)i2c_dev->base;
 
 	switch(i2c_dev->id){
@@ -292,7 +279,49 @@ static void rtk_i2c_setup_reg_base(struct rtk_i2c_dev *i2c_dev){
 		default:
 			break;
 	}
+#else
+	u32 base = (u32)i2c_dev->base;
 
+	switch(i2c_dev->id){
+		case 0:
+			i2c_dev->p_this->reg_map.I2C_ISR = (base & 0xFFFFFF000);
+			i2c_dev->p_this->reg_map.I2C_INT = ISO_ISR_I2C0;
+			i2c_dev->p_this->reg_map.IC_SDA_DEL = (base & 0xFFFFFF000) | ISO_I2C0_SDA_DEL;
+			break;
+		case 1:
+			i2c_dev->p_this->reg_map.I2C_ISR = (base & 0xFFFFFF000) | 0x000C;
+			i2c_dev->p_this->reg_map.I2C_INT = MIS_ISR_I2C1;
+			i2c_dev->p_this->reg_map.IC_SDA_DEL = (base & 0xFFFFFF000) | MIS_I2C1_SDA_DEL;
+			break;
+		case 2:
+			i2c_dev->p_this->reg_map.I2C_ISR = (base & 0xFFFFFF000) | 0x000C;
+			i2c_dev->p_this->reg_map.I2C_INT = MIS_ISR_I2C2;
+			i2c_dev->p_this->reg_map.IC_SDA_DEL = (base & 0xFFFFFF000) | MIS_I2C2_SDA_DEL;
+			break;
+		case 3:
+			i2c_dev->p_this->reg_map.I2C_ISR = (base & 0xFFFFFF000) | 0x000C;
+			i2c_dev->p_this->reg_map.I2C_INT = MIS_ISR_I2C3;
+			i2c_dev->p_this->reg_map.IC_SDA_DEL = (base & 0xFFFFFF000) | MIS_I2C3_SDA_DEL;
+			break;
+		case 4:
+			i2c_dev->p_this->reg_map.I2C_ISR = (base & 0xFFFFFF000) | 0x000C;
+			i2c_dev->p_this->reg_map.I2C_INT = MIS_ISR_I2C4;
+			i2c_dev->p_this->reg_map.IC_SDA_DEL = (base & 0xFFFFFF000) | MIS_I2C4_SDA_DEL;
+			break;
+		case 5:
+			i2c_dev->p_this->reg_map.I2C_ISR = (base & 0xFFFFFF000) | 0x000C;
+			i2c_dev->p_this->reg_map.I2C_INT = MIS_ISR_I2C5;
+			i2c_dev->p_this->reg_map.IC_SDA_DEL = (base & 0xFFFFFF000) | MIS_I2C5_SDA_DEL;
+			break;
+		case 6:
+			i2c_dev->p_this->reg_map.I2C_ISR = (base & 0xFFFFFF000);
+			i2c_dev->p_this->reg_map.I2C_INT = ISO_ISR_I2C6;
+			i2c_dev->p_this->reg_map.IC_SDA_DEL = (base & 0xFFFFFF000) | ISO_I2C6_SDA_DEL;
+			break;
+		default:
+			break;
+	}
+#endif
 	i2c_dev->p_this->reg_map.IC_CON = base | I2C_CON;
 	i2c_dev->p_this->reg_map.IC_TAR = base | I2C_TAR;
 	i2c_dev->p_this->reg_map.IC_SAR = base | I2C_SAR;
@@ -340,6 +369,7 @@ static void rtk_i2c_setup_reg_base(struct rtk_i2c_dev *i2c_dev){
 
 }
 
+
 static int  rtk_i2c_init(struct rtk_i2c_dev *i2c_dev){
 
 	int i = 0;
@@ -353,7 +383,9 @@ static int  rtk_i2c_init(struct rtk_i2c_dev *i2c_dev){
 
 	i2c_dev->p_this->n_port = i2c_phy[i2c_dev->p_this->id].n_port;
 	i2c_dev->p_this->p_port = (venus_i2c_port *)i2c_phy[i2c_dev->p_this->id].p_port;
-//	i2c_dev->p_this->current_port = venus_i2c_find_current_port(i2c_dev->p_this);
+#ifdef CONFIG_ARCH_RTD119X
+	i2c_dev->p_this->current_port = venus_i2c_find_current_port(i2c_dev->p_this);
+#endif
 
     if (i2c_dev->p_this->current_port && i2c_dev->p_this->current_port->gpio_mapped){
     	i2c_dev->p_this->gpio_map.muxpad      = i2c_dev->p_this->current_port->pin_mux[0].addr;
@@ -392,6 +424,9 @@ static int rtk_i2c_probe(struct platform_device *pdev){
 	int irq;
 	u32 i2c_id;
 	int ret = 0;
+#ifdef CONFIG_ARCH_RTD129X
+	char clkname[20];
+#endif
 
 	base = of_iomap(pdev->dev.of_node, 0);
 	if (!base) {
@@ -409,14 +444,25 @@ static int rtk_i2c_probe(struct platform_device *pdev){
 		printk(KERN_ERR "Get I2C ID fail\n");
 		return -EINVAL;
 	}
+#ifdef CONFIG_ARCH_RTD129X
+	if(i2c_id==0 || i2c_id==1)
+		sprintf(clkname, "clk_en_i2c%d", i2c_id);
+	else
+		sprintf(clkname, "clk_en_misc_i2c_%d", i2c_id);
 
-    div_clk = of_clk_get(pdev->dev.of_node, 0);
-    if (IS_ERR_OR_NULL(div_clk)) {
-        printk(KERN_WARNING "Failed to get clk from DT: %ld\n", PTR_ERR(div_clk));
-        div_clk = NULL;
-    } 
-    clk_prepare_enable(div_clk);
-
+	div_clk = clk_get(NULL, clkname);
+	if (IS_ERR(div_clk)) 
+		return PTR_ERR(div_clk);
+	else
+		clk_prepare_enable(div_clk);
+#endif
+/*
+	div_clk = devm_clk_get(&pdev->dev, "div-clk");
+	if (IS_ERR(div_clk)) {
+		dev_err(&pdev->dev, "missing controller clock");
+		return PTR_ERR(div_clk);
+	}
+*/
 	i2c_dev = devm_kzalloc(&pdev->dev, sizeof(*i2c_dev), GFP_KERNEL);
 	if (!i2c_dev) {
 		dev_err(&pdev->dev, "Could not allocate struct tegra_i2c_dev");
@@ -502,7 +548,9 @@ static int rtk_i2c_suspend(struct device *dev)
 
 	i2c_lock_adapter(&i2c_dev->adapter);
 	i2c_dev->is_suspended = true;
-	clk_disable_unprepare(i2c_dev->div_clk);
+	if (i2c_dev->div_clk)
+		clk_disable_unprepare(i2c_dev->div_clk);
+
 	i2c_unlock_adapter(&i2c_dev->adapter);
 
 	printk("[I2C] Exit %s\n", __FUNCTION__);
@@ -518,8 +566,9 @@ static int rtk_i2c_resume(struct device *dev)
 	printk("[I2C] Enter %s\n", __FUNCTION__);
 
 	i2c_lock_adapter(&i2c_dev->adapter);
+	if (i2c_dev->div_clk)
+		clk_prepare_enable(i2c_dev->div_clk);
 
-	clk_prepare_enable(i2c_dev->div_clk);
 	ret = rtk_i2c_init(i2c_dev);
 
 	if (ret) {
@@ -535,14 +584,17 @@ static int rtk_i2c_resume(struct device *dev)
 
 	return 0;
 }
-
-//static SIMPLE_DEV_PM_OPS(rtk_i2c_pm, rtk_i2c_suspend, rtk_i2c_resume);
+#ifdef CONFIG_ARCH_RTD119X
+static SIMPLE_DEV_PM_OPS(rtk_i2c_pm, rtk_i2c_suspend, rtk_i2c_resume);
+#define RTK_I2C_PM_OPS	(&rtk_i2c_pm)
+#else
 static const struct dev_pm_ops rtk_i2c_pm_ops = {
 	.suspend_noirq = rtk_i2c_suspend,
 	.resume_noirq = rtk_i2c_resume,
 };
 
 #define RTK_I2C_PM_OPS	(&rtk_i2c_pm_ops)
+#endif
 #else
 #define RTK_I2C_PM_OPS	NULL
 #endif

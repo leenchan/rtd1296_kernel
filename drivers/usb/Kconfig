@@ -18,24 +18,6 @@ config USB_EHCI_BIG_ENDIAN_MMIO
 
 config USB_EHCI_BIG_ENDIAN_DESC
 	bool
-# many non-PCI SOC chips embed OHCI
-config USB_ARCH_HAS_OHCI
-	boolean
-	# ARM:
-	default y if ARCH_RTK119X || ARCH_RTD129x
-	default PCI
-
-# some non-PCI hcds implement EHCI
-config USB_ARCH_HAS_EHCI
-	boolean
-	default y if ARCH_RTK119X || ARCH_RTD129x
-	default PCI
-
-# some non-PCI HCDs implement xHCI
-config USB_ARCH_HAS_XHCI
-	boolean
-	default y if ARCH_RTK119X || ARCH_RTD129x
-	default PCI
 
 menuconfig USB_SUPPORT
 	bool "USB support"
@@ -164,7 +146,7 @@ source "drivers/usb/misc/Kconfig"
 source "drivers/usb/atm/Kconfig"
 
 config USB_PATCH_ON_RTK
-	tristate
+	bool
 	default y
 
 endif # USB

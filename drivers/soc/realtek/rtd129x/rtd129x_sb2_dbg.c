@@ -1,13 +1,3 @@
-/*
- * rtd129x_sb2_dbg.c - bus debug driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- */
-
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -43,13 +33,13 @@ irqreturn_t isr_sb2_dbg(int irq, void *pdev)
 		writel((1 << 9) | (1 << 7) | 1, SB2_DBG_INT);
 
 		s_a_cpu = (intr & (1<<10)) ? 1 : 2;	/* SCPU:1, ACPU:2 */
-		addr = (s_a_cpu==1) ? readl(SB2_DBG_ADDR_SYSTEM) : readl(SB2_DBG_ADDR_AUDIO);
+		addr = (s_a_cpu == 1) ? readl(SB2_DBG_ADDR_SYSTEM) : readl(SB2_DBG_ADDR_AUDIO);
 		cause = readl(SB2_DBG_ADDR1);
-		cause = (s_a_cpu==1) ? (cause >> 2) : (cause >> 4);
+		cause = (s_a_cpu == 1) ? (cause >> 2) : (cause >> 4);
 
 		sprintf(buf, "Memory 0x%08x trashed by %sCPU with %s %s\n", addr,
 				(s_a_cpu == 1) ? "S" : "A",
-				(cause & 1) ? "D" : "I", 
+				(cause & 1) ? "D" : "I",
 				(cause & 2) ? "W" : "R");
 
 		die(buf, regs, 0);
@@ -64,7 +54,7 @@ irqreturn_t isr_sb2_dbg(int irq, void *pdev)
 
 		pr_err("[SB2 DBG] sb2 get int 0x%08x from SB2_INV_INTSTAT\n", intr);
 
-		writel( SWCIVA_INT | ACIVA_INT | SCIVA_INT | WRITE_DATA_0 , SB2_INV_INTSTAT);
+		writel( SWCIVA_INT | ACIVA_INT | SCIVA_INT | WRITE_DATA_0, SB2_INV_INTSTAT);
 
 		if (intr & SWCIVA_INT)
 			pr_err("\033[0;31m[SB2 DBG] Invalid access issued by SCPU security world\033[m\n") ;
@@ -93,8 +83,7 @@ static int sb2_dbg_init(struct platform_device *pdev)
 	struct device_node *np;
 	int sb2_irq;
 
-	if (WARN_ON(!(pdev->dev.of_node)))
-	{
+	if (WARN_ON(!(pdev->dev.of_node))) {
 		pr_err("[SB2 DBG] Error: No node\n");
 		return -ENODEV;
 	}
@@ -105,15 +94,13 @@ static int sb2_dbg_init(struct platform_device *pdev)
 
 	sb2_irq = irq_of_parse_and_map(np, 0);
 
-	if(!sb2_irq)
-	{
-		pr_err("[SB2 DBG][%s] irq parse fail\n",__FUNCTION__);
+	if (!sb2_irq) {
+		pr_err("[SB2 DBG][%s] irq parse fail\n", __FUNCTION__);
 		return -ENXIO;
 	}
 
-	if (request_irq(sb2_irq, isr_sb2_dbg, IRQF_SHARED, "sb2_dbg", pdev) != 0)
-	{
-		pr_err("[SB2 DBG][%s] irq request fail\n",__FUNCTION__);
+	if (request_irq(sb2_irq, isr_sb2_dbg, IRQF_SHARED, "sb2_dbg", pdev) != 0) {
+		pr_err("[SB2 DBG][%s] irq request fail\n", __FUNCTION__);
 		return -ENXIO;
 	}
 
@@ -125,10 +112,10 @@ static int sb2_dbg_init(struct platform_device *pdev)
 
 	//Enable SB2 interrupt
 	writel(SB2_ACPU_INT_EN | SB2_SCPU_INT_EN | WRITE_DATA_1, SB2_DBG_INT);
-	writel(SWCIVA_INT | ACIVA_INT | SCIVA_INT | WRITE_DATA_0 , SB2_INV_INTSTAT);
+	writel(SWCIVA_INT | ACIVA_INT | SCIVA_INT | WRITE_DATA_0, SB2_INV_INTSTAT);
 	writel(SWCIVAIRQ_EN | ACIVAIRQ_EN | SCIVAIRQ_EN | WRITE_DATA_1 | readl(SB2_INV_INTEN), SB2_INV_INTEN);
 
-	pr_info("[SB2 DBG][%s] initialized\n",__FUNCTION__);
+	pr_info("[SB2 DBG][%s] initialized\n", __FUNCTION__);
 
 	return 0;
 }
@@ -138,13 +125,13 @@ static int sb2_dbg_exit(struct platform_device *pdev)
 	struct device_node *np;
 	int sb2_irq;
 
-	pr_info("[SB2 DBG][%s]\n",__FUNCTION__);
+	pr_info("[SB2 DBG][%s]\n", __FUNCTION__);
 
 	np = pdev->dev.of_node;
 	sb2_irq = irq_of_parse_and_map(np, 0);
 
 	//Disable  SB2 interrupt
-	writel(0x0 , SB2_DBG_INT);
+	writel(0x0, SB2_DBG_INT);
 
 	free_irq(sb2_irq, NULL);
 
@@ -153,22 +140,22 @@ static int sb2_dbg_exit(struct platform_device *pdev)
 
 int sb2_dbg_suspend(struct device *dev)
 {
-	pr_info("[SB2 DBG] Enter %s\n",__FUNCTION__);
+	pr_info("[SB2 DBG] Enter %s\n", __FUNCTION__);
 	//Disable  SB2 interrupt
-	writel(0x0 , SB2_DBG_INT);
+	writel(0x0, SB2_DBG_INT);
 
-	pr_info("[SB2 DBG] Exit %s\n",__FUNCTION__);
+	pr_info("[SB2 DBG] Exit %s\n", __FUNCTION__);
 
 	return 0;
 }
 
 int sb2_dbg_resume(struct device *dev)
 {
-	pr_info("[SB2 DBG] Enter %s\n",__FUNCTION__);
+	pr_info("[SB2 DBG] Enter %s\n", __FUNCTION__);
 
 	//Enable SB2 interrupt
 	writel(SB2_ACPU_INT_EN | SB2_SCPU_INT_EN | WRITE_DATA_1, SB2_DBG_INT);
-	writel(SWCIVA_INT | ACIVA_INT | SCIVA_INT | WRITE_DATA_0 , SB2_INV_INTSTAT);
+	writel(SWCIVA_INT | ACIVA_INT | SCIVA_INT | WRITE_DATA_0, SB2_INV_INTSTAT);
 	writel(SWCIVAIRQ_EN | ACIVAIRQ_EN | SCIVAIRQ_EN | WRITE_DATA_1 | readl(SB2_INV_INTEN), SB2_INV_INTEN);
 
 	pr_info("[SB2 DBG] Exit %s\n",__FUNCTION__);

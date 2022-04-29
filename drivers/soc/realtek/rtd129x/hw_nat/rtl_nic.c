@@ -10,11 +10,6 @@
  *
  *   re865x_nic.c: NIC driver for the RealTek 865*
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/version.h>
@@ -954,9 +949,15 @@ static struct rtl865x_vlanConfig vlanconfig[] = {
 /*		=====  ===   =======	===	 ===   =========   =======	====	====================================	*/
 
 #if defined(CONFIG_RTD_1295_HWNAT)
+#if defined(CONFIG_RTL_MULTI_LAN_DEV_SUPPORT_LINUX_BONDING)
+	{	RTL_DRV_LAN_P4_NETIF_NAME,	1,	IF_ETHER,	RTL_WANVLANID,		RTL_WAN_FID,		RTL_WANPORT_MASK,		RTL_WANPORT_MASK,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x94 } }, 0 },
+	{	RTL_DRV_LAN_P5_NETIF_NAME,	0,	IF_ETHER,	RTL_LANVLANID,		RTL_LAN_FID,		RTL_LANPORT_MASK_5,		RTL_LANPORT_MASK_5,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x95 } }, 0 },
+	{	RTL_DRV_LAN_P0_NETIF_NAME,	0,	IF_ETHER,	RTL_LANVLANID_2,	RTL_WAN2_FID,		(0x100 | RTL_LANPORT_MASK_1),		(0x100 | RTL_LANPORT_MASK_1),		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x90 } }, 0 },
+#else
 	{	RTL_DRV_LAN_P4_NETIF_NAME,	1,	IF_ETHER,	RTL_WANVLANID,		RTL_WAN_FID,		RTL_WANPORT_MASK,		RTL_WANPORT_MASK,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x94 } }, 0 },
 	{	RTL_DRV_LAN_P5_NETIF_NAME,	0,	IF_ETHER,	RTL_LANVLANID,		RTL_LAN_FID,		RTL_LANPORT_MASK_5,		RTL_LANPORT_MASK_5,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x95 } }, 0 },
 	{	RTL_DRV_LAN_P0_NETIF_NAME,	0,	IF_ETHER,	RTL_LANVLANID,		RTL_LAN_FID,		RTL_LANPORT_MASK_1,		RTL_LANPORT_MASK_1,		1500,	{ { 0x00, 0x12, 0x34, 0x56, 0x78, 0x90 } }, 0 },
+#endif
 #else /* defined(CONFIG_RTD_1295_HWNAT) */
 #ifdef CONFIG_BRIDGE
 #if defined(CONFIG_RTL_MULTI_LAN_DEV)
@@ -6000,7 +6001,6 @@ __MIPS16 __IRAM_FWD
 	unsigned long flags = 0;
 	SMP_LOCK_ETH(flags);
 #endif
-
 	skb->protocol = eth_type_trans(skb, skb->dev);
 
 #ifdef CONFIG_RTL_IPV6READYLOGO
@@ -6036,7 +6036,7 @@ __MIPS16 __IRAM_FWD
 	napi_schedule(&cp_this->napi);
 #else
 	netif_rx(skb);
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
 #else
 
 #ifdef CONFIG_RTL_8197F
@@ -6044,7 +6044,7 @@ __MIPS16 __IRAM_FWD
 	napi_gro_receive(&cp_this->napi, skb);
 #else
 	netif_rx(skb);
-#endif /* CONFIG_RTL_ETH_NAPI_GRO_SUPPORT */
+#endif
 #else
 	netif_receive_skb(skb);
 #endif
@@ -9024,6 +9024,7 @@ static int re865x_open(struct net_device *dev)
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 	cp = NETDRV_PRIV(dev);
+
 #ifdef CONFIG_RTL_HW_VLAN_SUPPORT_HW_NAT
 	/* printk("re865x_open dev=%s , id = %d \n",dev->name,cp->id); */
 	if (cp->id == 0) {
@@ -9035,8 +9036,8 @@ static int re865x_open(struct net_device *dev)
 	napi_enable(&cp->napi);
 #if defined(CONFIG_RTL_ETH_NAPI_GRO_SUPPORT)
 	dev->gro_flush_timeout = 10000;
-#endif /* CONFIG_RTL_ETH_NAPI_GRO_SUPPORT */
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
+#endif
 
 	if (cp->opened)
 		return SUCCESS;
@@ -9083,7 +9084,7 @@ static int re865x_open(struct net_device *dev)
 #if defined(RX_TASKLET) || defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
 		tasklet_init(&cp->rx_dsr_tasklet, (void *)interrupt_dsr_rx,
 				(unsigned long)cp);
-#endif /* RX_TASKLET || CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
 
 #ifdef TX_TASKLET
 		tasklet_init(&cp->tx_dsr_tasklet, interrupt_dsr_tx,
@@ -9269,8 +9270,8 @@ static int re865x_close(struct net_device *dev)
 #if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
 #if !defined(CONFIG_RTD_1295_HWNAT)
 	unsigned long flags;
-#endif /* !CONFIG_RTD_1295_HWNAT */
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
+#endif
 #if defined(CONFIG_RTD_1295_HWNAT)
 	unsigned int port;
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
@@ -9292,7 +9293,7 @@ static int re865x_close(struct net_device *dev)
 
 #if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
 	napi_disable(&cp->napi);
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
 
 	netif_stop_queue(dev);
 	/* The last opened device       */
@@ -9304,7 +9305,6 @@ static int re865x_close(struct net_device *dev)
 	{
 #if defined(CONFIG_RTD_1295_HWNAT)
 		struct dev_priv *cp;
-
 		if (!irqDev) {
 			pr_err(" no irqDev found\n");
 			BUG();
@@ -9317,7 +9317,6 @@ static int re865x_close(struct net_device *dev)
 		 * 3.the interrupt will be re_enable by rtl865x_start()
 		 */
 		rtl865x_disableInterrupt();
-
 		/* free_irq(dev->irq, GET_IRQ_OWNER(cp)); */
 		/* ((struct dev_priv *)((GET_IRQ_OWNER(cp))->priv))->irq_owner = 0; */
 		free_irq(dev->irq, irqDev);
@@ -9325,7 +9324,7 @@ static int re865x_close(struct net_device *dev)
 
 #if defined(RX_TASKLET) || defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
 		tasklet_kill(&cp->rx_dsr_tasklet);
-#endif /* RX_TASKLET || CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
 
 #ifdef TX_TASKLET
 		tasklet_kill(&cp->tx_dsr_tasklet);
@@ -10389,8 +10388,8 @@ static inline int rtl_isHwlookup(uint16 vid, struct sk_buff *skb,
 	}
 #endif
 
-/* #if defined(CONFIG_RTL_MULTI_LAN_DEV) ||defined(CONFIG_POCKET_ROUTER_SUPPORT) */
-#if defined(CONFIG_POCKET_ROUTER_SUPPORT)
+#if (defined(CONFIG_RTL_MULTI_LAN_DEV)&&defined(CONFIG_RTL_MULTI_LAN_DEV_SUPPORT_LINUX_BONDING)) ||defined (CONFIG_POCKET_ROUTER_SUPPORT)
+//#if defined(CONFIG_POCKET_ROUTER_SUPPORT)
 	*portlist = cp->portmask;
 	return FALSE;
 #elif defined(CONFIG_RTK_VLAN_SUPPORT)
@@ -10493,7 +10492,7 @@ static inline int rtl_isHwlookup(uint16 vid, struct sk_buff *skb,
 
 static inline int rtl_fill_txInfo(rtl_nicTx_info *txInfo)
 {
-	uint32 portlist;
+	uint32 portlist = 0;
 	struct sk_buff *skb = txInfo->out_skb;
 	struct dev_priv *cp;
 #if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
@@ -13409,28 +13408,24 @@ static int rtl_set_vlanconfig_mac_addr(void)
 	uint32 i, j;
 	uint8 mac[ETH_ALEN], ifname[IFNAMSIZ];
 	struct rtl865x_vlanConfig *vlancfg_entry;
-	const uint8 *macp;
 
-	if ((macp = of_get_mac_address(rtl819x_pdev->dev.of_node)) != NULL) {
-		memcpy(mac, macp, ETH_ALEN);
-	} else {
-		dt_node = of_find_node_by_path(path);
-		if (!dt_node) {
-			pr_err("Failed to find uMAC device-tree node: %s\n",
-				path);
-			return -ENODEV;
-		}
-
-		rtl_umac_mmio = of_iomap(dt_node, 0);
-		if (!rtl_umac_mmio) {
-			pr_err("HWNAT MMIO : no mmio space for rtl_umac_mmio\n");
-			return -EINVAL;
-		}
-
-		for (i = 0; i < ETH_ALEN; i++)
-			mac[i] = RTL_UMAC_R8(i);
+	dt_node = of_find_node_by_path(path);
+	if (!dt_node) {
+		printk(KERN_ERR "Failed to find uMAC device-tree node: %s\n",
+			path);
+		return -ENODEV;
 	}
-	/* DBG("MAC address base = %pM", mac); */
+
+	rtl_umac_mmio = of_iomap(dt_node, 0);
+	if (!rtl_umac_mmio) {
+		printk(KERN_ERR
+			"HWNAT MMIO : no mmio space for rtl_umac_mmio\n");
+		return -EINVAL;
+	}
+
+	for (i = 0; i < ETH_ALEN; i++)
+		mac[i] = RTL_UMAC_R8(i);
+	DBG("MAC address base = %pM", mac);
 
 	for (i = 0; i < ETH_INTF_NUM; i++) {
 		if (i == RTL_LAN_IDX)
@@ -13442,7 +13437,7 @@ static int rtl_set_vlanconfig_mac_addr(void)
 
 		if (vlancfg_entry) {
 			memcpy(vlancfg_entry->mac.octet, mac, ETHER_ADDR_LEN);
-			for (j = ETHER_ADDR_LEN - 1; j >= 3; j--) {
+			for (j = ETHER_ADDR_LEN - 1; j >= 0; j--) {
 				if (mac[j] == 0xFF) {
 					mac[j] = 0;
 				} else {
@@ -13889,6 +13884,7 @@ int __init re865x_probe(void)
 	cached_dev4 = NULL;
 #endif
 
+//#if !defined(CONFIG_RTD_1295_HWNAT)
 	/*init PHY LED style */
 #if defined(CONFIG_RTD_1295_HWNAT)
 	if (hwnat_gpio_link_led_enable) {
@@ -13912,6 +13908,7 @@ int __init re865x_probe(void)
 	WRITE_MEM32(SWTACR, CMD_FORCE | ACTION_START);	/* force add */
 #endif
 
+//#endif /* !defined(CONFIG_RTD_1295_HWNAT) */
 /*2007-12-19*/
 #if defined(CONFIG_RTK_VLAN_SUPPORT)
 	/* port based decision */
@@ -14005,6 +14002,7 @@ int __init re865x_probe(void)
 			printk("failed to allocate dev %d", i);
 			return -1;
 		}
+
 		SET_MODULE_OWNER(dev);
 		dp = NETDRV_PRIV(dev);
 		memset(dp, 0, sizeof(*dp));
@@ -14132,7 +14130,7 @@ int __init re865x_probe(void)
 		netif_napi_add(dev, &dp->napi, rtl865x_poll,
 			RTL865X_NAPI_WEIGHT);
 		skb_queue_head_init(&dp->rx_napi_skb_queue);
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
 
 #if defined(CONFIG_RTK_VLAN_SUPPORT) || defined(CONFIG_RTL_REPORT_LINK_STATUS)
 #ifdef CONFIG_RTL_PROC_NEW
@@ -14770,7 +14768,7 @@ int __init re865x_probe(void)
 #endif
 
 #ifdef CONFIG_RTL_836X_SUPPORT
-    rtl836x_init();
+	rtl836x_init();
 #endif
 
 	return 0;
@@ -14945,16 +14943,12 @@ static int re865x_exit(struct platform_device *pdev)
 static void __exit re865x_exit(void)
 #endif				/* defined(CONFIG_RTD_1295_HWNAT) */
 {
-#if defined(RX_TASKLET) || defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
+#if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
 	struct net_device *dev = platform_get_drvdata(pdev);
 	struct dev_priv *cp = netdev_priv(dev);
-#if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
 	struct sk_buff *skb;
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
-#endif /* RX_TASKLET || CONFIG_RTL_ETH_NAPI_SUPPORT */
-#if defined(RX_TASKLET) || defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
 	int i;
-#endif /* RX_TASKLET || CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
 
 #if defined(CONFIG_RTL_PROC_DEBUG) || defined(CONFIG_RTL_DEBUG_TOOL)
 
@@ -14978,14 +14972,13 @@ static void __exit re865x_exit(void)
 	rtl819x_exitWanPortSetting();
 #endif
 
-#if defined(RX_TASKLET) || defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
+#if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
 	for (i = 0; i < ETH_INTF_NUM; i++) {
 		dev = (struct net_device *)_rtl86xx_dev.dev[i];
 		if (!dev)
 			continue;
 
 		cp = NETDRV_PRIV(dev);
-#ifdef CONFIG_RTL_ETH_NAPI_SUPPORT
 		netif_napi_del(&cp->napi);
 		cp->napi.poll = NULL;
 		if (skb_queue_len(&cp->rx_napi_skb_queue)) {
@@ -14993,9 +14986,8 @@ static void __exit re865x_exit(void)
 			while ((skb = skb_dequeue(&cp->rx_napi_skb_queue)) != NULL)
 				dev_kfree_skb_any(skb);
 		}
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
 	}
-#endif /* RX_TASKLET || CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
 
 #if defined(CONFIG_RTD_1295_HWNAT)
 	if (hwnat_gpio_link_led_enable)
@@ -15244,12 +15236,13 @@ static int rtd129x_nat_suspend(struct device *dev)
 		ndev = _rtl86xx_dev.dev[i];
 		if (ndev) {
 			cp = NETDRV_PRIV(ndev);
-#if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
-			napi_disable(&cp->napi);
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+
 			if (netif_running(ndev)) {
 				DBG(KERN_ERR "[RTD129X_NAT] stop portmask 0x%x\n",
 						cp->portmask);
+#if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
+				napi_disable(&cp->napi);
+#endif
 				netif_device_detach(ndev);
 				netif_stop_queue(ndev);
 			}
@@ -15305,12 +15298,13 @@ static int rtd129x_nat_resume(struct device *dev)
 		ndev = _rtl86xx_dev.dev[i];
 		if (ndev) {
 			cp = NETDRV_PRIV(ndev);
-#if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
-			napi_enable(&cp->napi);
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+
 			if (netif_running(ndev)) {
 				DBG(KERN_ERR "[RTD129X_NAT] resume portmask 0x%x\n",
 						cp->portmask);
+#if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
+				napi_enable(&cp->napi);
+#endif
 				netif_device_attach(ndev);
 			}
 		}
@@ -15974,6 +15968,27 @@ static int rtl_config_perport_perdev_vlanconfig(int mode)
 	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->portmask = RTL_WANPORT_MASK;	/* eth0 */
 	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[0]))->portnum = 1;
 
+#if defined(CONFIG_RTL_MULTI_LAN_DEV_SUPPORT_LINUX_BONDING)
+	vlanconfig[1].isWan = 0;
+	vlanconfig[1].vid = RTL_LANVLANID;
+	vlanconfig[1].memPort = RTL_LANPORT_MASK_5;
+	vlanconfig[1].untagSet = RTL_LANPORT_MASK_5;
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->portmask = RTL_LANPORT_MASK_5;	/* eth1 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->id = RTL_LANVLANID_5;	/* eth1 */
+	((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[1]))->portnum = 1;
+
+	if (hwnat_mac0_enable > 0) {
+		vlanconfig[2].isWan = 0;
+		vlanconfig[2].vid = RTL_LANVLANID_2;
+		vlanconfig[2].memPort = (0x100 | RTL_LANPORT_MASK_1);
+		vlanconfig[2].untagSet = (0x100 | RTL_LANPORT_MASK_1);
+		vlanconfig[2].fid = RTL_WAN2_FID;
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->portmask = RTL_LANPORT_MASK_1;	/* eth2 */
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->id = RTL_LANVLANID_1;	/* eth2 */
+		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->portnum =
+			1;
+	}
+#else /* defined(CONFIG_RTL_MULTI_LAN_DEV_SUPPORT_LINUX_BONDING) */
 	vlanconfig[1].isWan = 0;
 	vlanconfig[1].vid = RTL_LANVLANID;
 	vlanconfig[1].memPort = RTL_LANPORT_MASK_5;
@@ -15992,6 +16007,7 @@ static int rtl_config_perport_perdev_vlanconfig(int mode)
 		((struct dev_priv *)NETDRV_PRIV(_rtl86xx_dev.dev[2]))->portnum =
 			1;
 	}
+#endif
 #else /* defined(CONFIG_RTD_1295_HWNAT) */
 	vlanconfig[0].vid = RTL_LANVLANID;
 	vlanconfig[0].memPort = RTL_LANPORT_MASK_4;
@@ -25917,7 +25933,7 @@ static int napi_recv(struct dev_priv *cp, int budget)
 #else
 		if (netif_receive_skb(pskb) != NET_RX_DROP)
 			work_done++;
-#endif /* CONFIG_RTL_ETH_NAPI_GRO_SUPPORT */
+#endif
 	}
 
 	return work_done;
@@ -25935,12 +25951,12 @@ static int rtl865x_poll(struct napi_struct *napi, int budget)
 		napi_complete_done(napi, work_done);
 #else
 		napi_complete(napi);
-#endif /* CONFIG_RTL_ETH_NAPI_GRO_SUPPORT */
+#endif
 	}
 
 	return work_done;
 }
-#endif /* CONFIG_RTL_ETH_NAPI_SUPPORT */
+#endif
 
 #ifdef CONFIG_SWCONFIG
 

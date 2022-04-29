@@ -1,5 +1,3 @@
-#ifndef __ASM_ARCH_RTK_IPC_SHM_H
-#define __ASM_ARCH_RTK_IPC_SHM_H
 extern volatile void __iomem *rpc_common_base;
 #define IPC_SHM_VIRT			(rpc_common_base+0x000000C4)
 
@@ -37,4 +35,3 @@ struct RTK119X_ipc_shm {
 };
 
 
-#endif /* End of  __ASM_ARCH_RTK_IPC_SHM_H */

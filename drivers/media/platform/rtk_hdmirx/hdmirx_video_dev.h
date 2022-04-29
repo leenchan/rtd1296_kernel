@@ -1,14 +1,3 @@
-/*
- * hdmirx_video_dev.h - RTK hdmi rx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #ifndef _HDMIRX_VIDEO_DEV_H_
 #define _HDMIRX_VIDEO_DEV_H_
 
@@ -19,11 +8,6 @@
 long v4l2_hdmi_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 long compat_v4l2_hdmi_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 int v4l2_mipi_top_open(struct file *filp);
-
-struct physical_addr_map {
-	unsigned int enable;
-	unsigned int phys[16];
-};
 
 struct compat_v4l2_plane {
 	__u32			bytesused;

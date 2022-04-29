@@ -27,7 +27,7 @@
 #define	MPIDR_EL1	1	/* MultiProcessor Affinity Register */
 #define	CSSELR_EL1	2	/* Cache Size Selection Register */
 #define	SCTLR_EL1	3	/* System Control Register */
-#define	ACTLR_EL1	4	/* Auxilliary Control Register */
+#define	ACTLR_EL1	4	/* Auxiliary Control Register */
 #define	CPACR_EL1	5	/* Coprocessor Access Control */
 #define	TTBR0_EL1	6	/* Translation Table Base Register 0 */
 #define	TTBR1_EL1	7	/* Translation Table Base Register 1 */
@@ -53,9 +53,7 @@
 #define	IFSR32_EL2	25	/* Instruction Fault Status Register */
 #define	FPEXC32_EL2	26	/* Floating-Point Exception Control Register */
 #define	DBGVCR32_EL2	27	/* Debug Vector Catch Register */
-#define	TEECR32_EL1	28	/* ThumbEE Configuration Register */
-#define	TEEHBR32_EL1	29	/* ThumbEE Handler Base Register */
-#define	NR_SYS_REGS	30
+#define	NR_SYS_REGS	28
 
 /* 32bit mapping */
 #define c0_MPIDR	(MPIDR_EL1 * 2)	/* MultiProcessor ID Register */
@@ -100,38 +98,23 @@
 
 #define ARM_EXCEPTION_IRQ	  0
 #define ARM_EXCEPTION_TRAP	  1
-/* The hyp-stub will return this for any kvm_call_hyp() call */
-#define ARM_EXCEPTION_HYP_GONE	  2
 
 #define KVM_ARM64_DEBUG_DIRTY_SHIFT	0
 #define KVM_ARM64_DEBUG_DIRTY		(1 << KVM_ARM64_DEBUG_DIRTY_SHIFT)
 
-#define kvm_ksym_ref(sym)		((void *)&sym + kvm_ksym_shift)
+#define kvm_ksym_ref(sym)		phys_to_virt((u64)&sym - kimage_voffset)
 
 #ifndef __ASSEMBLY__
-#if __GNUC__ > 4
-#define kvm_ksym_shift			(PAGE_OFFSET - KIMAGE_VADDR)
-#else
-/*
- * GCC versions 4.9 and older will fold the constant below into the addend of
- * the reference to 'sym' above if kvm_ksym_shift is declared static or if the
- * constant is used directly. However, since we use the small code model for
- * the core kernel, the reference to 'sym' will be emitted as a adrp/add pair,
- * with a +/- 4 GB range, resulting in linker relocation errors if the shift
- * is sufficiently large. So prevent the compiler from folding the shift into
- * the addend, by making the shift a variable with external linkage.
- */
-__weak u64 kvm_ksym_shift = PAGE_OFFSET - KIMAGE_VADDR;
-#endif
-
 struct kvm;
 struct kvm_vcpu;
 
 extern char __kvm_hyp_init[];
 extern char __kvm_hyp_init_end[];
-extern char __kvm_hyp_reset[];
 
 extern char __kvm_hyp_vector[];
+
+#define	__kvm_hyp_code_start	__hyp_text_start
+#define	__kvm_hyp_code_end	__hyp_text_end
 
 extern void __kvm_flush_vm_context(void);
 extern void __kvm_tlb_flush_vmid_ipa(struct kvm *kvm, phys_addr_t ipa);

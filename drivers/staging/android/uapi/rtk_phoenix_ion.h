@@ -60,20 +60,12 @@ struct RTK_ION_IOC_GET_MEMORY_INFO_S {
     unsigned int freeSize;      /* response */
 };
 
-struct RTK_ION_IOC_SYNC_RANE {
-	ion_user_handle_t   handle;
-	unsigned long long  phyAddr;
-	unsigned int        len;
-};
-
 #define RTK_ION_IOC_MAGIC		                'R'
 #define RTK_PHOENIX_ION_TILER_ALLOC             (0x0)
 #define RTK_PHOENIX_ION_GET_LAST_ALLOC_ADDR     (0x1)
 #define RTK_ION_IOC_INVALIDATE                  (0x10)
 #define RTK_ION_IOC_FLUSH                       (0x11)
 #define RTK_ION_IOC_GET_MEMORY_INFO             _IOWR(RTK_ION_IOC_MAGIC, 0x12, struct RTK_ION_IOC_GET_MEMORY_INFO_S)
-#define RTK_ION_IOC_INVALIDATE_RANGE            (0x13)
-#define RTK_ION_IOC_FLUSH_RANGE                 (0x14)
 
 
 /**

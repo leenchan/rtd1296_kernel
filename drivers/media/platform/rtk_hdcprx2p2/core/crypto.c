@@ -549,47 +549,6 @@ H2status Compute_Hprime_Rx(const H2uint8 *Kd, const H2uint8 *rtx, const H2uint8 
 	return rc;
 }
 
-#if 1
-H2status Compute_Mprime_22(unsigned char *kd, unsigned char *bstream_id_type,unsigned char *bseq_num_M, unsigned char *Mprime)
-{
-	H2status rc = H2_ERROR;
-
-	unsigned char psrc[ (Stream_Type_SIZE)+ seq_num_M_SIZE];
-	unsigned char sha256_kd[32]={0};
-
-	if (bstream_id_type == NULL || bseq_num_M == NULL ||kd ==NULL )
-		return H2_ERROR;
-       Sha256(kd,KD_SIZE,sha256_kd);
-	memcpy(psrc, bstream_id_type, (Stream_Type_SIZE));
-	memcpy(psrc + (Stream_Type_SIZE), bseq_num_M, seq_num_M_SIZE);
-	rc = hmacsha256(sha256_kd, KD_SIZE, psrc, (Stream_Type_SIZE)+ seq_num_M_SIZE, Mprime);
-
-
-	return rc;
-}
-
-
-H2status Compute_Vprime_22(unsigned char *kd, unsigned char *receiver_id, unsigned char *temp_rxinfor, unsigned char *temp_seq_num, unsigned char *Vprime)
-{
-	H2status rc = H2_ERROR;
-	unsigned char rec_ID_LEN;
-	unsigned char psrc[ (RECEIVERID_SIZE*MAX_DEVICECOUNT)+ RXinfo_SIZE + Seq_num_V_SIZE];
-
-	if (receiver_id == NULL || temp_rxinfor == NULL || temp_seq_num == NULL)
-		return H2_ERROR;
-
-        rec_ID_LEN = ((((temp_rxinfor[0]&0x1)<<4)|((temp_rxinfor[1]&0xF0)>>4))*RECEIVERID_SIZE);
-
-	memcpy(psrc, receiver_id, (rec_ID_LEN));
-	memcpy(psrc + (rec_ID_LEN), temp_rxinfor, RXinfo_SIZE);
-	memcpy(psrc + (rec_ID_LEN) + RXinfo_SIZE, temp_seq_num, Seq_num_V_SIZE);
-	rc = hmacsha256(kd, KD_SIZE, psrc, (rec_ID_LEN+RXinfo_SIZE+Seq_num_V_SIZE), Vprime);
-
-
-	return rc;
-}
-
-#endif
 H2status Compute_Hprime_22(unsigned char *kd, unsigned char *rtx, unsigned char *txcaps, unsigned char *rxcaps, unsigned char *Hprime)
 {
 	H2status rc = H2_ERROR;

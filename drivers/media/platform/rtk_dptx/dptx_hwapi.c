@@ -172,10 +172,6 @@ void DpTxTPInitialSet(struct rtk_dptx_hwinfo *hwinfo);
 #define ADD_DP_TX_TP1_LANE3_SAME_VOL_CNT(x) (x->TxLTInfo.b3TP1Lane3SameVolCnt++)
 #define CLR_DP_TX_TP1_LANE3_SAME_VOL_CNT(x) (x->TxLTInfo.b3TP1Lane3SameVolCnt = 0)
 
-#define GET_DP_TX_TP1_CNT(x) (x->TxLTInfo.b3TP1count)
-#define ADD_DP_TX_TP1_CNT(x) (x->TxLTInfo.b3TP1count++)
-#define CLR_DP_TX_TP1_CNT(x) (x->TxLTInfo.b3TP1count = 0)
-
 #define GET_DP_TX_TP2_CNT(x) (x->TxLTInfo.b3TP2count)
 #define ADD_DP_TX_TP2_CNT(x) (x->TxLTInfo.b3TP2count++)
 #define CLR_DP_TX_TP2_CNT(x) (x->TxLTInfo.b3TP2count = 0)
@@ -258,7 +254,7 @@ void DpTxTPInitialSet(struct rtk_dptx_hwinfo *hwinfo);
 
 
 
-
+#if 0
 static int GetBit(void __iomem *base, unsigned int offset, unsigned int mask)
 {
 	unsigned int reg;
@@ -267,7 +263,7 @@ static int GetBit(void __iomem *base, unsigned int offset, unsigned int mask)
 	reg &= mask;
 	return reg;
 }
-
+#endif
 static unsigned int GetReg(void __iomem *base, unsigned int offset)
 {
 	return readl(base + offset);
@@ -322,7 +318,7 @@ static bool DpTxAuxWrite(struct rtk_dptx_hwinfo *hwinfo,
 		SetReg(base, PBD_A8_AUXTX_REQ_DATA, pucWriteArray[i]);
 	//Start transfer
 	SetBit(base, PBD_A3_AUXTX_TRAN_CTRL, ~_BIT0, _BIT0);
-	
+
 	if(down_timeout(&hwinfo->sem, 10)) {
 		printk(KERN_ERR "%s time out\n", __FUNCTION__);
 		return false;
@@ -348,13 +344,13 @@ static bool DpTxAuxRead(struct rtk_dptx_hwinfo *hwinfo,
 	ucAddrH = (ucAddr>>16) & 0xFF;
 	ucAddrM = (ucAddr>>8) & 0xFF;
 	ucAddrL = ucAddr & 0xFF;
-	
+
 	SetReg(base, PBD_B1_AUX_IRQ_EVENT, 0x3F);
 	SetBit(base, PBD_AB_AUX_FIFO_CTRL, ~(_BIT1 | _BIT0), (_BIT1 | _BIT0));
 	SetReg(base, PBD_A4_AUXTX_REQ_CMD, ucAddrH);
 	SetReg(base, PBD_A5_AUXTX_REQ_ADDR_M, ucAddrM);
 	SetReg(base, PBD_A6_AUXTX_REQ_ADDR_L, ucAddrL);
-	
+
 	SetReg(base, PBD_A7_AUXTX_REQ_LEN, ((ucLength > 0) ? (ucLength - 1) : 0));
 	SetBit(base, PBD_A3_AUXTX_TRAN_CTRL, ~_BIT0, _BIT0);
 
@@ -390,7 +386,7 @@ bool DpTxAuxNativeRead(struct rtk_dptx_hwinfo *hwinfo,
 						unsigned char ucLength,
 						unsigned char *pucReadArray)
 {
-	ucAddr = ucAddr | (0x90 << 16);	
+	ucAddr = ucAddr | (0x90 << 16);
 	return DpTxAuxRead(hwinfo, ucAddr, ucLength, pucReadArray);
 }
 
@@ -444,7 +440,7 @@ bool DpTxLinkConfig(struct rtk_dptx_hwinfo *hwinfo)
 		return false;
 	if(DpTxAuxNativeRead(hwinfo, 0x0, 16, data)==false)
 		return false;
-	
+
 	// Step1:Get DownStream infromation
 	if((data[0] != 0x10) && (data[0] != 0x11) && (data[0] != 0x12))
 		data[0] = 0x11;
@@ -459,9 +455,7 @@ bool DpTxLinkConfig(struct rtk_dptx_hwinfo *hwinfo)
 		SET_DP_TX_DOWNSTREAM_MAX_LINK_RATE(hwinfo, 0x6);
 
 //	SET_DP_TX_DOWNSTREAM_LANE_NUM(hwinfo, (data[2] & 0x1F));	
-	if(hwinfo->out_type == DP_FORMAT_1080P_60 || hwinfo->out_type == DP_FORMAT_1440_768
-			|| hwinfo->out_type == DP_FORMAT_1280_800 || hwinfo->out_type == DP_FORMAT_1440_900
-			|| hwinfo->out_type == DP_FORMAT_960_544)
+	if(hwinfo->out_type == DP_FORMAT_1080P_60)
 		SET_DP_TX_DOWNSTREAM_LANE_NUM(hwinfo, _DP_TWO_LANE);
 	else if(hwinfo->out_type == DP_FORMAT_2160P_30 ||
 			hwinfo->out_type == DP_FORMAT_2160P_60)
@@ -481,7 +475,7 @@ int ReadEDID(struct rtk_dptx_hwinfo *hwinfo, unsigned char *ptr, int length)
 
 	for(i=0; i<length; i++)
 		*(ptr+i) = 0;
-	
+
 	ret = DpTxAuxI2CoverWrite(hwinfo, 0x50, 1, ptr, 0);
 	if(ret==false)
 		return -1;
@@ -496,7 +490,7 @@ void DpTxPhyTxSetSignalLevel(struct rtk_dptx_hwinfo *hwinfo, unsigned char enumL
 	void __iomem *lvds_base = hwinfo->lvds_base;
 	unsigned int val;
 	unsigned char *tbl, idx;
-	
+
 	tbl = tDPTX_DRV_TABLE;
 
 	if(ucVoltageSwing + ucPreEmphasis > 3) {
@@ -509,10 +503,10 @@ void DpTxPhyTxSetSignalLevel(struct rtk_dptx_hwinfo *hwinfo, unsigned char enumL
 	}
 	idx = (ucVoltageSwing * 4 + ucPreEmphasis) * 3;
 	val = readl(lvds_base+0x44);
-	val = val & ~((0x1 << (16+enumLaneX)) | 0xF<<(enumLaneX*4));
-	val = val | tbl[idx]<<(16+enumLaneX) | tbl[idx+1]<<(enumLaneX*4) | 0x00f00000;
+	val = val & ~(0x100000 | 0xF<<(enumLaneX*4));
+	val = val | tbl[idx]<<16 | tbl[idx+1]<<(enumLaneX*4) | 0x00f00000;
 	writel(val, lvds_base+0x44);
-	
+
 	val = readl(lvds_base+0x48);
 	val = val & ~(0xF<<(enumLaneX*4)) & ~0xFF000000;
 	val = val | tbl[idx+2]<<(enumLaneX*4) | 0x1F000000;
@@ -526,7 +520,7 @@ void DpTxPhyTxSetSignalLevel1(struct rtk_dptx_hwinfo *hwinfo, int lanX, int swin
 	void __iomem *lvds_base = hwinfo->lvds_base;
 	unsigned int val, i;
 	unsigned char *tbl, lv;
-	
+
 	tbl = tDPTX_DRV_TABLE1;
 	lv = deemp;
 	for(i=0; i<swing; i++)
@@ -652,7 +646,7 @@ bool DpTxTP1Lane0Adjust(struct rtk_dptx_hwinfo *hwinfo)
 
 	if(GET_DP_TX_LANE0_CURRENT_VOL_SWING(hwinfo) == GET_DP_TX_LANE0_ADJUST_VOL_SWING(hwinfo)) {
 		ADD_DP_TX_TP1_LANE0_SAME_VOL_CNT(hwinfo);
-		if((GET_DP_TX_TP1_LANE0_SAME_VOL_CNT(hwinfo) == 5) || 
+		if((GET_DP_TX_TP1_LANE0_SAME_VOL_CNT(hwinfo) == 5) ||
 			((GET_DP_TX_TP1_LANE0_SAME_VOL_CNT(hwinfo) == 1) && (GET_DP_TX_LANE0_ADJUST_VOL_SWING(hwinfo) == _DP_TX_LEVEL_3))) {
 			CLR_DP_TX_TP1_LANE0_SAME_VOL_CNT(hwinfo);
 			return false;
@@ -667,7 +661,7 @@ bool DpTxTP1Lane0Adjust(struct rtk_dptx_hwinfo *hwinfo)
 		SET_DP_TX_LANE0_CURRENT_VOL_SWING_MAX_REACH(hwinfo);
 	else
 		CLR_DP_TX_LANE0_CURRENT_VOL_SWING_MAX_REACH(hwinfo);
-	
+
 	if(GET_DP_TX_LANE0_CURRENT_PRE_EMPHASIS(hwinfo) == _DP_TX_LEVEL_3)
 		SET_DP_TX_LANE0_CURRENT_PRE_EMPHASIS_MAX_REACH(hwinfo);
 	else
@@ -683,7 +677,7 @@ bool DpTxTP1Lane1Adjust(struct rtk_dptx_hwinfo *hwinfo)
 
 	if(GET_DP_TX_LANE1_CURRENT_VOL_SWING(hwinfo) == GET_DP_TX_LANE1_ADJUST_VOL_SWING(hwinfo)) {
 		ADD_DP_TX_TP1_LANE1_SAME_VOL_CNT(hwinfo);
-		if((GET_DP_TX_TP1_LANE1_SAME_VOL_CNT(hwinfo) == 5) || 
+		if((GET_DP_TX_TP1_LANE1_SAME_VOL_CNT(hwinfo) == 5) ||
 			((GET_DP_TX_TP1_LANE1_SAME_VOL_CNT(hwinfo) == 1) && (GET_DP_TX_LANE1_ADJUST_VOL_SWING(hwinfo) == _DP_TX_LEVEL_3))) {
 			CLR_DP_TX_TP1_LANE1_SAME_VOL_CNT(hwinfo);
 			return false;
@@ -698,7 +692,7 @@ bool DpTxTP1Lane1Adjust(struct rtk_dptx_hwinfo *hwinfo)
 		SET_DP_TX_LANE1_CURRENT_VOL_SWING_MAX_REACH(hwinfo);
 	else
 		CLR_DP_TX_LANE1_CURRENT_VOL_SWING_MAX_REACH(hwinfo);
-	
+
 	if(GET_DP_TX_LANE1_CURRENT_PRE_EMPHASIS(hwinfo) == _DP_TX_LEVEL_3)
 		SET_DP_TX_LANE1_CURRENT_PRE_EMPHASIS_MAX_REACH(hwinfo);
 	else
@@ -714,7 +708,7 @@ bool DpTxTP1Lane2Adjust(struct rtk_dptx_hwinfo *hwinfo)
 
 	if(GET_DP_TX_LANE2_CURRENT_VOL_SWING(hwinfo) == GET_DP_TX_LANE2_ADJUST_VOL_SWING(hwinfo)) {
 		ADD_DP_TX_TP1_LANE2_SAME_VOL_CNT(hwinfo);
-		if((GET_DP_TX_TP1_LANE2_SAME_VOL_CNT(hwinfo) == 5) || 
+		if((GET_DP_TX_TP1_LANE2_SAME_VOL_CNT(hwinfo) == 5) ||
 			((GET_DP_TX_TP1_LANE2_SAME_VOL_CNT(hwinfo) == 1) && (GET_DP_TX_LANE2_ADJUST_VOL_SWING(hwinfo) == _DP_TX_LEVEL_3))) {
 			CLR_DP_TX_TP1_LANE2_SAME_VOL_CNT(hwinfo);
 			return false;
@@ -729,7 +723,7 @@ bool DpTxTP1Lane2Adjust(struct rtk_dptx_hwinfo *hwinfo)
 		SET_DP_TX_LANE2_CURRENT_VOL_SWING_MAX_REACH(hwinfo);
 	else
 		CLR_DP_TX_LANE2_CURRENT_VOL_SWING_MAX_REACH(hwinfo);
-	
+
 	if(GET_DP_TX_LANE2_CURRENT_PRE_EMPHASIS(hwinfo) == _DP_TX_LEVEL_3)
 		SET_DP_TX_LANE2_CURRENT_PRE_EMPHASIS_MAX_REACH(hwinfo);
 	else
@@ -745,7 +739,7 @@ bool DpTxTP1Lane3Adjust(struct rtk_dptx_hwinfo *hwinfo)
 
 	if(GET_DP_TX_LANE3_CURRENT_VOL_SWING(hwinfo) == GET_DP_TX_LANE3_ADJUST_VOL_SWING(hwinfo)) {
 		ADD_DP_TX_TP1_LANE3_SAME_VOL_CNT(hwinfo);
-		if((GET_DP_TX_TP1_LANE3_SAME_VOL_CNT(hwinfo) == 5) || 
+		if((GET_DP_TX_TP1_LANE3_SAME_VOL_CNT(hwinfo) == 5) ||
 			((GET_DP_TX_TP1_LANE3_SAME_VOL_CNT(hwinfo) == 1) && (GET_DP_TX_LANE3_ADJUST_VOL_SWING(hwinfo) == _DP_TX_LEVEL_3))) {
 			CLR_DP_TX_TP1_LANE3_SAME_VOL_CNT(hwinfo);
 			return false;
@@ -760,7 +754,7 @@ bool DpTxTP1Lane3Adjust(struct rtk_dptx_hwinfo *hwinfo)
 		SET_DP_TX_LANE3_CURRENT_VOL_SWING_MAX_REACH(hwinfo);
 	else
 		CLR_DP_TX_LANE3_CURRENT_VOL_SWING_MAX_REACH(hwinfo);
-	
+
 	if(GET_DP_TX_LANE3_CURRENT_PRE_EMPHASIS(hwinfo) == _DP_TX_LEVEL_3)
 		SET_DP_TX_LANE3_CURRENT_PRE_EMPHASIS_MAX_REACH(hwinfo);
 	else
@@ -814,7 +808,7 @@ void DpTxSignalInitialSetting(struct rtk_dptx_hwinfo *hwinfo)
 void DpTxTPInitialSet(struct rtk_dptx_hwinfo *hwinfo)
 {
 	unsigned char link_rate, link_count;
-	
+
 	SET_DP_TX_LT_RESULT(hwinfo, _DP_TX_TRAINING_NO_RESULT);
 	SET_DP_TX_LT_STATE(hwinfo, _DP_TX_TRAINING_PATTERN1);
 
@@ -871,7 +865,7 @@ unsigned char DpTxTrainPattern1(struct rtk_dptx_hwinfo *hwinfo)
 
 	switch(GET_DP_TX_DOWNSTREAM_LANE_NUM(hwinfo)) {
 		case _DP_FOUR_LANE:
-			if((GET_DP_TX_LANE3_CR_DONE(hwinfo) & GET_DP_TX_LANE2_CR_DONE(hwinfo) 
+			if((GET_DP_TX_LANE3_CR_DONE(hwinfo) & GET_DP_TX_LANE2_CR_DONE(hwinfo)
 				& GET_DP_TX_LANE1_CR_DONE(hwinfo) & GET_DP_TX_LANE0_CR_DONE(hwinfo)) == true)
 				return _DP_TX_TRAINING_PATTERN1_PASS;
 			break;
@@ -885,12 +879,6 @@ unsigned char DpTxTrainPattern1(struct rtk_dptx_hwinfo *hwinfo)
 				return _DP_TX_TRAINING_PATTERN1_PASS;
 			break;
 	}
-
-	if(GET_DP_TX_TP1_CNT(hwinfo) >= 5) {
-		CLR_DP_TX_TP1_CNT(hwinfo);
-		return _DP_TX_TRAINING_PATTERN1_ADJUST_FAIL;
-	} else
-		ADD_DP_TX_TP1_CNT(hwinfo);
 
 	switch(GET_DP_TX_DOWNSTREAM_LANE_NUM(hwinfo)) {
 		case _DP_FOUR_LANE:
@@ -947,12 +935,12 @@ unsigned char DpTxTrainPattern2(struct rtk_dptx_hwinfo *hwinfo)
 
 	switch(GET_DP_TX_DOWNSTREAM_LANE_NUM(hwinfo)) {
 		case _DP_FOUR_LANE:
-			if((GET_DP_TX_LANE3_CR_DONE(hwinfo) & GET_DP_TX_LANE2_CR_DONE(hwinfo) 
+			if((GET_DP_TX_LANE3_CR_DONE(hwinfo) & GET_DP_TX_LANE2_CR_DONE(hwinfo)
 				& GET_DP_TX_LANE1_CR_DONE(hwinfo) & GET_DP_TX_LANE0_CR_DONE(hwinfo)) != true) {
 				CLR_DP_TX_TP2_CNT(hwinfo);
 				return _DP_TX_TRAINING_PATTERN2_ADJUST_FAIL;
 			}
-			if((GET_DP_TX_LANE3_EQ_DONE(hwinfo) & GET_DP_TX_LANE2_EQ_DONE(hwinfo) 
+			if((GET_DP_TX_LANE3_EQ_DONE(hwinfo) & GET_DP_TX_LANE2_EQ_DONE(hwinfo)
 				& GET_DP_TX_LANE1_EQ_DONE(hwinfo) & GET_DP_TX_LANE0_EQ_DONE(hwinfo)) == true) {
 				CLR_DP_TX_TP2_CNT(hwinfo);
 				return _DP_TX_TRAINING_PATTERN2_PASS;
@@ -1010,10 +998,8 @@ void DpTxTrainPatternEnd(struct rtk_dptx_hwinfo *hwinfo)
 	DpTxAuxNativeWrite(hwinfo, 0x102, 1, data);
 
 	if(GET_DP_TX_LT_RESULT(hwinfo) == _DP_TX_TRAINING_PASS) {
-#if RTK_VO_SET
 		SetReg(base, PBB_01_DPTX_ML_PAT_SEL, 0x40);
 		SetReg(base, PBB_01_DPTX_ML_PAT_SEL, 0x41);
-#endif
 	}
 }
 
@@ -1021,7 +1007,7 @@ int DpTxLinkTraining(struct rtk_dptx_hwinfo *hwinfo)
 {
 	unsigned char data[20];
 	unsigned char ret;
-	
+
 	if(DpTxLinkConfig(hwinfo)==false) {
 		printk(KERN_ERR "DpTxLinkConfig fail\n");
 		return -1;
@@ -1029,11 +1015,11 @@ int DpTxLinkTraining(struct rtk_dptx_hwinfo *hwinfo)
 	//Power up Downstream
 	data[0] = 0x1;
 	DpTxAuxNativeWrite(hwinfo, 0x600, 1, data);
-	
+
 //	DpTxAuxNativeRead(hwinfo, 0x202, 3, data);
 
 	DpTxTPInitialSet(hwinfo);
-	while(GET_DP_TX_LT_RESULT(hwinfo)!=_DP_TX_TRAINING_PASS && 
+	while(GET_DP_TX_LT_RESULT(hwinfo)!=_DP_TX_TRAINING_PASS &&
 			GET_DP_TX_LT_RESULT(hwinfo)!=_DP_TX_TRAINING_FAIL)
 	{
 		switch(GET_DP_TX_LT_STATE(hwinfo))
@@ -1044,7 +1030,7 @@ int DpTxLinkTraining(struct rtk_dptx_hwinfo *hwinfo)
 				if(ret == _DP_TX_TRAINING_PATTERN1_PASS) {
 					printk(KERN_ERR "[dptx] pattern1 success\n");
 					SET_DP_TX_LT_STATE(hwinfo, _DP_TX_TRAINING_PATTERN2);
-				} else if(ret == _DP_TX_TRAINING_PATTERN1_ADJUST_FAIL) {
+				} else {
 					printk(KERN_ERR "[dptx] pattern1 fail\n");
 					SET_DP_TX_LT_RESULT(hwinfo, _DP_TX_TRAINING_FAIL);
 					DpTxTrainPatternEnd(hwinfo);
@@ -1077,6 +1063,7 @@ int DpTxLinkTraining(struct rtk_dptx_hwinfo *hwinfo)
 void DpTxPixelPLLSetting(struct rtk_dptx_hwinfo *hwinfo)
 {
 	void __iomem *pll_base = hwinfo->pll_base;
+	void __iomem *lvds_base = hwinfo->lvds_base;
 	unsigned int reg;
 
 	// Pixel PLL setting
@@ -1117,34 +1104,6 @@ void DpTxPixelPLLSetting(struct rtk_dptx_hwinfo *hwinfo)
 		writel(0x934741a2, pll_base + 0x250);
 		mdelay(1);
 		writel(0xcf1c, pll_base + 0x604);
-		mdelay(1);
-	} else if(hwinfo->out_type == DP_FORMAT_1440_768) {
-		writel(0x934701a2, pll_base + 0x250);
-		mdelay(1);
-		writel(0x934741a2, pll_base + 0x250);
-		mdelay(1);
-		writel(0xe800, pll_base + 0x604);
-		mdelay(1);
-	} else if(hwinfo->out_type == DP_FORMAT_1440_900) {
-		writel(0x934701a2, pll_base + 0x250);
-		mdelay(1);
-		writel(0x934741a2, pll_base + 0x250);
-		mdelay(1);
-		writel(0x11800, pll_base + 0x604);
-		mdelay(1);
-	} else if(hwinfo->out_type == DP_FORMAT_1280_800) {
-		writel(0x934701a2, pll_base + 0x250);
-		mdelay(1);
-		writel(0x934741a2, pll_base + 0x250);
-		mdelay(1);
-		writel(0xdaab, pll_base + 0x604);
-		mdelay(1);
-	} else if(hwinfo->out_type == DP_FORMAT_960_544) {
-		writel(0x934701b2, pll_base + 0x250);
-		mdelay(1);
-		writel(0x934741b2, pll_base + 0x250);
-		mdelay(1);
-		writel(0xD800, pll_base + 0x604);
 		mdelay(1);
 	} else {
 		writel(0x934701a2, pll_base + 0x250);
@@ -1219,7 +1178,7 @@ void DpTxDpPLLSetting(struct rtk_dptx_hwinfo *hwinfo)
 static void DpTxAuxPHYSet(struct rtk_dptx_hwinfo *hwinfo)
 {
 	void __iomem *base = hwinfo->reg_base;
-	
+
 	SetBit(base, PBD_61_AUX_1, ~(_BIT7 | _BIT6 | _BIT5), _BIT7);
 	SetBit(base, PBD_61_AUX_1, ~(_BIT3 | _BIT2 | _BIT1 | _BIT0), (_BIT3 | _BIT2 | _BIT1 | _BIT0));
 	SetBit(base, PBD_62_AUX_2, ~(_BIT5 | _BIT0), _BIT5 |_BIT0);
@@ -1348,7 +1307,7 @@ static void DpTxAudioSetting(struct rtk_dptx_hwinfo *hwinfo)
 		((WORD *)pucData)[2] = ((WORD *)pucData)[1] - ((WORD *)pucData)[0];
 	else
 		((WORD *)pucData)[2] = 0;
-	
+
 //	SetReg(base, PBB_D4_ARBITER_SEC_END_CNT_HB, pucData[4]);
 //	SetReg(base, PBB_D5_ARBITER_SEC_END_CNT_LB, pucData[5]);
 	SetReg(base, PBB_D4_ARBITER_SEC_END_CNT_HB, 0x00);
@@ -1369,7 +1328,7 @@ void DpTxSSTAudioPlaySetting(struct rtk_dptx_hwinfo *hwinfo)
 
 	DpTxAudioSetting(hwinfo);
 
-	// Set Maud	
+	// Set Maud
 	SetReg(base, PBC_20_AUD_TS_MAUD_H, 0x0);
 	SetReg(base, PBC_21_AUD_TS_MAUD_M, 0x2);
 	SetReg(base, PBC_22_AUD_TS_MAUD_L, 0x0);
@@ -1423,26 +1382,6 @@ void DpTxSSTDisplayFormatSetting(struct rtk_dptx_hwinfo *hwinfo)
 		SetReg(base, PBB_CE_TU_DATA_SIZE1, 0x0);
 		SetReg(base, PBB_CA_V_DATA_PER_LINE0, 0xf);
 		SetReg(base, PBB_CB_V_DATA_PER_LINE1, 0x00);
-	} else if(hwinfo->out_type == DP_FORMAT_1440_768) {
-		SetReg(base, PBB_CD_TU_DATA_SIZE0, 0x19);
-		SetReg(base, PBB_CE_TU_DATA_SIZE1, 0x6);
-		SetReg(base, PBB_CA_V_DATA_PER_LINE0, 0x8);
-		SetReg(base, PBB_CB_V_DATA_PER_LINE1, 0x70);
-	} else if(hwinfo->out_type == DP_FORMAT_1440_900) {
-		SetReg(base, PBB_CD_TU_DATA_SIZE0, 0x1e);
-		SetReg(base, PBB_CE_TU_DATA_SIZE1, 0x0);
-		SetReg(base, PBB_CA_V_DATA_PER_LINE0, 0x8);
-		SetReg(base, PBB_CB_V_DATA_PER_LINE1, 0x70);
-	} else if(hwinfo->out_type == DP_FORMAT_1280_800) {
-		SetReg(base, PBB_CD_TU_DATA_SIZE0, 0x17);
-		SetReg(base, PBB_CE_TU_DATA_SIZE1, 0x8);
-		SetReg(base, PBB_CA_V_DATA_PER_LINE0, 0x7);
-		SetReg(base, PBB_CB_V_DATA_PER_LINE1, 0x80);
-	} else if(hwinfo->out_type == DP_FORMAT_960_544) {
-		SetReg(base, PBB_CD_TU_DATA_SIZE0, 0x0c);
-		SetReg(base, PBB_CE_TU_DATA_SIZE1, 0x4);
-		SetReg(base, PBB_CA_V_DATA_PER_LINE0, 0x5);
-		SetReg(base, PBB_CB_V_DATA_PER_LINE1, 0xa0);
 	} else {
 		SetReg(base, PBB_CD_TU_DATA_SIZE0, 0x35);
 		SetReg(base, PBB_CE_TU_DATA_SIZE1, 0x0);
@@ -1514,7 +1453,7 @@ static void DpTxSSTMSASetting(struct rtk_dptx_hwinfo *hwinfo)
 		SetReg(base, PBB_B7_MN_STRM_ATTR_HTT_M, 0x6);
 		SetReg(base, PBB_B8_MN_STRM_ATTR_HTT_L, 0x72);
 		SetReg(base, PBB_B9_MN_STRM_ATTR_HST_M, 0x01);
-		SetReg(base, PBB_BA_MN_STRM_ATTR_HST_L, 0x33);
+		SetReg(base, PBB_BA_MN_STRM_ATTR_HST_L, 0x05);
 		SetReg(base, PBB_BB_MN_STRM_ATTR_HWD_M, 0x5);
 		SetReg(base, PBB_BC_MN_STRM_ATTR_HWD_L, 0x00);
 		SetReg(base, PBB_BD_MN_STRM_ATTR_HSW_M, 0x0);
@@ -1544,74 +1483,6 @@ static void DpTxSSTMSASetting(struct rtk_dptx_hwinfo *hwinfo)
 		SetReg(base, PBB_C5_MN_STRM_ATTR_VSW_M, 0x80);
 		SetReg(base, PBB_C6_MN_STRM_ATTR_VSW_L, 0x6);
 		SetReg(base, PBB_B5_MSA_MISC0, 0x20);
-	} else if(hwinfo->out_type == DP_FORMAT_1440_768) {
-		SetReg(base, PBB_B7_MN_STRM_ATTR_HTT_M, 0x5);
-		SetReg(base, PBB_B8_MN_STRM_ATTR_HTT_L, 0xf0);
-		SetReg(base, PBB_B9_MN_STRM_ATTR_HST_M, 0x0);
-		SetReg(base, PBB_BA_MN_STRM_ATTR_HST_L, 0x49);
-		SetReg(base, PBB_BB_MN_STRM_ATTR_HWD_M, 0x5);
-		SetReg(base, PBB_BC_MN_STRM_ATTR_HWD_L, 0xa0);
-		SetReg(base, PBB_BD_MN_STRM_ATTR_HSW_M, 0x0);
-		SetReg(base, PBB_BE_MN_STRM_ATTR_HSW_L, 0x20);
-		SetReg(base, PBB_BF_MN_STRM_ATTR_VTTE_M, 0x3);
-		SetReg(base, PBB_C0_MN_STRM_ATTR_VTTE_L, 0x16);
-		SetReg(base, PBB_C2_MN_STRM_ATTR_VST_L, 0xf);
-		SetReg(base, PBB_C3_MN_STRM_ATTR_VHT_M, 0x3);
-		SetReg(base, PBB_C4_MN_STRM_ATTR_VHT_L, 0x0);
-		SetReg(base, PBB_C5_MN_STRM_ATTR_VSW_M, 0x0);
-		SetReg(base, PBB_C6_MN_STRM_ATTR_VSW_L, 0x8);
-		SetReg(base, PBB_B5_MSA_MISC0, 0x20);
-	} else if(hwinfo->out_type == DP_FORMAT_1440_900) {
-		SetReg(base, PBB_B7_MN_STRM_ATTR_HTT_M, 0x5);
-		SetReg(base, PBB_B8_MN_STRM_ATTR_HTT_L, 0xf0);
-		SetReg(base, PBB_B9_MN_STRM_ATTR_HST_M, 0x0);
-		SetReg(base, PBB_BA_MN_STRM_ATTR_HST_L, 0x49);
-		SetReg(base, PBB_BB_MN_STRM_ATTR_HWD_M, 0x5);
-		SetReg(base, PBB_BC_MN_STRM_ATTR_HWD_L, 0xa0);
-		SetReg(base, PBB_BD_MN_STRM_ATTR_HSW_M, 0x0);
-		SetReg(base, PBB_BE_MN_STRM_ATTR_HSW_L, 0x20);
-		SetReg(base, PBB_BF_MN_STRM_ATTR_VTTE_M, 0x3);
-		SetReg(base, PBB_C0_MN_STRM_ATTR_VTTE_L, 0x9e);
-		SetReg(base, PBB_C2_MN_STRM_ATTR_VST_L, 0xf);
-		SetReg(base, PBB_C3_MN_STRM_ATTR_VHT_M, 0x3);
-		SetReg(base, PBB_C4_MN_STRM_ATTR_VHT_L, 0x84);
-		SetReg(base, PBB_C5_MN_STRM_ATTR_VSW_M, 0x0);
-		SetReg(base, PBB_C6_MN_STRM_ATTR_VSW_L, 0x8);
-		SetReg(base, PBB_B5_MSA_MISC0, 0x20);
-	} else if(hwinfo->out_type == DP_FORMAT_1280_800) {
-		SetReg(base, PBB_B7_MN_STRM_ATTR_HTT_M, 0x5);
-		SetReg(base, PBB_B8_MN_STRM_ATTR_HTT_L, 0x50);
-		SetReg(base, PBB_B9_MN_STRM_ATTR_HST_M, 0x0);
-		SetReg(base, PBB_BA_MN_STRM_ATTR_HST_L, 0x49);
-		SetReg(base, PBB_BB_MN_STRM_ATTR_HWD_M, 0x5);
-		SetReg(base, PBB_BC_MN_STRM_ATTR_HWD_L, 0x00);
-		SetReg(base, PBB_BD_MN_STRM_ATTR_HSW_M, 0x0);
-		SetReg(base, PBB_BE_MN_STRM_ATTR_HSW_L, 0x20);
-		SetReg(base, PBB_BF_MN_STRM_ATTR_VTTE_M, 0x3);
-		SetReg(base, PBB_C0_MN_STRM_ATTR_VTTE_L, 0x37);
-		SetReg(base, PBB_C2_MN_STRM_ATTR_VST_L, 0xf);
-		SetReg(base, PBB_C3_MN_STRM_ATTR_VHT_M, 0x3);
-		SetReg(base, PBB_C4_MN_STRM_ATTR_VHT_L, 0x20);
-		SetReg(base, PBB_C5_MN_STRM_ATTR_VSW_M, 0x0);
-		SetReg(base, PBB_C6_MN_STRM_ATTR_VSW_L, 0x8);
-		SetReg(base, PBB_B5_MSA_MISC0, 0x20);
-	} else if(hwinfo->out_type == DP_FORMAT_960_544) {
-		SetReg(base, PBB_B7_MN_STRM_ATTR_HTT_M, 0x4);
-		SetReg(base, PBB_B8_MN_STRM_ATTR_HTT_L, 0x10);
-		SetReg(base, PBB_B9_MN_STRM_ATTR_HST_M, 0x0);
-		SetReg(base, PBB_BA_MN_STRM_ATTR_HST_L, 0x49);
-		SetReg(base, PBB_BB_MN_STRM_ATTR_HWD_M, 0x3);
-		SetReg(base, PBB_BC_MN_STRM_ATTR_HWD_L, 0xc0);
-		SetReg(base, PBB_BD_MN_STRM_ATTR_HSW_M, 0x0);
-		SetReg(base, PBB_BE_MN_STRM_ATTR_HSW_L, 0x20);
-		SetReg(base, PBB_BF_MN_STRM_ATTR_VTTE_M, 0x2);
-		SetReg(base, PBB_C0_MN_STRM_ATTR_VTTE_L, 0x30);
-		SetReg(base, PBB_C2_MN_STRM_ATTR_VST_L, 0xf);
-		SetReg(base, PBB_C3_MN_STRM_ATTR_VHT_M, 0x2);
-		SetReg(base, PBB_C4_MN_STRM_ATTR_VHT_L, 0x20);
-		SetReg(base, PBB_C5_MN_STRM_ATTR_VSW_M, 0x0);
-		SetReg(base, PBB_C6_MN_STRM_ATTR_VSW_L, 0x8);
-		SetReg(base, PBB_B5_MSA_MISC0, 0x20);
 	}
 	SetBit(base, PBB_B4_MSA_CTRL, ~_BIT7, _BIT7);
 }
@@ -1626,7 +1497,7 @@ void DpTxSSTSetting(struct rtk_dptx_hwinfo *hwinfo)
 	WORD usMeasureTime = 0;
 	DWORD ulHwMvidMin = 0xFFFFFFFF;
 	DWORD ulHwMvidMax = 0x00000000;
-	
+
 	DWORD pucData[6];
 
 //	SetBit(base, PBB_A8_MN_VID_AUTO_EN_1, ~(_BIT7 | _BIT6), _BIT6 | _BIT7);
@@ -1640,7 +1511,7 @@ void DpTxSSTSetting(struct rtk_dptx_hwinfo *hwinfo)
 	pucData[0] /= ((GET_DP_TX_DOWNSTREAM_DOWN_SPREAD(hwinfo) == true) ?
 					((DWORD)270 * GET_DP_TX_DOWNSTREAM_LINK_RATE(hwinfo) * 9975 / 10000) : ((DWORD)270 * GET_DP_TX_DOWNSTREAM_LINK_RATE(hwinfo)));
 	printk(KERN_ERR "[DPTX] pucData[0] = 0x%x\n", pucData[0]);
-	usMeasureTime = (WORD)(pucData[1] / ((GET_DP_TX_DOWNSTREAM_DOWN_SPREAD(hwinfo) == true) ? 
+	usMeasureTime = (WORD)(pucData[1] / ((GET_DP_TX_DOWNSTREAM_DOWN_SPREAD(hwinfo) == true) ?
 					((DWORD)27 * GET_DP_TX_DOWNSTREAM_LINK_RATE(hwinfo) * 9975 / 10000) : ((DWORD)27 * GET_DP_TX_DOWNSTREAM_LINK_RATE(hwinfo))) / 5);
 	usMeasureTime *= 2;
 
@@ -1710,7 +1581,7 @@ void DpTxSSTSetting(struct rtk_dptx_hwinfo *hwinfo)
 	SetReg(base, PBB_AD_MN_N_VID_M, *((unsigned char *)pucData+5));
 	SetReg(base, PBB_AE_MN_N_VID_L, *((unsigned char *)pucData+4));
 	printk(KERN_ERR "[DPTX] 0x%x, 0x%x\n", *((unsigned char *)pucData+4), *((unsigned char *)pucData+5));
-	
+
 	SetBit(base, PBB_B4_MSA_CTRL, ~_BIT6, 0x00);
 	SetBit(base, PBB_A8_MN_VID_AUTO_EN_1, ~(_BIT7 | _BIT6), _BIT6);
 #else
@@ -1758,7 +1629,7 @@ void DpTxIRQHandle(struct rtk_dptx_hwinfo *hwinfo)
 		DpTxAuxReset(hwinfo);
 		up(&hwinfo->sem);
 	}
-	
+
 	SetReg(base, PBD_B1_AUX_IRQ_EVENT, 0x3F);
 	SetBit(base, PBD_AB_AUX_FIFO_CTRL, ~(_BIT1 | _BIT0), (_BIT1 | _BIT0));
 }
@@ -1853,9 +1724,10 @@ void Set_720p_1lane(struct rtk_dptx_hwinfo *hwinfo)
 #if RTK_VO_SET
 	void __iomem *pll_base = hwinfo->pll_base;
 	vo_common_setting(pll_base, vo_base);
-#else
-	SetReg(base, PBB_C8_VBID_FW_CTL, 0x1);
 #endif
+
+	SetReg(base, PBB_C8_VBID_FW_CTL, 0x1);
+
 	SET_DP_TX_INPUT_PIXEL_CLK(hwinfo, 74);
 
 	writel(0x0, lvds_base+0x100);
@@ -1865,15 +1737,13 @@ void Set_720p_1lane(struct rtk_dptx_hwinfo *hwinfo)
 	writel(0x1a02ea, lvds_base+0x410);
 	writel(0x2ee, lvds_base+0x418);
 	writel(0x10006, lvds_base+0x41C);
+	writel(0x000002eb, lvds_base+0x42C);
 
 #if RTK_VO_SET
 	writel(0x500, vo_base + 0x48);
 	writel(0x500, vo_base + 0x4c);
 	writel(0x5002d0, vo_base + 0x68);
 	writel(0x50002d0, vo_base + 0xd78);
-	writel(0x800002eb, lvds_base+0x42C);
-#else
-	writel(0x000002eb, lvds_base+0x42C);
 #endif
 
 	DpTxSSTSetting(hwinfo);
@@ -1902,9 +1772,9 @@ void Set_1080p_2lane(struct rtk_dptx_hwinfo *hwinfo)
 #if RTK_VO_SET
 	void __iomem *pll_base = hwinfo->pll_base;
 	vo_common_setting(pll_base, vo_base);
-#else
-	SetReg(base, PBB_C8_VBID_FW_CTL, 0x1);
 #endif
+	SetReg(base, PBB_C8_VBID_FW_CTL, 0x1);
+
 	SET_DP_TX_INPUT_PIXEL_CLK(hwinfo, 148);
 
 	writel(0x0, lvds_base+0x100);
@@ -1914,15 +1784,13 @@ void Set_1080p_2lane(struct rtk_dptx_hwinfo *hwinfo)
 	writel(0x2A0462, lvds_base+0x410);
 	writel(0x465, lvds_base+0x418);
 	writel(0x10006, lvds_base+0x41C);
+	writel(0x00000463, lvds_base+0x42C);
 	
 #if RTK_VO_SET
 	writel(0x780, vo_base + 0x48);
 	writel(0x780, vo_base + 0x4c);
 	writel(0x780438, vo_base + 0x68);
 	writel(0x7800438, vo_base + 0xd78);
-	writel(0x80000463, lvds_base+0x42C);
-#else
-	writel(0x00000463, lvds_base+0x42C);
 #endif
 
 	DpTxSSTSetting(hwinfo);
@@ -1936,206 +1804,6 @@ void Set_1080p_2lane(struct rtk_dptx_hwinfo *hwinfo)
 	SetReg(base, PBB_0D_DPTX_PHY_CTRL, 0x15);
 
 //	SetBit(base, PBB_A8_MN_VID_AUTO_EN_1, ~(_BIT7 | _BIT6), _BIT6);
-#if RTK_VO_SET
-	writel(0x47, vo_base + 0xec4);
-	writel(0x3, vo_base + 0x20);
-	writel(0x3, vo_base + 0xe78);
-#else
-	writel(0x3, vo_base + 0xe78);
-#endif
-}
-
-void Set_1440_768_2lane(struct rtk_dptx_hwinfo *hwinfo)
-{
-	void __iomem *lvds_base = hwinfo->lvds_base;
-	void __iomem *base = hwinfo->reg_base;
-	void __iomem *vo_base = hwinfo->vo_base;
-
-#if RTK_VO_SET
-	void __iomem *pll_base = hwinfo->pll_base;
-	vo_common_setting(pll_base, vo_base);
-#else
-	SetReg(base, PBB_C8_VBID_FW_CTL, 0x1);
-#endif
-	SET_DP_TX_INPUT_PIXEL_CLK(hwinfo, 72);
-
-	writel(0x0, lvds_base+0x100);
-	writel(0x20, lvds_base+0x404);
-	writel(0x5f005f0, lvds_base+0x408);
-	writel(0x03f05df, lvds_base+0x40C);
-	writel(0xf030f, lvds_base+0x410);
-	writel(0x316, lvds_base+0x418);
-	writel(0x10009, lvds_base+0x41C);
-
-#if RTK_VO_SET
-	writel(0x5a0, vo_base + 0x48);
-	writel(0x5a0, vo_base + 0x4c);
-	writel(0x5a0300, vo_base + 0x68);
-	writel(0x5a00300, vo_base + 0xd78);
-	writel(0x80000310, lvds_base+0x42C);
-#else
-	writel(0x00000310, lvds_base+0x42C);
-#endif
-
-	DpTxSSTSetting(hwinfo);
-
-	SetReg(base, PBB_00_DP_PHY_CTRL, 0x38);
-
-	SetReg(base, PBB_A0_DP_MAC_CTRL, 0x6);
-	writel(0x3, lvds_base+0x40);
-	SetReg(base, PBC_A7_DPTX_SFIFO_CTRL0, 0x80);
-	SetReg(base, PBB_0D_DPTX_PHY_CTRL, 0x15);
-
-#if RTK_VO_SET
-	writel(0x47, vo_base + 0xec4);
-	writel(0x3, vo_base + 0x20);
-	writel(0x3, vo_base + 0xe78);
-#else
-	writel(0x3, vo_base + 0xe78);
-#endif
-}
-
-void Set_1440_900_2lane(struct rtk_dptx_hwinfo *hwinfo)
-{
-	void __iomem *lvds_base = hwinfo->lvds_base;
-	void __iomem *base = hwinfo->reg_base;
-	void __iomem *vo_base = hwinfo->vo_base;
-
-#if RTK_VO_SET
-	void __iomem *pll_base = hwinfo->pll_base;
-	vo_common_setting(pll_base, vo_base);
-#else
-	SetReg(base, PBB_C8_VBID_FW_CTL, 0x1);
-#endif
-	SET_DP_TX_INPUT_PIXEL_CLK(hwinfo, 85);
-
-	writel(0x0, lvds_base+0x100);
-	writel(0x20, lvds_base+0x404);
-	writel(0x5f005f0, lvds_base+0x408);
-	writel(0x03f05df, lvds_base+0x40C);
-	writel(0xf0393, lvds_base+0x410);
-	writel(0x39e, lvds_base+0x418);
-	writel(0x10009, lvds_base+0x41C);
-
-#if RTK_VO_SET
-	writel(0x5a0, vo_base + 0x48);
-	writel(0x5a0, vo_base + 0x4c);
-	writel(0x5a0384, vo_base + 0x68);
-	writel(0x5a00384, vo_base + 0xd78);
-	writel(0x80000394, lvds_base+0x42C);
-#else
-	writel(0x00000394, lvds_base+0x42C);
-#endif
-
-	DpTxSSTSetting(hwinfo);
-
-	SetReg(base, PBB_00_DP_PHY_CTRL, 0x38);
-
-	SetReg(base, PBB_A0_DP_MAC_CTRL, 0x6);
-	writel(0x3, lvds_base+0x40);
-	SetReg(base, PBC_A7_DPTX_SFIFO_CTRL0, 0x80);
-	SetReg(base, PBB_0D_DPTX_PHY_CTRL, 0x15);
-
-#if RTK_VO_SET
-	writel(0x47, vo_base + 0xec4);
-	writel(0x3, vo_base + 0x20);
-	writel(0x3, vo_base + 0xe78);
-#else
-	writel(0x3, vo_base + 0xe78);
-#endif
-}
-
-void Set_1280_800_2lane(struct rtk_dptx_hwinfo *hwinfo)
-{
-	void __iomem *lvds_base = hwinfo->lvds_base;
-	void __iomem *base = hwinfo->reg_base;
-	void __iomem *vo_base = hwinfo->vo_base;
-
-#if RTK_VO_SET
-	void __iomem *pll_base = hwinfo->pll_base;
-	vo_common_setting(pll_base, vo_base);
-#else
-	SetReg(base, PBB_C8_VBID_FW_CTL, 0x1);
-#endif
-	SET_DP_TX_INPUT_PIXEL_CLK(hwinfo, 67);
-
-	writel(0x0, lvds_base+0x100);
-	writel(0x20, lvds_base+0x404);
-	writel(0x5500550, lvds_base+0x408);
-	writel(0x03f053f, lvds_base+0x40C);
-	writel(0xf032f, lvds_base+0x410);
-	writel(0x337, lvds_base+0x418);
-	writel(0x10009, lvds_base+0x41C);
-
-#if RTK_VO_SET
-	writel(0x500, vo_base + 0x48);
-	writel(0x500, vo_base + 0x4c);
-	writel(0x500320, vo_base + 0x68);
-	writel(0x5000320, vo_base + 0xd78);
-	writel(0x80000330, lvds_base+0x42C);
-#else
-	writel(0x00000330, lvds_base+0x42C);
-#endif
-
-	DpTxSSTSetting(hwinfo);
-
-	SetReg(base, PBB_00_DP_PHY_CTRL, 0x38);
-
-	SetReg(base, PBB_A0_DP_MAC_CTRL, 0x6);
-	writel(0x3, lvds_base+0x40);
-	SetReg(base, PBC_A7_DPTX_SFIFO_CTRL0, 0x80);
-	SetReg(base, PBB_0D_DPTX_PHY_CTRL, 0x15);
-
-#if RTK_VO_SET
-	writel(0x47, vo_base + 0xec4);
-	writel(0x3, vo_base + 0x20);
-	writel(0x3, vo_base + 0xe78);
-#else
-	writel(0x3, vo_base + 0xe78);
-#endif
-}
-
-void Set_960_544_2lane(struct rtk_dptx_hwinfo *hwinfo)
-{
-	void __iomem *lvds_base = hwinfo->lvds_base;
-	void __iomem *base = hwinfo->reg_base;
-	void __iomem *vo_base = hwinfo->vo_base;
-
-#if RTK_VO_SET
-	void __iomem *pll_base = hwinfo->pll_base;
-	vo_common_setting(pll_base, vo_base);
-#else
-	SetReg(base, PBB_C8_VBID_FW_CTL, 0x1);
-#endif
-	SET_DP_TX_INPUT_PIXEL_CLK(hwinfo, 35);
-
-	writel(0x0, lvds_base+0x100);
-	writel(0x20, lvds_base+0x404);
-	writel(0x4100410, lvds_base+0x408);
-	writel(0x03f03ff, lvds_base+0x40C);
-	writel(0xf022f, lvds_base+0x410);
-	writel(0x230, lvds_base+0x418);
-	writel(0x10009, lvds_base+0x41C);
-
-#if RTK_VO_SET
-	writel(0x3c0, vo_base + 0x48);
-	writel(0x3c0, vo_base + 0x4c);
-	writel(0x3c0220, vo_base + 0x68);
-	writel(0x3c00220, vo_base + 0xd78);
-	writel(0x80000330, lvds_base+0x42C);
-#else
-	writel(0x00000330, lvds_base+0x42C);
-#endif
-
-	DpTxSSTSetting(hwinfo);
-
-	SetReg(base, PBB_00_DP_PHY_CTRL, 0x38);
-
-	SetReg(base, PBB_A0_DP_MAC_CTRL, 0x6);
-	writel(0x3, lvds_base+0x40);
-	SetReg(base, PBC_A7_DPTX_SFIFO_CTRL0, 0x80);
-	SetReg(base, PBB_0D_DPTX_PHY_CTRL, 0x15);
-
 #if RTK_VO_SET
 	writel(0x47, vo_base + 0xec4);
 	writel(0x3, vo_base + 0x20);
@@ -2233,21 +1901,6 @@ void Set_2160p60_4lane(struct rtk_dptx_hwinfo *hwinfo)
 #endif
 }
 
-void dptx_lvdsint_en(struct rtk_dptx_hwinfo *hwinfo, int en)
-{
-	void __iomem *lvds_base = hwinfo->lvds_base;
-	unsigned int reg;
-
-	reg = readl(lvds_base + 0x42C);
-	if(en)
-		reg = reg | 0x80000000;
-	else
-		reg = reg & ~0x80000000;
-	writel(reg, lvds_base + 0x42C);
-
-	reg = readl(lvds_base + 0x42C);
-}
-
 void dptx_close_phy(struct rtk_dptx_hwinfo *hwinfo)
 {
 	void __iomem *base = hwinfo->reg_base;
@@ -2304,18 +1957,6 @@ int dptx_config_tv_system(struct rtk_dptx_hwinfo *hwinfo)
 	case DP_FORMAT_1024_768:
 		Set_1024_768_1lane(hwinfo);
 		break;
-	case DP_FORMAT_1440_768:
-		Set_1440_768_2lane(hwinfo);
-		break;
-	case DP_FORMAT_1440_900:
-		Set_1440_900_2lane(hwinfo);
-		break;
-	case DP_FORMAT_1280_800:
-		Set_1280_800_2lane(hwinfo);
-		break;
-	case DP_FORMAT_960_544:
-		Set_960_544_2lane(hwinfo);
-		break;
 	case DP_FORMAT_720P_60:
 	default:
 		Set_720p_1lane(hwinfo);
@@ -2334,3 +1975,4 @@ int dptx_config_tv_system(struct rtk_dptx_hwinfo *hwinfo)
 		return -1;
 	return ret;
 }
+

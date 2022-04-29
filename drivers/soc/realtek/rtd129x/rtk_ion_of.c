@@ -1,13 +1,3 @@
-/*
- * rtk_ion_of.c - Realtek ION driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- */
-
 #include <linux/version.h>
 #include <linux/err.h>
 #include <linux/module.h>
@@ -19,6 +9,8 @@
 #include <linux/of_address.h>
 
 #include <linux/dma-contiguous.h>
+#include <asm/pgtable.h>
+
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 9)
 #include "../../drivers/staging/android/ion/ion.h"
 #include "../../drivers/staging/android/uapi/ion.h"
@@ -29,10 +21,10 @@
 #include <linux/ion.h>
 #include "../../drivers/gpu/ion/ion_priv.h"
 #endif
-
 #include "include/debug.h"
 #include "soc/realtek/memory.h"
 #include "../../../../mm/cma.h"
+
 
 struct ion_device *rtk_phoenix_ion_device;
 EXPORT_SYMBOL(rtk_phoenix_ion_device);
@@ -253,7 +245,6 @@ static struct ion_platform_data *rtk_ion_parse_dt(const struct device_node *dt_n
                     heap_data->priv = (void *) pools;
                 }
             }
-
         }
 #endif
 
@@ -278,6 +269,9 @@ static int rtk_ion_probe(struct platform_device *pdev)
 
     dbg_info("%s %s",__FILE__, __func__);
     if (pdev->dev.of_node) {
+		if (!of_device_is_available(pdev->dev.of_node))
+			return -ENODEV;
+
         pdata = rtk_ion_parse_dt(pdev->dev.of_node);
         if (IS_ERR(pdata)) {
             err = PTR_ERR(pdata);

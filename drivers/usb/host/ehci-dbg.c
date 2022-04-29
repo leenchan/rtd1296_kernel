@@ -628,7 +628,8 @@ static ssize_t fill_periodic_buffer(struct debug_buffer *buf)
 	unsigned		i;
 	__hc32			tag;
 
-	if (!(seen = kmalloc (DBG_SCHED_LIMIT * sizeof *seen, GFP_ATOMIC)))
+	seen = kmalloc(DBG_SCHED_LIMIT * sizeof *seen, GFP_ATOMIC);
+	if (!seen)
 		return 0;
 	seen_count = 0;
 
@@ -889,28 +890,6 @@ static ssize_t fill_registers_buffer(struct debug_buffer *buf)
 			ehci_read_frame_index(ehci));
 	size -= temp;
 	next += temp;
-
-#ifdef CONFIG_USB_PATCH_ON_RTK
-	temp = scnprintf (next, size, "CTRLDSSEGMENT %08x\n",
-			ehci_readl(ehci, &ehci->regs->segment));
-	size -= temp;
-	next += temp;
-
-	temp = scnprintf (next, size, "PERIODIC_LIST_BASE %08x\n",
-			ehci_readl(ehci, &ehci->regs->frame_list));
-	size -= temp;
-	next += temp;
-
-	temp = scnprintf (next, size, "ASYNC_LIST_ADDR %08x\n",
-			ehci_readl(ehci, &ehci->regs->async_next));
-	size -= temp;
-	next += temp;
-
-	temp = scnprintf (next, size, "CONFIG_FLAG %08x\n",
-			ehci_readl(ehci, &ehci->regs->configured_flag));
-	size -= temp;
-	next += temp;
-#endif
 
 	for (i = 1; i <= HCS_N_PORTS (ehci->hcs_params); i++) {
 		temp = dbg_port_buf (scratch, sizeof scratch, label, i,

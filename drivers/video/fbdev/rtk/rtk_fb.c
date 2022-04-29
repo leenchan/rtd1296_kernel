@@ -54,7 +54,8 @@
 #ifdef USE_UMP
 #include <linux/ump.h>
 #include <linux/ump_fb.h>
-#define IOCTL_GET_FB_UMP_SECURE_ID _IOWR('m', 0xF8, __u32)
+#define IOCTL_GET_FB_UMP_SECURE_ID _IOWR('F', 0xF8, __u32)
+
 static ump_dd_handle ump_wrapped_buffer = UMP_DD_INVALID_MEMORY_HANDLE;
 #endif
 
@@ -83,6 +84,7 @@ extern struct ion_device *rtk_phoenix_ion_device;
 #define ANDROID_NUMBER_OF_FPS 60
 #define ANDROID_BYTES_PER_PIXEL 4
 static int debug = 0;
+static uint32_t my_fb_node=0;
 
 #define dprintk(msg...) if (debug)   { printk(KERN_ALERT    "D/RTK_FB: " msg); }
 //#define dprintk(msg...) if (debug)   { dbg_info(KERN_DEBUG    "D/RTK_FB: " msg); }
@@ -126,6 +128,7 @@ struct rtk_fb {
     struct rtk_fb_memory *      pMem;
     int                         fps;
     int                         irq;
+    int                         pixel_format;
 };
 
 enum rtk_fb_memory_flags {
@@ -148,7 +151,7 @@ __maybe_unused static inline int    rtk_fb_memory_bypePrePixel  (struct rtk_fb_m
 
 static int fb_avcpu_event_notify(struct notifier_block *self, unsigned long action, void *data)
 {
-    struct fb_info *info = (struct fb_info *)registered_fb[0];
+    struct fb_info *info = (struct fb_info *)registered_fb[my_fb_node];
 	struct rtk_fb *fb = container_of(info, struct rtk_fb, fb);
     return DC_avcpu_event_notify(action, &fb->video_info);
 }
@@ -280,7 +283,7 @@ static int rtk_fb_mmap(struct fb_info * info, struct vm_area_struct *vma)
         len     = info->fix.mmio_len;
     }
     //vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
-    vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+    vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
     return vm_iomap_memory(vma, start, len);
 }
 
@@ -377,7 +380,7 @@ static int rtk_fb_memory_alloc(struct rtk_fb_memory ** ppMem, int width, int hei
     *ppMem = (struct rtk_fb_memory *) kzalloc(sizeof(struct rtk_fb_memory), GFP_KERNEL);
     pMem = *ppMem;
 
-	pMem->fb_client         = ion_client_create(rtk_phoenix_ion_device, "android_fb");
+	pMem->fb_client         = ion_client_create(rtk_phoenix_ion_device, "graphic_fb");
 	pMem->fb_handle         = ion_alloc(pMem->fb_client, allocate_size, align, ion_heap_mask, ion_heap_flag);
     pMem->alloc_size        = allocate_size;
     pMem->width             = width;
@@ -517,7 +520,7 @@ static int rtk_fb_update_by_memory(struct rtk_fb * fb, struct rtk_fb_memory * pM
     fb->fb.var.activate	        = FB_ACTIVATE_NOW;
     fb->fb.var.height           = fb_height;
     fb->fb.var.width            = fb_width;
-
+#if 0
     if (fb_byte_per_pixel == 4) {
         /* ARGB 8888 */
         fb->fb.var.bits_per_pixel   = 32;
@@ -539,7 +542,87 @@ static int rtk_fb_update_by_memory(struct rtk_fb * fb, struct rtk_fb_memory * pM
         fb->fb.var.blue.offset      = 0;
         fb->fb.var.blue.length      = 5;
     }
-
+#else
+    switch (fb->pixel_format) {
+        default:
+        case INBAND_CMD_GRAPHIC_FORMAT_ARGB8888_LITTLE:
+        case INBAND_CMD_GRAPHIC_FORMAT_ARGB8888:
+        {
+                        /* ARGB 8888 */
+            fb->fb.var.bits_per_pixel   = 32;
+            fb->fb.var.transp.offset    = 24;
+            fb->fb.var.transp.length    = 8;
+            fb->fb.var.red.offset       = 16;
+            fb->fb.var.red.length       = 8;
+            fb->fb.var.green.offset     = 8;
+            fb->fb.var.green.length     = 8;
+            fb->fb.var.blue.offset      = 0;
+            fb->fb.var.blue.length      = 8;
+            break;
+        }        
+        case INBAND_CMD_GRAPHIC_FORMAT_RGBA8888:        
+        case INBAND_CMD_GRAPHIC_FORMAT_RGBA8888_LITTLE:        
+        {
+                        /* ARGB 8888 */
+            fb->fb.var.bits_per_pixel = 32;
+            fb->fb.var.blue.offset    = 24;
+            fb->fb.var.blue.length    = 8;
+            fb->fb.var.green.offset   = 16;
+            fb->fb.var.green.length   = 8;
+            fb->fb.var.red.offset     = 8;
+            fb->fb.var.red.length     = 8;
+            fb->fb.var.transp.offset  = 0;
+            fb->fb.var.transp.length  = 8;
+            break;
+        }
+        case INBAND_CMD_GRAPHIC_FORMAT_RGBA5551:
+        case INBAND_CMD_GRAPHIC_FORMAT_RGBA5551_LITTLE:
+        {
+            /* ARGB 5551 */
+            fb->fb.var.bits_per_pixel   = 16;
+            fb->fb.var.red.offset       = 11;
+            fb->fb.var.red.length       = 5;
+            fb->fb.var.green.offset     = 6;
+            fb->fb.var.green.length     = 5;
+            fb->fb.var.blue.offset      = 1;
+            fb->fb.var.blue.length      = 5;
+            fb->fb.var.transp.offset    = 0;
+            fb->fb.var.transp.length    = 1;            
+            break;
+        }
+        case INBAND_CMD_GRAPHIC_FORMAT_ARGB1555:
+        case INBAND_CMD_GRAPHIC_FORMAT_ARGB1555_LITTLE:
+        {
+            /* ARGB 5551 */
+            fb->fb.var.bits_per_pixel   = 16;
+            fb->fb.var.blue.offset       = 0;
+            fb->fb.var.blue.length       = 5;
+            fb->fb.var.green.offset     = 5;
+            fb->fb.var.green.length     = 5;
+            fb->fb.var.red.offset      = 10;
+            fb->fb.var.red.length      = 5;
+            fb->fb.var.transp.offset    = 15;
+            fb->fb.var.transp.length    = 1;            
+            break;
+        }
+        case INBAND_CMD_GRAPHIC_FORMAT_RGB565:
+        case INBAND_CMD_GRAPHIC_FORMAT_RGB565_LITTLE:
+        {
+            /* ARGB 5551 */
+        /* RGB 565 */
+            fb->fb.var.bits_per_pixel   = 16;
+            fb->fb.var.red.offset       = 11;
+            fb->fb.var.red.length       = 5;
+            fb->fb.var.green.offset     = 5;
+            fb->fb.var.green.length     = 6;
+            fb->fb.var.blue.offset      = 0;
+            fb->fb.var.blue.length      = 5;
+            fb->fb.var.transp.offset    = 0;
+            fb->fb.var.transp.length    = 0;                        
+            break;
+        }
+    }
+#endif
     fb->fb.var.width            = 0;
     fb->fb.var.height           = 0;
     switch (fb_width)
@@ -588,22 +671,27 @@ static int rtk_fb_set_size (struct rtk_fb *fb, int width, int height, int count,
     struct rtk_fb_memory * pMem = NULL;
     int byte_per_pixel = ANDROID_BYTES_PER_PIXEL;
 
-
-    /* Only support 4 byte or 2 byte */
     switch (_byte_per_pixel) {
-        case 4:
-        case 2:
-            byte_per_pixel = _byte_per_pixel;
+        case INBAND_CMD_GRAPHIC_FORMAT_ARGB8888:
+        case INBAND_CMD_GRAPHIC_FORMAT_RGBA8888:        
+        case INBAND_CMD_GRAPHIC_FORMAT_ARGB8888_LITTLE:
+        case INBAND_CMD_GRAPHIC_FORMAT_RGBA8888_LITTLE:        
+            byte_per_pixel = 4;
+            break;
+        case INBAND_CMD_GRAPHIC_FORMAT_RGB888:
+        case INBAND_CMD_GRAPHIC_FORMAT_RGB888_LITTLE:
+            byte_per_pixel = 3;
             break;
         default:
+            byte_per_pixel = 2;
             break;
     }
 
     if (fb->pMem != NULL &&
             width           == rtk_fb_memory_width(fb->pMem) &&
             height          == rtk_fb_memory_height(fb->pMem) &&
-            count           == rtk_fb_memory_count(fb->pMem) &&
-            byte_per_pixel  == rtk_fb_memory_bypePrePixel(fb->pMem))
+            count           == rtk_fb_memory_count(fb->pMem) /*&&
+            byte_per_pixel  == rtk_fb_memory_bypePrePixel(fb->pMem)*/)
         goto done;
 
     if (rtk_fb_memory_alloc(&pMem, width, height, byte_per_pixel, PAGE_SIZE, count, flags) != 0) {
@@ -639,6 +727,9 @@ static int rtk_fb_probe(struct platform_device *pdev)
 	const u32 *prop;
     int size;
     dbg_warn("[%s %s] \n", __FILE__, __func__);
+	
+	if (!of_device_is_available(pdev->dev.of_node))
+		return -ENODEV;
 
 	fb = kzalloc(sizeof(*fb), GFP_KERNEL);
 	if (fb == NULL) {
@@ -675,9 +766,17 @@ static int rtk_fb_probe(struct platform_device *pdev)
         dbg_warn("[%s %s] Use default fps:%d\n", __FILE__, __func__, fb->fps);
     }
 
-    if (rtk_fb_set_size(fb, width, height, count, ANDROID_BYTES_PER_PIXEL, RTK_FB_MEM_ALLOC_ALGO_LAST_FIT) != 0) {
+    prop = of_get_property(pdev->dev.of_node, "pixel_format", &size);
+    if ((prop) && (size >= sizeof(u32) * 1)) {
+        fb->pixel_format = of_read_number(prop, 1);
+    } else {
+        fb->pixel_format=INBAND_CMD_GRAPHIC_FORMAT_ARGB8888;
+        dbg_warn("[%s %s] Use default dts_byte_per_pixel:%d\n", __FILE__, __func__, fb->pixel_format);
+    }
+
+    if (rtk_fb_set_size(fb, width, height, count, fb->pixel_format, RTK_FB_MEM_ALLOC_ALGO_LAST_FIT) != 0) {
         dbg_err("[%s %s] rtk_fb_set_size return error! ([%dx%d] bypePrePixel=%d align=%ld count=%d) \n",
-                __FILE__, __func__, width, height, ANDROID_BYTES_PER_PIXEL, PAGE_SIZE, count);
+                __FILE__, __func__, width, height, fb->pixel_format, PAGE_SIZE, count);
         goto err_fb_set_var_failed;
     }
 
@@ -693,7 +792,8 @@ static int rtk_fb_probe(struct platform_device *pdev)
 	ret = register_framebuffer(&fb->fb);
 	if(ret)
 		goto err_register_framebuffer_failed;
-
+    my_fb_node=fb->fb.node;
+    //printk("%s %s %d I'm fd%d\n",my_fb_node);
 #ifdef CONFIG_REALTEK_AVCPU
     register_avcpu_notifier(&fb_avcpu_event_notifier);
 #endif

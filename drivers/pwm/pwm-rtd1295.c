@@ -1,12 +1,15 @@
 /*
- * RTD1295 pulse-width-modulation controller driver
+ * drivers/pwm/pwm-rtd1295.c
  *
- * Copyright (C) 2017 Realtek Semiconductor Corporation.
+ * rtd1295 pulse-width-modulation controller driver
+ *
+ * Copyright (c) 2014, Realtek Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
+ *
  */
 
 #include <linux/clk.h>
@@ -222,10 +225,10 @@ int set_real_freq_by_target_freq(struct rtd1295_pwm_chip *pc, int hwpwm, int tar
 			}
 		}
 		csd = (32 - (i + 8)) - 1;
+		ocd = (div >> (csd + 1)) - 1;
 		if (csd > max_csd) csd = max_csd;
 		else if (csd < min_csd) csd = min_csd;
 
-		ocd = (div >> (csd + 1)) - 1;
 		if (ocd > max_ocd) ocd = max_ocd;
 		else if (ocd < min_ocd) ocd = min_ocd;
 

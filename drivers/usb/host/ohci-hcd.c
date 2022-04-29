@@ -44,7 +44,6 @@
 #include <asm/irq.h>
 #include <asm/unaligned.h>
 #include <asm/byteorder.h>
-//#include <soc/realtek/rtd129x_lockapi.h>
 
 
 #define DRIVER_AUTHOR "Roman Weissgaerber, David Brownell"
@@ -156,7 +155,8 @@ static int ohci_urb_enqueue (
 	int		retval = 0;
 
 	/* every endpoint has a ed, locate and maybe (re)initialize it */
-	if (! (ed = ed_get (ohci, urb->ep, urb->dev, pipe, urb->interval)))
+	ed = ed_get(ohci, urb->ep, urb->dev, pipe, urb->interval);
+	if (! ed)
 		return -ENOMEM;
 
 	/* for the private part of the URB we need the number of TDs (size) */
@@ -855,9 +855,6 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 	struct ohci_hcd		*ohci = hcd_to_ohci (hcd);
 	struct ohci_regs __iomem *regs = ohci->regs;
 	int			ints;
-	unsigned long flags;
-
-	//rtk_lockapi_lock(flags, __FUNCTION__);
 
 	/* Read interrupt status (and flush pending writes).  We ignore the
 	 * optimization of checking the LSB of hcca->done_head; it doesn't
@@ -872,7 +869,6 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 		ohci->rh_state = OHCI_RH_HALTED;
 		ohci_dbg (ohci, "device removed!\n");
 		usb_hc_died(hcd);
-		//rtk_lockapi_unlock(flags,__FUNCTION__);
 		return IRQ_HANDLED;
 	}
 
@@ -880,10 +876,8 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 	ints &= ohci_readl(ohci, &regs->intrenable);
 
 	/* interrupt for some other device? */
-	if (ints == 0 || unlikely(ohci->rh_state == OHCI_RH_HALTED)) {
-		//rtk_lockapi_unlock(flags,__FUNCTION__);
+	if (ints == 0 || unlikely(ohci->rh_state == OHCI_RH_HALTED))
 		return IRQ_NOTMINE;
-	}
 
 	if (ints & OHCI_INTR_UE) {
 		// e.g. due to PCI Master/Target Abort
@@ -964,8 +958,6 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 		(void) ohci_readl (ohci, &ohci->regs->control);
 	}
 	spin_unlock(&ohci->lock);
-
-	//rtk_lockapi_unlock(flags,__FUNCTION__);
 
 	return IRQ_HANDLED;
 }
@@ -1265,9 +1257,8 @@ MODULE_LICENSE ("GPL");
 
 #ifdef CONFIG_USB_OHCI_RTK
 #include "ohci-rtk.c"
-#define	PLATFORM_DRIVER		ohci_rtk_driver
+#define PLATFORM_DRIVER ohci_rtk_driver
 #endif
-
 
 static int __init ohci_hcd_mod_init(void)
 {

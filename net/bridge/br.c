@@ -122,13 +122,13 @@ static struct notifier_block br_device_notifier = {
 };
 
 /* called with RTNL */
-static int br_netdev_switch_event(struct notifier_block *unused,
-				  unsigned long event, void *ptr)
+static int br_switchdev_event(struct notifier_block *unused,
+			      unsigned long event, void *ptr)
 {
-	struct net_device *dev = netdev_switch_notifier_info_to_dev(ptr);
+	struct net_device *dev = switchdev_notifier_info_to_dev(ptr);
 	struct net_bridge_port *p;
 	struct net_bridge *br;
-	struct netdev_switch_notifier_fdb_info *fdb_info;
+	struct switchdev_notifier_fdb_info *fdb_info;
 	int err = NOTIFY_DONE;
 
 	p = br_port_get_rtnl(dev);
@@ -138,14 +138,14 @@ static int br_netdev_switch_event(struct notifier_block *unused,
 	br = p->br;
 
 	switch (event) {
-	case NETDEV_SWITCH_FDB_ADD:
+	case SWITCHDEV_FDB_ADD:
 		fdb_info = ptr;
 		err = br_fdb_external_learn_add(br, p, fdb_info->addr,
 						fdb_info->vid);
 		if (err)
 			err = notifier_from_errno(err);
 		break;
-	case NETDEV_SWITCH_FDB_DEL:
+	case SWITCHDEV_FDB_DEL:
 		fdb_info = ptr;
 		err = br_fdb_external_learn_del(br, p, fdb_info->addr,
 						fdb_info->vid);
@@ -158,8 +158,8 @@ out:
 	return err;
 }
 
-static struct notifier_block br_netdev_switch_notifier = {
-	.notifier_call = br_netdev_switch_event,
+static struct notifier_block br_switchdev_notifier = {
+	.notifier_call = br_switchdev_event,
 };
 
 static void __net_exit br_net_exit(struct net *net)
@@ -180,14 +180,6 @@ static void __net_exit br_net_exit(struct net *net)
 static struct pernet_operations br_net_ops = {
 	.exit	= br_net_exit,
 };
-
-#if defined (CONFIG_RTL865X_LANPORT_RESTRICTION)
-#include <net/rtl/features/lan_restrict.h>
-#endif
-
-#if 0//LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
-#define CONFIG_RTL_PROC_NEW		1
-#endif
 
 #if defined(CONFIG_RTL_819X) && defined(CONFIG_PROC_FS) && defined(CONFIG_BRIDGE_IGMP_SNOOPING)
 #include <linux/proc_fs.h>
@@ -210,14 +202,6 @@ struct proc_dir_entry *procIgmpSnoop=NULL;
 #include <net/rtl/rtl_nic.h>
 #endif
 
-#if defined(CONFIG_RTL_DNS_TRAP)
-#include <net/rtl/rtl_dnstrap.h>
-#endif
-#if defined(CONFIG_RTL_HTTP_REDIRECT)
-extern int http_redirect_init(void);
-extern int http_redirect_fini(void);
-#endif
-
 #if defined(CONFIG_RTL_819X)
 int IGMPProxyOpened = 0;
 #endif
@@ -226,15 +210,8 @@ static const struct stp_proto br_stp_proto = {
 	.rcv	= br_stp_rcv,
 };
 #if defined(CONFIG_RTL_IGMP_SNOOPING)
-#if defined(IMPROVE_MCAST_PERFORMANCE_WITH_RTL8367)
-int mCastImprove = 0;
-extern int rtl_enable_mCast_improve(int enable);
-#endif
 struct proc_dir_entry *procIgmpSnoop=NULL;
 int igmpsnoopenabled=0;	// Should be 0(default), set 1 when igmpproxy up!
-#if defined(CONFIG_RTL_HW_MCAST_WIFI)
-int hwwifiEnable = 0;
-#endif
 
 extern struct net_bridge *bridge0;
 extern int32 rtl_configMulticastSnoopingFastLeave(int enableFastLeave, int ageTime);
@@ -249,15 +226,6 @@ int rtl_check_br_igmpmodule(struct net_bridge *br);
 #endif
 #if defined(CONFIG_RTL_HARDWARE_MULTICAST)
 
-#if defined (CONFIG_RTL_HW_MCAST_PATCH_FOR_MAC)
-unsigned char macCloneProcess=0;
-unsigned char cloneMacAddr[6]={0};
-unsigned char replaceMacAddr[6]={0};
-int igmpClonePort=-1;
-#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_8881A) || defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
-extern int32 rtl865x_set_mcastMacClone(uint32 enabled, unsigned char * macAddr);
-#endif
-#endif
 extern int rtl_processAclForIgmpSnooping(int aclEnabled);
 
 
@@ -284,21 +252,6 @@ static int br_igmpSnoopRead(char *page, char **start, off_t off,
 #else
 	int len;
 	len = sprintf(page, "igmpsnoopenabled:%c\n\n", igmpsnoopenabled + '0');
-#endif
-
-#if defined(CONFIG_RTL_HW_MCAST_WIFI)
-#ifdef CONFIG_RTL_PROC_NEW
-	seq_printf(s, "hwwifiEnable:%d\n\n",hwwifiEnable);
-#else
-	len += sprintf(page+len, "hwwifiEnable:%d\n\n", hwwifiEnable);
-#endif
-#endif
-#if defined(IMPROVE_MCAST_PERFORMANCE_WITH_RTL8367)
-#ifdef CONFIG_RTL_PROC_NEW
-	seq_printf(s, "improve mCast with rtl8367:%c\n\n", mCastImprove + '0');
-#else
-	len += sprintf(page+len, "improve mCast with rtl8367:%c\n\n", mCastImprove + '0');
-#endif
 #endif
 
 #ifdef CONFIG_RTL_PROC_NEW
@@ -335,25 +288,6 @@ static int br_igmpSnoopRead(char *page, char **start, off_t off,
 	if (cnt == 0)
 		len += sprintf(page + len, "NULL\n");
 	len += sprintf(page + len, "\n");
-#endif
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST)
-#if defined(CONFIG_RTL_HW_MCAST_PATCH_FOR_MAC)
-#ifdef CONFIG_RTL_PROC_NEW
-	seq_printf(s, "mcastMac:[%d] oriMac:%2x-%2x-%2x-%2x-%2x-%2x	replaceMac:%2x-%2x-%2x-%2x-%2x-%2x\n",
-		macCloneProcess, cloneMacAddr[0] ,cloneMacAddr[1], cloneMacAddr[2],
-		cloneMacAddr[3], cloneMacAddr[4], cloneMacAddr[5],
-		replaceMacAddr[0], replaceMacAddr[1], replaceMacAddr[2],
-		replaceMacAddr[3], replaceMacAddr[4], replaceMacAddr[5]);
-
-#else
-	len += sprintf(page + len, "mcastMac:[%d] oriMac:%2x-%2x-%2x-%2x-%2x-%2x	replaceMac:%2x-%2x-%2x-%2x-%2x-%2x\n",
-		macCloneProcess, cloneMacAddr[0], cloneMacAddr[1], cloneMacAddr[2],
-		cloneMacAddr[3], cloneMacAddr[4], cloneMacAddr[5],
-		replaceMacAddr[0], replaceMacAddr[1], replaceMacAddr[2],
-		replaceMacAddr[3], replaceMacAddr[4], replaceMacAddr[5]);
-
-#endif
-#endif
 #endif
 
 #if defined(CONFIG_RTL_819X)
@@ -511,31 +445,6 @@ static int br_igmpSnoopRead(char *page, char **start, off_t off,
 	return len;
 #endif
 }
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST) && defined(CONFIG_RTL_HW_MCAST_PATCH_FOR_MAC)
-static int _is_hex(char c)
-{
-	return (((c >= '0') && (c <= '9')) ||
-			((c >= 'A') && (c <= 'F')) ||
-			((c >= 'a') && (c <= 'f')));
-}
-
-static int string_to_hex(char *string, unsigned char *key, int len)
-{
-	char tmpBuf[4];
-	int idx, ii=0;
-	for (idx=0; idx<len; idx+=2) {
-		tmpBuf[0] = string[idx];
-		tmpBuf[1] = string[idx+1];
-		tmpBuf[2] = 0;
-		if ( !_is_hex(tmpBuf[0]) || !_is_hex(tmpBuf[1]))
-			return 0;
-
-		key[ii++] = (unsigned char) simple_strtol(tmpBuf, (char**)NULL, 16);
-	}
-	return 1;
-}
-#endif
-
 static int br_igmpSnoopWrite(struct file *file, const char *buffer,
 		      unsigned long count, void *data)
 {
@@ -551,12 +460,6 @@ static int br_igmpSnoopWrite(struct file *file, const char *buffer,
 	int cnt;
 	int fastLeave = 0;
 	int ageTime = 0;
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST) && defined(CONFIG_RTL_HW_MCAST_PATCH_FOR_MAC)
-	int processMode=0;
-#endif
-#if defined (IMPROVE_MCAST_PERFORMANCE_WITH_RTL8367)
-	int mCastImproveTemp = 0;
-#endif
 
 	if (count < 2)
 		return -EFAULT;
@@ -578,27 +481,6 @@ static int br_igmpSnoopWrite(struct file *file, const char *buffer,
 				}
 				igmpsnoopenabled = simple_strtol(tokptr, NULL, 0);
 			}
-#if defined(IMPROVE_MCAST_PERFORMANCE_WITH_RTL8367)
-			else if(!memcmp(tokptr, "improve", 7))
-			{
-				tokptr = strsep(&strptr, " ");
-				if (tokptr==NULL)
-				{
-					return -EFAULT;
-				}
-
-				mCastImproveTemp = simple_strtol(tokptr, NULL, 0);
-				if(mCastImproveTemp)
-					mCastImproveTemp = 1;
-
-				if(mCastImproveTemp!=mCastImprove)
-				{
-					mCastImprove = mCastImproveTemp;
-					rtl_enable_mCast_improve(mCastImprove);
-				}
-
-			}
-#endif
 			else if (!memcmp(tokptr, "fastleave", 9))
 			{
 				tokptr = strsep(&strptr, " ");
@@ -646,17 +528,6 @@ static int br_igmpSnoopWrite(struct file *file, const char *buffer,
 
 				maxUnknownMcastPPS = simple_strtol(tokptr, NULL, 0);
 			}
-#if defined(CONFIG_RTL_HW_MCAST_WIFI)
-			else if(!memcmp(tokptr,"hwWifi",6))
-			{
-				tokptr = strsep(&strptr," ");
-				if (tokptr==NULL)
-				{
-					return -EFAULT;
-				}
-				hwwifiEnable = simple_strtol(tokptr, NULL, 0);
-			}
-#endif
 			else if (!memcmp(tokptr, "reserve", 7))
 			{
 
@@ -688,55 +559,6 @@ static int br_igmpSnoopWrite(struct file *file, const char *buffer,
 				groupAddr = (ipAddr[0] << 24)|(ipAddr[1] << 16)|(ipAddr[2] << 8)|(ipAddr[3]);
 				rtl_add_ReservedMCastAddr(groupAddr, flag);
 			}
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST)
-
-#if defined(CONFIG_RTL_HW_MCAST_PATCH_FOR_MAC)
-			else if(!memcmp(tokptr,"mcastMac",8))
-			{
-
-
-				tokptr = strsep(&strptr," ");
-				if (tokptr==NULL)
-				{
-					return -EFAULT;
-				}
-				processMode = simple_strtol(tokptr, NULL, 0);
-				macCloneProcess =processMode;/*1:hw mac replace;2:sw mac replace 3: disable hw multicast;0 do nothing*/
-
-				tokptr = strsep(&strptr," ");
-				if (tokptr==NULL)
-				{
-					return -EFAULT;
-				}
-
-				string_to_hex(tokptr, cloneMacAddr, 12);
-
-				tokptr = strsep(&strptr," ");
-				if (tokptr==NULL)
-				{
-					return -EFAULT;
-				}
-				string_to_hex(tokptr, replaceMacAddr, 12);
-
-	#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_8881A) || defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
-				if(processMode)
-					macCloneProcess =MACCLONE_MODE_HW_REPLACE;
-				else
-					macCloneProcess =0;
-
-				/*
-				printk("macCloneProcess:%d,replaceMacAddr:%x-%x-%x-%x-%x-%x[%s]:[%d].\n",
-				macCloneProcess,replaceMacAddr[0],replaceMacAddr[1],replaceMacAddr[2],
-				replaceMacAddr[3],replaceMacAddr[4],replaceMacAddr[5],__FUNCTION__,__LINE__);
-				*/
-				rtl865x_set_mcastMacClone(macCloneProcess, replaceMacAddr);
-	#else
-				//do nothing now
-
-	#endif
-			}
-#endif
-#endif
 #if defined(CONFIG_RTL_819X)
 #if defined(CONFIG_RTL_HARDWARE_MULTICAST)
 			else if (!memcmp(tokptr, "hash", 4))
@@ -1462,11 +1284,8 @@ static unsigned char* br_generateIgmpQuery(struct net_bridge * br)
 	if (landev = brDev){
 		in_dev = (struct in_dev*)(landev->ip_ptr);
 		if (in_dev != NULL) {
-			//printk("[%s:%d]\n", __FUNCTION__, __LINE__);
 			for (ifap = in_dev->ifa_list; ifap != NULL; ifap = ifap->ifa_next) {
-				//printk("[%s:%d]\n", __FUNCTION__, __LINE__);
 				if (strcmp(br->dev->name, ifap->ifa_label) == 0){
-					//printk("src ip:0x%x, [%s:%d]\n", ifap->ifa_address, __FUNCTION__, __LINE__);
 					if (igmpVersion == 3)
 					{
 						memcpy(&igmpV3QueryBuf[26], &ifap->ifa_address, 4);
@@ -1480,13 +1299,11 @@ static unsigned char* br_generateIgmpQuery(struct net_bridge * br)
 		}
 		else
 		{
-			//printk("[%s:%d]\n", __FUNCTION__, __LINE__);
 			return NULL;
 		}
 	}
 	else
 	{
-		//printk("[%s:%d]\n", __FUNCTION__, __LINE__);
 		return NULL;
 	}
 #else /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
@@ -1514,28 +1331,6 @@ static unsigned char* br_generateIgmpQuery(struct net_bridge * br)
 		return NULL;
 	}
 
-	#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-	if(!strcmp(RTL_PS_BR1_DEV_NAME, br->dev->name))
-	{
-		if (landev = brDev){
-			in_dev=(struct net_device *)(landev->ip_ptr);
-			if (in_dev != NULL) {
-				for (ifap=in_dev->ifa_list; ifap != NULL; ifap=ifap->ifa_next) {
-					if (strcmp(br->dev->name, ifap->ifa_label) == 0){
-						if(igmpVersion==3)
-						{
-							memcpy(&igmpV3QueryBuf[26],&ifap->ifa_address,4);
-						}
-						else
-						{
-							memcpy(&igmpV2QueryBuf[26],&ifap->ifa_address,4);
-						}
-					}
-				}
-			}
-		}
-	}
-	#endif
 #endif /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
 	if (igmpVersion == 3)
 	{
@@ -2086,14 +1881,6 @@ void br_mCastQueryTimerExpired(unsigned long arg)
 			rtl_set_brqueryCntByName(br->dev->name, brmCastQueryTimerCnt);
 		}
 #else
-	#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-		if(!strcmp(br->dev->name,RTL_PS_BR1_DEV_NAME))
-		{
-			br_igmpQueryTimerExpired(arg);
-			return;
-		}
-	#endif
-
 	if (mCastQueryTimerCnt % 2 == 0)
 	{
 		br_igmpQueryTimerExpired(arg);
@@ -2130,7 +1917,6 @@ void br_signal_igmpProxy(void)
 	}
 
 	read_lock(&tasklist_lock);
-//	task = find_task_by_pid(br->igmpProxy_pid);
 	task = find_task_by_vpid(br->igmpProxy_pid);
 	read_unlock(&tasklist_lock);
 	if (task)
@@ -2259,7 +2045,6 @@ static int br_igmpProxyWrite(struct file *file, const char *buffer,
 			IGMPProxyOpened = chartmp - '0';
 		}
 	}else if (count == 1){//call from demon(demon direct call br's ioctl)
-		//memcpy(&chartmp,buffer,1);
 		if (buffer) {
 			get_user(chartmp,buffer);
 			IGMPProxyOpened = chartmp - '0';
@@ -2698,25 +2483,15 @@ static int __init br_init(void)
 	if (err)
 		goto err_out1;
 
-#if defined (CONFIG_RTL865X_LANPORT_RESTRICTION)
-	lan_restrict_init();
-#endif
-
 	err = br_nf_core_init();
 	if (err)
 		goto err_out2;
 
-#if defined(CONFIG_RTL_DNS_TRAP)
-	br_dns_filter_init();
-#endif
-#if defined(CONFIG_RTL_HTTP_REDIRECT)
-	http_redirect_init();
-#endif
 	err = register_netdevice_notifier(&br_device_notifier);
 	if (err)
 		goto err_out3;
 
-	err = register_netdev_switch_notifier(&br_netdev_switch_notifier);
+	err = register_switchdev_notifier(&br_switchdev_notifier);
 	if (err)
 		goto err_out4;
 
@@ -2740,7 +2515,7 @@ static int __init br_init(void)
 	return 0;
 
 err_out5:
-	unregister_netdev_switch_notifier(&br_netdev_switch_notifier);
+	unregister_switchdev_notifier(&br_switchdev_notifier);
 err_out4:
 	unregister_netdevice_notifier(&br_device_notifier);
 err_out3:
@@ -2761,7 +2536,7 @@ static void __exit br_deinit(void)
 	#endif
 	stp_proto_unregister(&br_stp_proto);
 	br_netlink_fini();
-	unregister_netdev_switch_notifier(&br_netdev_switch_notifier);
+	unregister_switchdev_notifier(&br_switchdev_notifier);
 	unregister_netdevice_notifier(&br_device_notifier);
 	brioctl_set(NULL);
 	unregister_pernet_subsys(&br_net_ops);
@@ -2771,12 +2546,6 @@ static void __exit br_deinit(void)
 	br_nf_core_fini();
 #if IS_ENABLED(CONFIG_ATM_LANE)
 	br_fdb_test_addr_hook = NULL;
-#endif
-#if defined(CONFIG_RTL_DNS_TRAP)
-	br_dns_filter_exit();
-#endif
-#if defined(CONFIG_RTL_HTTP_REDIRECT)
-	http_redirect_fini();
 #endif
 	br_fdb_fini();
 }

@@ -1,7 +1,6 @@
+comment "RTD129X Device Drivers"
 
-comment "RTD129x Device Drivers"
-
-menu "RTD129x Device Drivers"
+menu "RTD129X Device Drivers"
 
 config RTK_SB2_MEM_TRASH_MONITOR
 	bool "Memory trash monitor"
@@ -22,32 +21,11 @@ config RTK_MEM_REMAP
 	help
 	  Enable helper functions for static ioremap. If unsure, say N.
 
-#Add your device driver config in here.
-config RTK_MCP
-	bool "MCP driver"
-	default n
-	help
-	  Realtek MCP driver
-
 config RTK_FAN
 	bool "RTK Fan driver"
 	default n
 	help
 	  Realtek Fan driver
-
-config RTK_ACPU_RELOAD
-	bool "Dynamic ACPU reload"
-	default n
-	help
-	  Dynamic ACPU stop/start mechanism. If unsure, say N.
-
-config RTK_IPCSHM_RESET
-	bool "Dynamic IPC share memory reset"
-	depends on RTK_ACPU_RELOAD
-	default n
-	help
-	  Reset IPC_SHM when performing dynamic ACPU stop/start.
-	  If unsure, say N.
 
 config RTK_SW_LOCK_API
 	bool "RTK SW LOCK API"
@@ -55,25 +33,19 @@ config RTK_SW_LOCK_API
 	help
 	  Realtek SW LOCK API driver
 
-config RTK_VMX
-	bool "VMX boot enable"
+config UBIFS_RCVRY_HACK
+	bool "Add master node recovery on out of sync cases"
 	default n
 	help
-	  Set VMX boot enable.
-
-config RTK_REGMAP_I2C
-	bool
-	select REGMAP
-
-config RTK_MMIO
-        bool
-	select REGMAP_MMIO
+	Recover master node on following two cases:
+	1. 2nd LEB is unmapped and more than 1 entry in 1st LEB is valid.
+	2. 1st LEB is unmapped and 2nd LEB is not full.
+	* On normal cases, 2nd LEB should always contain equal or one less entries than 1st LEB.
 
 source "drivers/soc/realtek/rtd129x/rtk_ve/Kconfig"
 source "drivers/soc/realtek/rtd129x/irda/Kconfig"
 source "drivers/soc/realtek/rtd129x/rpc/Kconfig"
 source "drivers/soc/realtek/rtd129x/hw_nat/Kconfig"
-          
-endmenu #RTD129x Device Drivers
+endmenu #RTD129X Device Drivers
 
 

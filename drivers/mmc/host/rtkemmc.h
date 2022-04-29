@@ -132,7 +132,6 @@ struct rtkemmc_host {
 	u8					rpmb_cmd; // it is rpmb cmd flag. When receiving CMD23, set to 1
 	u8					tx_tuning; //flag  that tx tuning need to be performed
 	u8					rx_tuning; //flag  that rx tuning need to be performed
-	u8				dqs_tuning;
 
 #define INT_STAT_CD			0x00000001	  //cmd done
 #define INT_STAT_DTO		0x00000002	  //data trans over
@@ -199,7 +198,6 @@ struct sd_cmd_pkt {
 struct backupRegs {
     u32			emmc_mux_pad0;
     u32			emmc_mux_pad1;
-    u32			emmc_mux_pad2;
     u32			emmc_pfunc_nf1;
     u32			emmc_pfunc_cr;
     u32			emmc_pdrive_nf1;
@@ -564,15 +562,15 @@ static const unsigned char rtk_sd_cmdcode[64][2] = {
 
 /* rtk function definition */
 int error_handling(struct rtkemmc_host *emmc_port, unsigned int cmd_idx, unsigned int bIgnore);
-int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int,unsigned long,int);
-int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port,int,unsigned long,int);
+int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port);
+int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port);
 int rtkemmc_send_cmd24(struct rtkemmc_host *emmc_port);
 int rtkemmc_send_cmd17(struct rtkemmc_host *emmc_port);
 
 
 //int rtkemmc_send_cmd8(struct rtkemmc_host *emmc_port,unsigned int bIgnore);
 int rtkemmc_send_cmd8(struct rtkemmc_host *emmc_port, unsigned int bIgnore);
-int polling_to_tran_state(struct rtkemmc_host *emmc_port, int cmd_idx, int bIgnore);
+int polling_to_tran_state(struct rtkemmc_host *emmc_port, int bIgnore);
 void host_card_stop(struct rtkemmc_host *emmc_port);
 void host_card_stop2(struct rtkemmc_host *emmc_port);
 int rtkemmc_switch(struct mmc_card *card, u8 acc_mod, u8 index, u8 value, u8 cmd_set);

@@ -126,7 +126,10 @@ static void update_passive_instance(struct thermal_zone_device *tz,
 
 static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
 {
-	long trip_temp;
+#ifdef CONFIG_RTK_THERMAL
+	int trip_hyst;
+#endif
+	int trip_temp;
 	enum thermal_trip_type trip_type;
 	enum thermal_trend trend;
 	struct thermal_instance *instance;
@@ -136,9 +139,15 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
 	if (trip == THERMAL_TRIPS_NONE) {
 		trip_temp = tz->forced_passive;
 		trip_type = THERMAL_TRIPS_NONE;
+#ifdef CONFIG_RTK_THERMAL
+		trip_hyst = 0;
+#endif
 	} else {
 		tz->ops->get_trip_temp(tz, trip, &trip_temp);
 		tz->ops->get_trip_type(tz, trip, &trip_type);
+#ifdef CONFIG_RTK_THERMAL
+		tz->ops->get_trip_hyst(tz, trip, &trip_hyst);
+#endif
 	}
 
 	trend = get_tz_trend(tz, trip);
@@ -148,7 +157,7 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
 		trace_thermal_zone_trip(tz, trip, trip_type);
 	}
 
-	dev_dbg(&tz->device, "Trip%d[type=%d,temp=%ld]:trend=%d,throttle=%d\n",
+	dev_dbg(&tz->device, "Trip%d[type=%d,temp=%d]:trend=%d,throttle=%d\n",
 				trip, trip_type, trip_temp, trend, throttle);
 
 	mutex_lock(&tz->lock);
@@ -159,6 +168,16 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
 
 		old_target = instance->target;
 		instance->target = get_target_state(instance, trend, throttle);
+
+
+#ifdef CONFIG_RTK_THERMAL
+		/* for hysteresis */
+		if ((int)instance->target < old_target &&
+			tz->temperature >= (trip_temp - trip_hyst)) {
+			instance->target = old_target;
+		}
+#endif
+
 		dev_dbg(&instance->cdev->device, "old_target=%d, target=%d\n",
 					old_target, (int)instance->target);
 

@@ -66,13 +66,13 @@ void rtk_drm_lastclose(struct drm_device *dev)
  * rtk does not have a proper HW counter for vblank IRQs so enable_vblank
  * and disable_vblank are just no op callbacks.
  */
-static int rtk_enable_vblank(struct drm_device *dev, int crtc)
+static int rtk_enable_vblank(struct drm_device *dev, unsigned int crtc)
 {
     DRM_DEBUG_DRIVER("%s: dev=%p, crtc=%d", __func__, dev, crtc);
     return 0;
 }
 
-static void rtk_disable_vblank(struct drm_device *dev, int crtc)
+static void rtk_disable_vblank(struct drm_device *dev, unsigned  int crtc)
 {
     DRM_DEBUG_DRIVER("%s: dev=%p, crtc=%d", __func__, dev, crtc);
 }

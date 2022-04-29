@@ -1,14 +1,3 @@
-/*
- * hdmitx_scdc.h - RTK hdmitx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #ifndef _HDMITX_SCDC_H_
 #define _HDMITX_SCDC_H_
 
@@ -17,7 +6,7 @@
 #define SCDC_I2C_OK		0
 #define SCDC_I2C_FAIL	1
 
-/* Status and Control Data Channel Structure */
+//Status and Control Data Channel Structure
 #define SCDCS_Update_0		0x10
 #define SCDCS_Update_1		0x11
 #define SCDCS_TMDS_Config	0x20
@@ -33,19 +22,12 @@
 #define SCDCS_Err_Det_sum	0x56
 #define SCDCS_Test_Config_0	0xC0
 
-/**
- * struct hdmitx_scdc_data
- * @*dev_nd: scdc_rr node
- * @enable_rr: flag of enable SCDC read request function
- * @i2c1_req_reg: I2C1 read request control registers
- * @i2c1_irq: I2C1 read request interrupt number
- * @rr_work: struct work_struct
- */
-struct hdmitx_scdc_data {
+
+struct hdmitx_scdc_data{
 	struct device_node *dev_nd;
-	unsigned int enable_rr;
-	void __iomem *i2c1_req_reg;
-	unsigned int i2c1_irq;
+	unsigned int enable_rr;// Enable SCDC read request function
+	void __iomem *i2c1_req_reg;// I2C1 read request control registers
+	unsigned int i2c1_irq;// I2C1 read request interrupt number
 	struct work_struct rr_work;
 };
 
@@ -54,4 +36,4 @@ void enable_hdmitx_scdcrr(unsigned char enable);
 void register_hdmitx_scdcrr(struct device_node *dev);
 void hdmitx_scdcrr_suspend(void);
 void hdmitx_scdcrr_resume(void);
-#endif /* _HDMITX_SCDC_H_ */
+#endif//_HDMITX_SCDC_H_

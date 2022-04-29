@@ -291,14 +291,14 @@ menu "Config for Layered Driver Features"
 
 	config RTL_TSO
 		bool "Enable hardware TSO support(GSO is needed)"
-		default y
-		depends on RTL_8197F
+		default n
+		depends on RTL_8197F && !RTL_IPTABLES_FAST_PATH
 		select RTL_GSO
 
 	config RTL_GSO
 		bool "Enable software GSO support"
-		default y if RTL_8198C || RTL_819XD || RTL_8881A
-		depends on RTL_8197F || RTL_8198C || RTL_819XD || RTL_8881A
+		default n if RTL_8198C || RTL_819XD || RTL_8881A
+		depends on (RTL_8197F || RTL_8198C || RTL_819XD || RTL_8881A) && !RTL_IPTABLES_FAST_PATH
 
 endmenu
 
@@ -445,6 +445,11 @@ config RTL_MULTI_LAN_DEV
 	bool "Multiple lan dev support"
 	default y
 	depends on (RTL_8198C || RTL_8197F) && !RTL_8021Q_VLAN_SUPPORT_SRC_TAG
+
+config RTL_MULTI_LAN_DEV_SUPPORT_LINUX_BONDING
+    bool "Multi lan support linux bonding"
+    default n
+    depends on RTL_MULTI_LAN_DEV
 
 config RTL_EEE_DISABLED
 	bool "Disable 802.3az EEE feature"

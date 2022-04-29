@@ -1,14 +1,4 @@
-/**
- * snd-realtek.h - Realtek alsa driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
+//Copyright (C) 2007-2014 Realtek Semiconductor Corporation.
 #ifndef SND_REALTEK_H
 #define SND_REALTEK_H
 
@@ -66,7 +56,7 @@ extern struct ion_device *rtk_phoenix_ion_device;
 #endif
 
 #ifdef _TRACE_RPC
-#define TRACE_RPC() printk(KERN_ALERT "ï¿½ï¿½ alsa %s\n", __FUNCTION__);
+#define TRACE_RPC() printk(KERN_ALERT "¡¹ alsa %s\n", __FUNCTION__);
 #else
 #define TRACE_RPC() 
 #endif
@@ -89,7 +79,7 @@ extern struct ion_device *rtk_phoenix_ion_device;
 #define SHOW_CONFIG_INFO(format, ...)
 #endif
 
-#define ALSA_PRINT() printk(KERN_ALERT "[ï¿½ï¿½ï¿½ï¿½ %s %d]\n", __FUNCTION__, __LINE__);
+#define ALSA_PRINT() printk(KERN_ALERT "[¡¹¡¹ %s %d]\n", __FUNCTION__, __LINE__);
 
 #define ALSA_SEC_PRINT(sec, format, ...)    \
 {\
@@ -122,7 +112,7 @@ extern struct ion_device *rtk_phoenix_ion_device;
 
 //////////////
 // playback //
-//////////////
+////////////////Add by PC
 #define RTK_DMP_PLAYBACK_INFO    (SNDRV_PCM_INFO_INTERLEAVED | \
                          SNDRV_PCM_INFO_NONINTERLEAVED | \
                          SNDRV_PCM_INFO_RESUME | \
@@ -149,10 +139,10 @@ extern struct ion_device *rtk_phoenix_ion_device;
 #define RTK_DMP_CAPTURE_RATE_MIN 44100
 #define RTK_DMP_CAPTURE_RATE_MAX 48000
 #define RTK_DMP_CAPTURE_CHANNELS_MIN 2
-#define RTK_DMP_CAPTURE_CHANNELS_MAX 8
+#define RTK_DMP_CAPTURE_CHANNELS_MAX 2
 #define RTK_DMP_CAPTURE_MAX_BUFFER_SIZE         RTK_DMP_PLAYBACK_MAX_BUFFER_SIZE
-#define RTK_DMP_CAPTURE_MIN_PERIOD_BYTE         RTK_DMP_PLAYBACK_MIN_PERIOD_SIZE
-#define RTK_DMP_CAPTURE_MAX_PERIOD_BYTE         4096
+#define RTK_DMP_CAPTURE_MIN_PERIOD_SIZE         RTK_DMP_PLAYBACK_MIN_PERIOD_SIZE
+#define RTK_DMP_CAPTURE_MAX_PERIOD_SIZE         4096
 #define RTK_DMP_CAPTURE_PERIODS_MIN             RTK_DMP_PLAYBACK_PERIODS_MIN
 #define RTK_DMP_CAPTURE_PERIODS_MAX             RTK_DMP_PLAYBACK_PERIODS_MAX
 #define RTK_DMP_CAPTURE_FIFO_SIZE               RTK_DMP_PLAYBACK_FIFO_SIZE
@@ -163,17 +153,16 @@ extern struct ion_device *rtk_phoenix_ion_device;
 #define RTK_ENC_PTS_BUFFER_SIZE         (8*1024)
 
 enum{
-	ENUM_AIN_HDMIRX = 0,
-	ENUM_AIN_I2S,    // from ADC outside of IC
-	ENUM_AIN_ANALOG,
-	ENUM_AIN_AMIC
+    ENUM_AIN_HDMIRX = 0,
+    ENUM_AIN_I2S,    // from ADC outside of IC
+    ENUM_AIN_ANALOG
 };
 
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 
 #define MAX_PCM_DEVICES     1 //2 todo
-#define MAX_PCM_SUBSTREAMS  2
+#define MAX_PCM_SUBSTREAMS  8
 #define MAX_AI_DEVICES      1
 
 #define MIXER_ADDR_MASTER   0
@@ -657,7 +646,7 @@ enum ENUM_AUDIO_CHANNEL_OUT {
     ENABLE_DOWNMIX = 257,
 };
 typedef enum ENUM_AUDIO_CHANNEL_OUT ENUM_AUDIO_CHANNEL_OUT;
-
+//Add by PC
 enum AUDIO_ENUM_AIO_PRIVAETINFO {
     ENUM_PRIVATEINFO_AIO_AO_INTERFACE_SWITCH_CONTROL = 0,
     ENUM_PRIVATEINFO_AIO_AI_INTERFACE_SWITCH_CONTROL = 1,
@@ -668,11 +657,6 @@ enum AUDIO_ENUM_AIO_PRIVAETINFO {
 	ENUM_PRIVATEINFO_AIO_AI_LOOPBACK_HDMITX = 6,
 	ENUM_PRIVATEINFO_AIO_AI_LOOPBACK_DAC = 7,
 	ENUM_PRIVATEINFO_AIO_AI_ADC_ANALOG = 8,
-	ENUM_PRIVATEINFO_AIO_AI_MULTIPLE_ADC = 9,
-	ENUM_PRIVATEINFO_AIO_AI_ADC_AMIC = 9 + 1,
-	ENUM_PRIVATEINFO_AIO_KERNEL_RPC = 9 + 2,
-	ENUM_PRIVATEINFO_AIO_SET_SE_CLK = 9 + 3,
-	ENUM_PRIVATEINFO_AIO_AI_PRIVATEINFO = 9 + 4,
 };
 typedef enum AUDIO_ENUM_AIO_PRIVAETINFO AUDIO_ENUM_AIO_PRIVAETINFO;
 
@@ -767,7 +751,7 @@ typedef struct _tagRingBufferHeader {
     /*
 FileOffset:
 the offset to the streaming file from the beginning of the file.
-It is set by system to tell FW that the current streaming is starting from ï¿½ï¿½FileOffsetï¿½ï¿½ bytes.
+It is set by system to tell FW that the current streaming is starting from ¡¥FileOffset¡¦ bytes.
 For example, the TIFF file display will set fileOffset to 0 at beginning.
 
 RequestedFileOffset:
@@ -1011,7 +995,7 @@ typedef struct
     unsigned int *pVirt;
     unsigned int size;
 } ALSA_MEM_INFO;
-
+//Add by PC
 typedef struct
 {
     unsigned int latency;
@@ -1065,8 +1049,6 @@ typedef struct snd_card_RTK_pcm {
     snd_pcm_uframes_t nHWReadSize;      /* less than runntime->period_size */
     snd_pcm_uframes_t nTotalRead;
     snd_pcm_uframes_t nTotalWrite;
-	
-	struct ion_handle *inRingHandle;
 
     struct timer_list nStartTimer;
     //    struct work_struct nEOSWork;
@@ -1115,7 +1097,6 @@ typedef struct snd_card_RTK_capture_pcm {
     int AIAgentID;
     int bInitRing;
     int bStop;
-    int devices_index; // 0 for capture, 1 for i2s, 2 for nonpcm, 3 for analog, 4 for amic
     int *pAIRingData[8];   // kernel virtual address
     unsigned int *pLPCMData;
     unsigned int nPeriodJiffies;
@@ -1123,7 +1104,7 @@ typedef struct snd_card_RTK_capture_pcm {
     unsigned int nFrameBytes;
     unsigned int nRingSize; // bytes
     unsigned int nLPCMRingSize;
-    int source_in;
+    int source_in;//Add by PC
 #ifdef USE_ION_AUDIO_HEAP
     ion_phys_addr_t phy_pAIRingData[8]; //physical address of ai data
     ion_phys_addr_t phy_pLPCMData;      //physical address of lpcm data
@@ -1145,7 +1126,7 @@ typedef struct snd_card_RTK_capture_pcm {
 /************************************************************************/
 int snd_realtek_hw_ring_write(RINGBUFFER_HEADER* ring, void *data, int len, unsigned int offset) ;
 int writeInbandCmd(snd_card_RTK_pcm_t *dpcm, void *data, int len);
-unsigned long snd_card_get_90k_pts(void);
+unsigned long snd_card_get_90k_pts(void);//Add by PC
 #if _DBG_CHECK_AI_HW_RING_DATA_EN
 static void snd_card_capture_lpcm_check_ringBuf(unsigned int data);
 #endif
@@ -1172,11 +1153,11 @@ int RPC_TOAGENT_AO_PRIVATE_INFO(snd_pcm_substream_t *substream);
 int RPC_TOAGENT_RELEASE_AO_FLASH_PIN(snd_card_RTK_pcm_t *);
 int RPC_TOAGENT_RELEASE_INIT_AO_RING(snd_pcm_substream_t * substream);
 int RPC_TOAGENT_PAUSE(snd_pcm_substream_t * substream);
-int RPC_TOAGENT_SET_TRUEHD_ERR_SELF_RESET(bool isON);
+int RPC_TOAGENT_SET_TRUEHD_ERR_SELF_RESET(bool isON);//Add by PC
 int RPC_TOAGENT_SET_VOLUME(int volume);
 int RPC_TOAGENT_GET_VOLUME(snd_card_RTK_pcm_t *mars);
 int RPC_TOAGENT_PUT_SHARE_MEMORY(void *p, int type);
-int RPC_TOAGENT_PUT_SHARE_MEMORY_LATENCY(void *p, void *p2, int decID, int type);
+int RPC_TOAGENT_PUT_SHARE_MEMORY_LATENCY(void *p, void *p2, int decID, int type);//Add by PC
 int RPC_TOAGENT_CREATE_AI_AGENT(snd_card_RTK_capture_pcm_t *dpcm);
 int RPC_TOAGENT_AI_CONNECT_ALSA(snd_card_RTK_capture_pcm_t *dpcm);
 int RPC_TOAGENT_CONFIGURE_AI_HW(snd_pcm_runtime_t *runtime);
@@ -1184,13 +1165,10 @@ int RPC_TOAGENT_SWITCH_FOCUS(AUDIO_RPC_FOCUS *focus);
 int RPC_TOAGENT_DAC_I2S_CONFIG(AUDIO_CONFIG_DAC_I2S *config);
 int RPC_TOAGENT_DAC_SPDIF_CONFIG(AUDIO_CONFIG_DAC_SPDIF *config);
 int RPC_TOAGENT_SETREFCLOCK(AUDIO_RPC_REFCLOCK *pClock);
-int RPC_TOAGENT_AI_CONFIG_I2S_IN(snd_pcm_runtime_t *runtime, snd_card_RTK_capture_pcm_t *dpcm);
-int RPC_TOAGENT_AI_CONFIG_I2S_krpc0_IN(snd_card_RTK_capture_pcm_t *dpcm);
-int RPC_TOAGENT_AI_CONFIG_I2S_krpc1_IN(snd_card_RTK_capture_pcm_t *dpcm);
+int RPC_TOAGENT_AI_CONFIG_I2S_IN(snd_card_RTK_capture_pcm_t *dpcm);//Add by PC
 int RPC_TOAGENT_DESTROY_AI_FLOW_SVC(int instance_id);
 int RPC_TOAGENT_AI_CONFIG_NONPCM_IN(snd_card_RTK_capture_pcm_t *dpcm);
-int RPC_TOAGENT_AI_CONFIG_ANALOG_IN(snd_pcm_runtime_t *runtime, snd_card_RTK_capture_pcm_t *dpcm);
-int RPC_TOAGENT_AI_CONFIG_AMIC_IN(snd_pcm_runtime_t *runtime, snd_card_RTK_capture_pcm_t *dpcm);
+int RPC_TOAGENT_AI_CONFIG_ANALOG_IN(snd_card_RTK_capture_pcm_t *dpcm);
 
 #ifdef AO_ON_SCPU
 void rtk_ao_kernel_rpc(

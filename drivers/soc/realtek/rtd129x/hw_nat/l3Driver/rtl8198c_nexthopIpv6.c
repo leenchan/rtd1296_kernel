@@ -5,11 +5,6 @@
 * Program : ipv6 nexthop table driver
 * Abstract : 
 * Author : Jia Wenjian (wenjain_jai@realsil.com.cn)  
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
 */
 
 /*      @doc RTL_LAYEREDDRV_API

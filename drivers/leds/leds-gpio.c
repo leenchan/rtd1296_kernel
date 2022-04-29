@@ -16,6 +16,7 @@
 #include <linux/kernel.h>
 #include <linux/leds.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
 #include <linux/slab.h>
@@ -27,14 +28,10 @@ struct gpio_led_data {
 	struct work_struct work;
 	u8 new_level;
 	u8 can_sleep;
-	u8 active_low;
 	u8 blinking;
 	int (*platform_gpio_blink_set)(struct gpio_desc *desc, int state,
 			unsigned long *delay_on, unsigned long *delay_off);
 };
-
-#define LEDS_GPIO_DEFACTIVE_HIGH	0
-#define LEDS_GPIO_DEFACTIVE_LOW		1
 
 static void gpio_led_work(struct work_struct *work)
 {
@@ -60,9 +57,6 @@ static void gpio_led_set(struct led_classdev *led_cdev,
 		level = 0;
 	else
 		level = 1;
-
-	if (led_dat->active_low)
-		level = !level;
 
 	/* Setting GPIOs with I2C/etc requires a task context, and we don't
 	 * seem to have a reliable way to know if we're already in one; so
@@ -131,32 +125,23 @@ static int create_gpio_led(const struct gpio_led *template,
 	led_dat->cdev.name = template->name;
 	led_dat->cdev.default_trigger = template->default_trigger;
 	led_dat->can_sleep = gpiod_cansleep(led_dat->gpiod);
-	led_dat->active_low = template->active_low;
 	led_dat->blinking = 0;
-
 	if (blink_set) {
 		led_dat->platform_gpio_blink_set = blink_set;
 		led_dat->cdev.blink_set = gpio_blink_set;
 	}
-
 	led_dat->cdev.brightness_set = gpio_led_set;
-
 	if (template->default_state == LEDS_GPIO_DEFSTATE_KEEP)
-		state = !!gpiod_get_value_cansleep(led_dat->gpiod) ^ led_dat->active_low;
+		state = !!gpiod_get_value_cansleep(led_dat->gpiod);
 	else
 		state = (template->default_state == LEDS_GPIO_DEFSTATE_ON);
-
 	led_dat->cdev.brightness = state ? LED_FULL : LED_OFF;
-
 	if (!template->retain_state_suspended)
 		led_dat->cdev.flags |= LED_CORE_SUSPENDRESUME;
 
-	ret = gpiod_direction_output(led_dat->gpiod, led_dat->active_low ^ state);
-	if (ret < 0) {
-		pr_err("set LED gpio %s output(%d) failed\n", 
-			led_dat->cdev.name, led_dat->active_low ^ state);
+	ret = gpiod_direction_output(led_dat->gpiod, state);
+	if (ret < 0)
 		return ret;
-	}
 
 	INIT_WORK(&led_dat->work, gpio_led_work);
 
@@ -199,7 +184,6 @@ static struct gpio_leds_priv *gpio_leds_create(struct platform_device *pdev)
 	device_for_each_child_node(dev, child) {
 		struct gpio_led led = {};
 		const char *state = NULL;
-		const char *active = NULL;
 
 		led.gpiod = devm_get_gpiod_from_child(dev, NULL, child);
 		if (IS_ERR(led.gpiod)) {
@@ -208,31 +192,23 @@ static struct gpio_leds_priv *gpio_leds_create(struct platform_device *pdev)
 			goto err;
 		}
 
-		np = of_node(child);
+		np = to_of_node(child);
 
 		if (fwnode_property_present(child, "label")) {
 			fwnode_property_read_string(child, "label", &led.name);
 		} else {
 			if (IS_ENABLED(CONFIG_OF) && !led.name && np)
 				led.name = np->name;
-			if (!led.name)
-				return ERR_PTR(-EINVAL);
+			if (!led.name) {
+				ret = -EINVAL;
+				goto err;
+			}
 		}
+		fwnode_property_read_string(child, "linux,default-trigger",
+					    &led.default_trigger);
 
-		fwnode_property_read_string(child, "linux,default-trigger", &led.default_trigger);
-
-		if (!fwnode_property_read_string(child, "default-active", &active))
-                {
-                        if (!strcmp(active, "high"))
-                                led.active_low = LEDS_GPIO_DEFACTIVE_HIGH;
-                        else if (!strcmp(active, "low"))
-                                led.active_low = LEDS_GPIO_DEFACTIVE_LOW;
-			else
-				pr_err("leds-gpio: default-active not defined\n");
-                }
-
-		if (!fwnode_property_read_string(child, "default-state", &state)) 
-		{
+		if (!fwnode_property_read_string(child, "default-state",
+						 &state)) {
 			if (!strcmp(state, "keep"))
 				led.default_state = LEDS_GPIO_DEFSTATE_KEEP;
 			else if (!strcmp(state, "on"))
@@ -244,18 +220,19 @@ static struct gpio_leds_priv *gpio_leds_create(struct platform_device *pdev)
 		if (fwnode_property_present(child, "retain-state-suspended"))
 			led.retain_state_suspended = 1;
 
-		ret = create_gpio_led(&led, &priv->leds[priv->num_leds++],
+		ret = create_gpio_led(&led, &priv->leds[priv->num_leds],
 				      dev, NULL);
 		if (ret < 0) {
 			fwnode_handle_put(child);
 			goto err;
 		}
+		priv->num_leds++;
 	}
 
 	return priv;
 
 err:
-	for (count = priv->num_leds - 2; count >= 0; count--)
+	for (count = priv->num_leds - 1; count >= 0; count--)
 		delete_gpio_led(&priv->leds[count]);
 	return ERR_PTR(ret);
 }
@@ -314,9 +291,22 @@ static int gpio_led_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void gpio_led_shutdown(struct platform_device *pdev)
+{
+	struct gpio_leds_priv *priv = platform_get_drvdata(pdev);
+	int i;
+
+	for (i = 0; i < priv->num_leds; i++) {
+		struct gpio_led_data *led = &priv->leds[i];
+
+		gpio_led_set(&led->cdev, LED_OFF);
+	}
+}
+
 static struct platform_driver gpio_led_driver = {
 	.probe		= gpio_led_probe,
 	.remove		= gpio_led_remove,
+	.shutdown	= gpio_led_shutdown,
 	.driver		= {
 		.name	= "leds-gpio",
 		.of_match_table = of_gpio_leds_match,

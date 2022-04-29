@@ -1,7 +1,7 @@
 #ifndef __I2C_VENUS_CONFIG_SATURN_H__
 #define __I2C_VENUS_CONFIG_SATURN_H__
 
-#include "platform.h"
+//#include "platform.h"
 
 #define MODLE_NAME        "Saturn"
 #define I2C_PHY_CNT       7

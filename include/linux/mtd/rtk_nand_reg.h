@@ -10,6 +10,12 @@
 #define __NAND_REG_H
 //========================================================================
 
+#ifdef CONFIG_ARCH_RTD129X
+#define RBUS_OFFSET				(0x80000000)
+#else
+#define RBUS_OFFSET				(0x0)
+#endif
+
 //CRT registers for NAND driver
 #define REG_CLOCK_ENABLE1			(0xc)		// 23: Clock enable bit for NAND
 //#define REG_MUXPAD7				(0xb800036c)
@@ -18,9 +24,8 @@
 //===================================================================
 //NAND flash register definition
 #define REG_DDR_BASE_ADDR				(0x80000000)
-//#define REG_NF_BASE_ADDR				(0x9801f000)
 #define REG_NF_BASE_ADDR				(0x0)
-#define REG_NF_SWC_BASE_ADDR				(0x9802f000)
+#define REG_NF_SWC_BASE_ADDR				(0x0)
 
 #define REG_ND_PA0						( REG_NF_BASE_ADDR + 0 ) 		//Page address 0 [7:0]
 #define	REG_ND_PA1						( REG_NF_BASE_ADDR + 0x4 )		//Page address 1 [15:8]
@@ -29,6 +34,7 @@
 #define	REG_ND_CMD						( REG_NF_BASE_ADDR + 0x10 )		//Command [7:0]
 #define	REG_ND_DAT						( REG_NF_BASE_ADDR + 0x14 )		//NAND Data[7:0](Status_0)
 #define	REG_ND_CTL						( REG_NF_BASE_ADDR + 0x18 )		//NAND control register
+#define	REG_BLANK_ZERO_NUM					( REG_NF_BASE_ADDR + 0x1c )		//Blank zero number
 #define	REG_CMD3						( REG_NF_BASE_ADDR + 0x28 )		//CMD3 is the third command that would be transfer out by auto mode case 0/1/2
 #define	REG_ND_PA3						( REG_NF_BASE_ADDR + 0x2c )		//Page address 3 [23:21]
 #define REG_POLL_FSTS					( REG_NF_BASE_ADDR + 0x30 )		//Polling nand flash status
@@ -89,7 +95,11 @@
 /*
  * Defines for the CP.
  */
+#ifdef CONFIG_ARCH_RTD129X
+#define REG_CP_BASE_ADDR				(0x98015000)
+#else
 #define REG_CP_BASE_ADDR				(0x18015000)
+#endif
 #define REG_MCP_CTRL					(REG_CP_BASE_ADDR+0x100)
 #define REG_MCP_STATUS					(REG_CP_BASE_ADDR+0x104)
 #define REG_MCP_EN						(REG_CP_BASE_ADDR+0x108)

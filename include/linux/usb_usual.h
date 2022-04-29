@@ -79,8 +79,6 @@
 		/* Cannot handle MI_REPORT_SUPPORTED_OPERATION_CODES */	\
 	US_FLAG(MAX_SECTORS_240,	0x08000000)		\
 		/* Sets max_sectors to 240 */			\
-	US_FLAG(SNPS_XHCI_WA,   0x10000000)			\
-		/* needs Synopsys xHCI workaround */		\
 	US_FLAG(NO_REPORT_LUNS,	0x10000000)			\
 		/* Cannot handle REPORT_LUNS */			\
 

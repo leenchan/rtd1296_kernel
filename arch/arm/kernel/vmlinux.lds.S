@@ -18,11 +18,6 @@
 	*(.proc.info.init)						\
 	VMLINUX_SYMBOL(__proc_info_end) = .;
 
-#define HYPERVISOR_TEXT							\
-	VMLINUX_SYMBOL(__hyp_text_start) = .;				\
-	*(.hyp.text)							\
-	VMLINUX_SYMBOL(__hyp_text_end) = .;
-
 #define IDMAP_TEXT							\
 	ALIGN_FUNCTION();						\
 	VMLINUX_SYMBOL(__idmap_text_start) = .;				\
@@ -113,7 +108,6 @@ SECTIONS
 			TEXT_TEXT
 			SCHED_TEXT
 			LOCK_TEXT
-			HYPERVISOR_TEXT
 			KPROBES_TEXT
 			*(.gnu.warning)
 			*(.glue_7)
@@ -126,8 +120,6 @@ SECTIONS
 #ifdef CONFIG_DEBUG_RODATA
 	. = ALIGN(1<<SECTION_SHIFT);
 #endif
-	_etext = .;			/* End of text section */
-
 	RO_DATA(PAGE_SIZE)
 
 	. = ALIGN(4);
@@ -157,6 +149,8 @@ SECTIONS
 #endif
 
 	NOTES
+
+	_etext = .;			/* End of text and rodata section */
 
 #ifndef CONFIG_XIP_KERNEL
 # ifdef CONFIG_ARM_KERNMEM_PERMS

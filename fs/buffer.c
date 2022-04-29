@@ -532,7 +532,7 @@ repeat:
 static void do_thaw_one(struct super_block *sb, void *unused)
 {
 	char b[BDEVNAME_SIZE];
-	while (sb->s_bdev && thaw_bdev_force(sb->s_bdev, sb))
+	while (sb->s_bdev && !thaw_bdev(sb->s_bdev, sb))
 		printk(KERN_WARNING "Emergency Thaw on %s\n",
 		       bdevname(sb->s_bdev, b));
 }
@@ -553,8 +553,6 @@ void emergency_thaw_all(void)
 {
 	struct work_struct *work;
 
-	printk("%s\n", __func__);
-	dump_stack();
 	work = kmalloc(sizeof(*work), GFP_ATOMIC);
 	if (work) {
 		INIT_WORK(work, do_thaw_all);
@@ -1001,7 +999,7 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	int ret = 0;		/* Will call free_more_memory() */
 	gfp_t gfp_mask;
 
-	gfp_mask = (mapping_gfp_mask(inode->i_mapping) & ~__GFP_FS) | gfp;
+	gfp_mask = mapping_gfp_constraint(inode->i_mapping, ~__GFP_FS) | gfp;
 
 	/*
 	 * XXX: __getblk_slow() can not really deal with failure and
@@ -1179,13 +1177,11 @@ void mark_buffer_dirty(struct buffer_head *bh)
 		struct page *page = bh->b_page;
 		struct address_space *mapping = NULL;
 		struct mem_cgroup *memcg;
-        struct backing_dev_info *bdi;
 
 		memcg = mem_cgroup_begin_page_stat(page);
 		if (!TestSetPageDirty(page)) {
 			mapping = page_mapping(page);
-            bdi = inode_to_bdi(mapping->host);
-			if (mapping && bdi->dev != NULL)
+			if (mapping)
 				__set_page_dirty(page, mapping, memcg, 0);
 		}
 		mem_cgroup_end_page_stat(memcg);
@@ -2424,9 +2420,9 @@ EXPORT_SYMBOL(block_commit_write);
  * unlock the page.
  *
  * Direct callers of this function should protect against filesystem freezing
- * using sb_start_write() - sb_end_write() functions.
+ * using sb_start_pagefault() - sb_end_pagefault() functions.
  */
-int __block_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf,
+int block_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf,
 			 get_block_t get_block)
 {
 	struct page *page = vmf->page;
@@ -2462,26 +2458,6 @@ int __block_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf,
 out_unlock:
 	unlock_page(page);
 	return ret;
-}
-EXPORT_SYMBOL(__block_page_mkwrite);
-
-int block_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf,
-		   get_block_t get_block)
-{
-	int ret;
-	struct super_block *sb = file_inode(vma->vm_file)->i_sb;
-
-	sb_start_pagefault(sb);
-
-	/*
-	 * Update file times before taking page lock. We may end up failing the
-	 * fault so this update may be superfluous but who really cares...
-	 */
-	file_update_time(vma->vm_file);
-
-	ret = __block_page_mkwrite(vma, vmf, get_block);
-	sb_end_pagefault(sb);
-	return block_page_mkwrite_return(ret);
 }
 EXPORT_SYMBOL(block_page_mkwrite);
 
@@ -2961,14 +2937,14 @@ sector_t generic_block_bmap(struct address_space *mapping, sector_t block,
 }
 EXPORT_SYMBOL(generic_block_bmap);
 
-static void end_bio_bh_io_sync(struct bio *bio, int err)
+static void end_bio_bh_io_sync(struct bio *bio)
 {
 	struct buffer_head *bh = bio->bi_private;
 
-	if (unlikely (test_bit(BIO_QUIET,&bio->bi_flags)))
+	if (unlikely(bio_flagged(bio, BIO_QUIET)))
 		set_bit(BH_Quiet, &bh->b_state);
 
-	bh->b_end_io(bh, test_bit(BIO_UPTODATE, &bio->bi_flags));
+	bh->b_end_io(bh, !bio->bi_error);
 	bio_put(bio);
 }
 
@@ -3024,7 +3000,6 @@ static int submit_bh_wbc(int rw, struct buffer_head *bh,
 			 unsigned long bio_flags, struct writeback_control *wbc)
 {
 	struct bio *bio;
-	int ret = 0;
 
 	BUG_ON(!buffer_locked(bh));
 	BUG_ON(!buffer_mapped(bh));
@@ -3051,12 +3026,9 @@ static int submit_bh_wbc(int rw, struct buffer_head *bh,
 
 	bio->bi_iter.bi_sector = bh->b_blocknr * (bh->b_size >> 9);
 	bio->bi_bdev = bh->b_bdev;
-	bio->bi_io_vec[0].bv_page = bh->b_page;
-	bio->bi_io_vec[0].bv_len = bh->b_size;
-	bio->bi_io_vec[0].bv_offset = bh_offset(bh);
 
-	bio->bi_vcnt = 1;
-	bio->bi_iter.bi_size = bh->b_size;
+	bio_add_page(bio, bh->b_page, bh->b_size, bh_offset(bh));
+	BUG_ON(bio->bi_iter.bi_size != bh->b_size);
 
 	bio->bi_end_io = end_bio_bh_io_sync;
 	bio->bi_private = bh;
@@ -3071,7 +3043,7 @@ static int submit_bh_wbc(int rw, struct buffer_head *bh,
 		rw |= REQ_PRIO;
 
 	submit_bio(rw, bio);
-	return ret;
+	return 0;
 }
 
 int _submit_bh(int rw, struct buffer_head *bh, unsigned long bio_flags)
@@ -3243,7 +3215,6 @@ int try_to_free_buffers(struct page *page)
 {
 	struct address_space * const mapping = page->mapping;
 	struct buffer_head *buffers_to_free = NULL;
-	struct backing_dev_info *bdi;
 	int ret = 0;
 
 	BUG_ON(!PageLocked(page));
@@ -3254,10 +3225,6 @@ int try_to_free_buffers(struct page *page)
 		ret = drop_buffers(page, &buffers_to_free);
 		goto out;
 	}
-
-	bdi = inode_to_bdi(mapping->host);
-	if(bdi->dev == NULL)
-		return 0;
 
 	spin_lock(&mapping->private_lock);
 	ret = drop_buffers(page, &buffers_to_free);

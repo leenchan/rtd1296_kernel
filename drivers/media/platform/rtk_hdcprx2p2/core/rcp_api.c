@@ -13,9 +13,6 @@
 #include <hdcp2_hal.h>
 #include <rcp_api.h>
 
-#include <linux/platform_device.h>
-extern struct platform_device* hdmirx_pdev;
-
 extern int MCP_AES_Encryption(
     unsigned char           mode,
     unsigned char           key[16],
@@ -280,12 +277,12 @@ int RCP_AES_CTR_Cipher(unsigned char Key[16], unsigned char IV[16],
 	dma_addr_t data_dma_phyaddr;
 	unsigned char *pData = NULL;
 
-	data_dma_vaddr = (unsigned long)dma_alloc_coherent(&hdmirx_pdev->dev, DataLen, &data_dma_phyaddr, GFP_ATOMIC);
+	data_dma_vaddr = (unsigned long)dma_alloc_coherent(NULL, DataLen, &data_dma_phyaddr, GFP_ATOMIC);
 	pData = (unsigned char *)data_dma_vaddr;
 	memcpy(pData, pDataIn, DataLen);
 	ret_val = MCP_AES_Encryption( 2, Key, IV, (unsigned char *)data_dma_phyaddr, (unsigned char *)data_dma_phyaddr, DataLen);
 	memcpy(pDataOut, pData, DataLen);
-	dma_free_coherent(&hdmirx_pdev->dev, DataLen, (void *)data_dma_vaddr, data_dma_phyaddr);
+	dma_free_coherent(NULL, DataLen, (void *)data_dma_vaddr, data_dma_phyaddr);
 	return ret_val;
 }
 
@@ -353,14 +350,14 @@ void RCP_HDCP2_GenDKey(int KmCw, unsigned char *Rtx, unsigned char *Rrx,
 	memcpy(aes_iv + 8, tmp8, 8);
 
 	/* Generate dkey*/
-	data_dma_vaddr = (unsigned long)dma_alloc_coherent(&hdmirx_pdev->dev, 16, &data_dma_phyaddr, GFP_ATOMIC);
+	data_dma_vaddr = (unsigned long)dma_alloc_coherent(NULL, 16, &data_dma_phyaddr, GFP_ATOMIC);
 	pData = (unsigned char *)data_dma_vaddr;
 	memset(pData, 0, 16);// AES DataIn -> 0
 	MCP_AES_Encryption( 2, aes_key, aes_iv, (unsigned char *)data_dma_phyaddr, (unsigned char *)data_dma_phyaddr, 16);
 
 	memset(dkey_tmp, 0, 16);
 	xor_array(pData, dkey_tmp, dkey_tmp, 16);// Dkey = 0 ^ AES DataOut
-	dma_free_coherent(&hdmirx_pdev->dev, 16, (void *)data_dma_vaddr, data_dma_phyaddr);
+	dma_free_coherent(NULL, 16, (void *)data_dma_vaddr, data_dma_phyaddr);
 
 	/* Set dkey*/
 	RCP_SET_CW(DKeyCW, dkey_tmp, 16);

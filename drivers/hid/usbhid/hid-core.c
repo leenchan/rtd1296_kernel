@@ -307,7 +307,6 @@ static void hid_irq_in(struct urb *urb)
 	case -EILSEQ:		/* protocol error or unplug */
 	case -EPROTO:		/* protocol error or unplug */
 	case -ETIME:		/* protocol error or unplug */
-	case -EOVERFLOW:	/* Value too large for defined data type */
 	case -ETIMEDOUT:	/* Should never happen, but... */
 		usbhid_mark_busy(usbhid);
 		clear_bit(HID_IN_RUNNING, &usbhid->iofl);
@@ -711,7 +710,8 @@ int usbhid_open(struct hid_device *hid)
 		 * Wait 50 msec for the queue to empty before allowing events
 		 * to go through hid.
 		 */
-		msleep(50);
+		if (res == 0 && !(hid->quirks & HID_QUIRK_ALWAYS_POLL))
+			msleep(50);
 		clear_bit(HID_RESUME_RUNNING, &usbhid->iofl);
 	}
 done:

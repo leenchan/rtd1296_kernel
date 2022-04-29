@@ -1,14 +1,3 @@
-/*
- * hdmiHdmi.c - RTK hdmi rx driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include <linux/gpio.h>
 
 #include "hdmiInternal.h"
@@ -37,8 +26,6 @@ extern UINT8 bSCDC_Enable_flag ;
 #define AVI_Y1Y0_mask		0x60
 #define AVI_YQ1YQ0_mask		0xC0
 #define AVI_Q_Range_mask	0x0c
-#define VSIF_PB4			(209)
-#define VSIF_PB5			(210)
 #define RGB_Default			0
 #define RGB_Limite_Range	1
 #define RGB_Full_Range		2
@@ -100,7 +87,6 @@ unsigned char HDMI_Audio_Conut = 0;
 /*=================== extern Variable/Function ===================*/
 extern HDMIRX_IOCTL_STRUCT_T hdmi_ioctl_struct;
 
-extern void CDR_RESET(UINT8 benable);
 extern void Hdmi_PhyInit(void);
 extern int rtd_hdmiRx_cmd(u_int8_t cmd,  void * arg);
 extern void hdmi_z0_set(unsigned char port, unsigned char lane, unsigned char enable);
@@ -248,7 +234,11 @@ void Hdmi_MacInit(void)
 	bHDMI_6G_flag = 0 ;  //detect 6 G or not
 	bSCDC_Enable_flag = 0;
 #endif
-
+#if 1 //fix panasonic issue((dvd mode + hdcp) fail)
+	hdmi_rx_reg_mask32(HDCP_PCR,
+		~(HDCP_PCR_km_clk_sel_mask|HDCP_PCR_hdcp_vs_sel_mask),
+		(HDCP_PCR_km_clk_sel_mask|HDCP_PCR_hdcp_vs_sel_mask), HDMI_RX_MAC);
+#endif
 	hdmi_rx_reg_mask32(HDMI_VCR, ~(HDMI_VCR_csam_mask | HDMI_VCR_prdsam_mask), HDMI_VCR_csam(1) | HDMI_VCR_prdsam(1), HDMI_RX_MAC);
 //	hdmiport_mask(HDMI_HDMI_AOCR_VADDR,(unsigned char)~(0xff),0x00);//Disable SPDIF/I2S Output
 //	hdmiport_mask(HDMI_HDMI_AOCR_VADDR,~_BIT10,_BIT10);//Hold avmute value outside v-sync region
@@ -304,8 +294,9 @@ void Audio_CTS_Bound(void)
 	}
 	else
 	{
-		cts_up = 84000*9/8;
-		cts_low = 16800*7/8;
+		cts_up = 60060 * 9/8  ;//990000;
+		cts_low = 25200 *7/8 ;
+
 	}
 
 	hdmi_rx_reg_mask32(AUDIO_CTS_UP_BOUND, ~(AUDIO_CTS_UP_BOUND_cts_up_bound_mask), AUDIO_CTS_UP_BOUND_cts_up_bound(cts_up), HDMI_RX_MAC);
@@ -334,8 +325,8 @@ void Audio_N_Bound(int freq)
 	}
 	else//32k	44.1k  48k
 	{
-		N_up = 20480*9/8;
-		N_low = 2730*7/8;
+		N_up = 17836 * 9/8	;//990000;
+		N_low = 3072 *7/8 ;
 	}
 
 	hdmi_rx_reg_mask32(AUDIO_N_UP_BOUND, ~(AUDIO_N_UP_BOUND_n_up_bound_mask), AUDIO_N_UP_BOUND_n_up_bound(N_up), HDMI_RX_MAC);
@@ -406,11 +397,12 @@ HDMI_bool Hdmi_VideoPLLSetting(int b, int cd, int Enable2X)
 	}
 	else
 #endif
-
-	if (cd || (Enable2X && (hdmi.tx_timing.progressive == 0)))
+	if	((cd || Enable2X)&&(((hdmi.tx_timing.progressive) == 0)))
+	{
 		hdmi_rx_reg_mask32(TMDS_DPC_SET0, ~TMDS_DPC_SET0_dpc_bypass_dis_mask, TMDS_DPC_SET0_dpc_bypass_dis(1), HDMI_RX_MAC);
-	else
+	} else {
 		hdmi_rx_reg_mask32(TMDS_DPC_SET0, ~TMDS_DPC_SET0_dpc_bypass_dis_mask, TMDS_DPC_SET0_dpc_bypass_dis(0), HDMI_RX_MAC);
+	}
 
 	if (large_ratio != 1)
 	{
@@ -498,8 +490,7 @@ HDMI_bool Hdmi_VideoPLLSetting(int b, int cd, int Enable2X)
 	if(tmds>600)
 		return FALSE;
 
-	HDMIRX_INFO("PLL Setting b(%d) cd(%d) TMDS(%dMHz) P(%u) 2X(%d) 6G_flag(%u)",
-		hdmi.b, cd, tmds, hdmi.tx_timing.progressive, Enable2X, bHDMI_6G_flag);
+	HDMIRX_INFO("PLL Setting b(%d) TMDS(%dMHz) P(%u) 2X(%d) 6G_flag(%u)",hdmi.b,tmds,hdmi.tx_timing.progressive,Enable2X,bHDMI_6G_flag);
 	HDMI_PRINTF("***************TMDS=%d MHz\n",tmds);
 	HDMI_PRINTF("***************cd=%d\n",cd);
 	HDMI_PRINTF("***************m=%d\n",m);
@@ -532,13 +523,6 @@ HDMI_bool Hdmi_VideoPLLSetting(int b, int cd, int Enable2X)
 	usleep_range(10, 15);
 	hdmi_rx_reg_mask32(HDMI_VPLLCR1, ~HDMI_VPLLCR1_dpll_freeze_mask, 0, HDMI_RX_MAC);
 	HDMI_PRINTF("Hdmi_VideoPLLSetting d404 = %x\n", hdmi_rx_reg_read32(HDMI_VPLLCR1, HDMI_RX_MAC));
-
-	/* CDR reset for fix resolution recognize fail */
-	CDR_RESET(1);
-	usleep_range(10000, 11000);
-	CDR_RESET(0);
-	/* Wait CDR stable */
-	usleep_range(50000, 51000);
 
 	return TRUE;
 }
@@ -1206,9 +1190,6 @@ HDMI_bool Hdmi_AudioModeDetect(void)
 				SET_HDMI_AUDIO_FSM(AUDIO_FSM_AUDIO_START);
 			}
 
-			if (GET_HDMI_AUDIO_FSM() == AUDIO_FSM_AUDIO_START)
-				hdmi_ioctl_struct.audio_detect_done = 0;
-
 		}
 		break;
 
@@ -1264,7 +1245,7 @@ void hdmi_phy_port_select(int port, char enable)
 	// Digital part sel port
 	hdmi_rx_reg_mask32(PHY_FIFO_CR, ~PHY_FIFO_CR_port_sel_mask, PHY_FIFO_CR_port_sel(port), HDMI_RX_MAC);
 	// clock detect
-	hdmi_rx_reg_mask32(MD, ~MD_reg_ck_ckdet_mask, MD_reg_ck_ckdet(1<<port), HDMI_RX_PHY);
+	hdmi_rx_reg_mask32(MD, ~MD_reg_ck_ckdet_mask, MD_reg_ck_ckdet(1<<(2-port)), HDMI_RX_PHY);
 
 	switch ( port )
 	{
@@ -1478,65 +1459,6 @@ void Hdmi_DumpState(void)
 //	HDMI_PRINTF( "Is422 = %d\n", GET_SCALER_IS422());
 }
 
-unsigned int Hdmi_count_fps(void)
-{
-	unsigned long prev_jif;
-	unsigned long jif1;
-	unsigned long jif2;
-	unsigned int vsync;
-	unsigned int frame_rate;
-	unsigned int max_rate = 0;
-	unsigned int retry_cnt = 0;
-
-retry:
-	frame_rate = 0;
-	jif1 = 0;
-	hdmi_rx_reg_mask32(TMDS_CTRL, ~TMDS_CTRL_yo_mask, TMDS_CTRL_yo_mask, HDMI_RX_MAC);
-	prev_jif = jiffies;
-	while ((jiffies - prev_jif) < msecs_to_jiffies(120)) {
-		vsync = TMDS_CTRL_get_yo(hdmi_rx_reg_read32(TMDS_CTRL, HDMI_RX_MAC));
-		if (vsync == 1) {
-			if (jif1 == 0) {
-				jif1 = jiffies;
-				hdmi_rx_reg_mask32(TMDS_CTRL, ~TMDS_CTRL_yo_mask, TMDS_CTRL_yo_mask, HDMI_RX_MAC);
-			} else {
-				/* jiffies between two vsync */
-				jif2 = jiffies - jif1;
-				/* frame_rate x 10 */
-				frame_rate = 10000000 / jiffies_to_usecs(jif2);
-				break;
-			}
-		}
-	}
-
-	if (!hdmi.tx_timing.progressive)
-		frame_rate = frame_rate/2;
-
-	/* Seek actual frame_rate */
-	if (frame_rate < 246)
-		frame_rate = 24;
-	else if (frame_rate < 256)
-		frame_rate = 25;
-	else if (frame_rate < 400)
-		frame_rate = 30;
-	else if (frame_rate < 550)
-		frame_rate = 50;
-	else
-		frame_rate = 60;
-
-	/* Return the max frame rate */
-	if (frame_rate > max_rate)
-		max_rate = frame_rate;
-
-	retry_cnt++;
-
-	if (retry_cnt < 10) {
-		msleep(50);
-		goto retry;
-	}
-
-	return max_rate;
-}
 
 #if HDMI2p0
 unsigned char drvif_Hdmi2p0_Scdc_Read(unsigned char addr)
@@ -1551,17 +1473,9 @@ void drvif_Hdmi2p0_Scdc_Write(unsigned char addr,unsigned char value)
 	hdmi_rx_reg_write32(SCDC_DP, value, HDMI_RX_MAC);
 }
 
-void drvif_Hdmi2p0_Scdc_Reset(void)
-{
-	hdmi_rx_reg_mask32(SCDC_CR,~(SCDC_CR_scdc_reset_mask),SCDC_CR_scdc_reset_mask, HDMI_RX_MAC);
-	HDMIRX_INFO("[HDMI2.0] Rest SCDC");
-	hdmi_rx_reg_mask32(SCDC_CR,~(SCDC_CR_scdc_reset_mask),0, HDMI_RX_MAC);
-	bHDMI_6G_flag=0;
-}
-
 void drvif_Hdmi2p0_DetectMode(void)
 {
-	UINT8 bTMDSStatus=0;
+	UINT8 bTMDSStatus;
 
 	if (hdmi_rx_reg_read32(HDMI_AFCR, HDMI_RX_MAC)&HDMI_6G_TEST)//Dummy Bit for 6G test
 	{
@@ -1699,41 +1613,6 @@ unsigned char drvif_Hdmi_GetColorDepth(void)
 		return 0;
 }
 
-unsigned char drvif_Hdmi_VSIF_VIC(void)
-{
-	unsigned char reg_val;
-
-	hdmi_rx_reg_write32(HDMI_PSAP, VSIF_PB4, HDMI_RX_MAC);
-	reg_val = hdmi_rx_reg_read32(HDMI_PSDP, HDMI_RX_MAC);
-
-	if((reg_val>>5)==1)//HDMI_Video_Format=1
-	{
-		hdmi_rx_reg_write32(HDMI_PSAP, VSIF_PB5, HDMI_RX_MAC);
-		reg_val = hdmi_rx_reg_read32(HDMI_PSDP, HDMI_RX_MAC);
-		HDMIRX_DEBUG("Extended_VIC=%u",reg_val);
-		switch (reg_val)
-		{
-			case 1:
-				reg_val = 95;
-				break;
-			case 2:
-				reg_val = 94;
-				break;
-			case 3:
-				reg_val = 93;
-				break;
-			case 4:
-				reg_val = 98;
-				break;
-			default:
-				reg_val=0;
-		}
-		return reg_val;
-	}
-
-	return 0;
-}
-
 unsigned char drvif_Hdmi_AVI_VIC(void)
 {
 	unsigned char reg_val;
@@ -1741,9 +1620,7 @@ unsigned char drvif_Hdmi_AVI_VIC(void)
 
 	reg_val = (hdmi_rx_reg_read32(HDMI_PSDP, HDMI_RX_MAC)) & 0x7F;
 
-	if(reg_val==0)// Get extened VIC
-		return drvif_Hdmi_VSIF_VIC();
-	else if(reg_val <= 107)
+	if(reg_val <= 107)
 		return reg_val;
 	else
 		return 0;
@@ -1975,20 +1852,10 @@ retry:
 			if(GET_ISHDMI() == MODE_HDMI) {
 				// Determine Color Space
 				SET_HDMI_COLOR_SPACE(Hdmi_GetColorSpace());
-
-				/* Count fps when VIC is zero */
-				if (drvif_Hdmi_AVI_VIC() == 0) {
-					hdmi.tx_timing.dvi_fps = Hdmi_count_fps();
-					HDMIRX_INFO("HDMI mode, fps=%u", hdmi.tx_timing.dvi_fps);
-				}
 			}else {
 				// Determine Color Space
 				SET_HDMI_COLOR_SPACE(COLOR_RGB);
-
-				/* Count fps */
-				hdmi.tx_timing.dvi_fps = Hdmi_count_fps();
-
-				HDMIRX_INFO("DVI mode, fps=%u", hdmi.tx_timing.dvi_fps);
+				HDMIRX_INFO("DVI mode");
 			}
 			drvif_Hdmi_AVI_RGB_Range();//cloud test
 			if (GET_HDMI_ISINTERLACE() != Hdmi_GetInterlace(HDMI_MS_MODE_ONESHOT)) {
@@ -2002,11 +1869,6 @@ retry:
 			hdmi.tx_timing.depth =(HDMI_COLOR_DEPTH_T) drvif_Hdmi_GetColorDepth();
 			HDMIRX_INFO("FSM_HDMI_DISPLAY_ON colorimetry(%u) color(%u) progressive(%u) depth(%u)",
 								hdmi.tx_timing.colorimetry,hdmi.tx_timing.color,hdmi.tx_timing.progressive,hdmi.tx_timing.depth);
-#if HDMI2p0
-			/* Fix 6G mode unstable  */
-			if ((bHDMI_6G_flag == 1) || (bHDMI_420_Space == COLOR_YUV420))
-				set_top_voltage(1);
-#endif
 
 			Hdmi_Get3DGenTiming(&hdmi.tx_timing, &hdmi.gen_timing);
 

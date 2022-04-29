@@ -14,7 +14,7 @@
 
 #include "dptx_edid.h"
 
-#define DPTX_EDID_DEBUG 1
+#define DPTX_EDID_DEBUG 0
 
 #if DPTX_EDID_DEBUG
 #define DPTX_EDID_DBG(format, ...) printk(KERN_ERR "[DPTX_EDID_DBG] " format, ## __VA_ARGS__)
@@ -687,13 +687,13 @@ static bool rtk_edid_block_valid(u8 *raw_edid, int block)
 	if (block == 0) {
 		int score = rtk_edid_header_is_valid(raw_edid);
 		if (score != 8)
-			goto bad;		
+			goto bad;
 	}
 
 	for (i = 0; i < EDID_LENGTH; i++)
 		csum += raw_edid[i];
 	if (csum) {
-		DPTX_EDID_ERR("EDID checksum is invalid, remainder is %d\n", csum);		
+		DPTX_EDID_ERR("EDID checksum is invalid, remainder is %d\n", csum);
 
 		/* allow CEA to slide through, switches mangle this */
 		if (raw_edid[0] != 0x02)
@@ -756,7 +756,7 @@ static u8 *rtk_find_cea_extension(struct edid *edid)
 	/* Find CEA extension */
 	for (i = 0; i < edid->extensions; i++) {
 		edid_ext = (u8 *)edid + EDID_LENGTH * (i + 1);
-		if (edid_ext[0] == CEA_EXT)		
+		if (edid_ext[0] == CEA_EXT)
 			break;
 	}
 
@@ -794,13 +794,13 @@ static void rtk_add_display_info(struct edid *edid,struct drm_display_info *info
 			info->color_formats |= DRM_COLOR_FORMAT_YCRCB444;
 		if (edid_ext[3] & EDID_CEA_YCRCB422)
 			info->color_formats |= DRM_COLOR_FORMAT_YCRCB422;
-			
+
 	}
 
 	/* Only defined for 1.4 with digital displays */
 	if (edid->revision < 4)
 		return;
-		
+
 	switch (edid->input & DRM_EDID_DIGITAL_DEPTH_MASK) {
 	case DRM_EDID_DIGITAL_DEPTH_6:
 		//info->bpc |= RTK_EDID_DIGITAL_DEPTH_6;
@@ -831,7 +831,7 @@ static void rtk_add_display_info(struct edid *edid,struct drm_display_info *info
 		info->color_formats |= DRM_COLOR_FORMAT_YCRCB444;
 	if (edid->features & DRM_EDID_FEATURE_RGB_YCRCB422)
 		info->color_formats |= DRM_COLOR_FORMAT_YCRCB422;
-			
+
 }
 
 static void cea_for_each_detailed_block(u8 *ext, detailed_cb *cb, void *closure)
@@ -864,12 +864,12 @@ static void rtk_for_each_detailed_block(u8 *raw_edid, detailed_cb *cb, void *clo
 
 	if (edid == NULL)
 		return;
-	
+
 	//parsing No.1-4 Detailed Timing Descriptor of basic edid, start from 0x36.
-	for (i = 0; i < EDID_DETAILED_TIMINGS; i++) 
+	for (i = 0; i < EDID_DETAILED_TIMINGS; i++)
 		cb(&(edid->detailed_timings[i]), closure);
 
-	//parsing Detailed Timing Descriptor of extension blk.		
+	//parsing Detailed Timing Descriptor of extension blk.
 	for (i = 1; i <= raw_edid[0x7e]; i++) {
 		u8 *ext = raw_edid + (i * EDID_LENGTH);
 		switch (*ext) {
@@ -907,10 +907,10 @@ static void drm_mode_do_interlace_quirk(struct drm_display_mode *mode,struct det
                 { 1440,  576 },
                 { 2880,  576 },
         };
- 
+
         if (!(pt->misc & DRM_EDID_PT_INTERLACED))
                 return;
- 
+
         for (i = 0; i < ARRAY_SIZE(cea_interlaced); i++) {
                 if ((mode->hdisplay == cea_interlaced[i].w) &&
                     (mode->vdisplay == cea_interlaced[i].h / 2)) {
@@ -921,7 +921,7 @@ static void drm_mode_do_interlace_quirk(struct drm_display_mode *mode,struct det
                         mode->vtotal |= 1;
                 }
         }
- 
+
         mode->flags |= DRM_MODE_FLAG_INTERLACE;
 }
 
@@ -962,7 +962,7 @@ static int rtk_drm_mode_vrefresh(const struct drm_display_mode *mode)
 static struct drm_display_mode *rtk_drm_mode_detailed(struct edid *edid,struct detailed_timing *timing,u32 quirks)
 {
 	struct drm_display_mode *mode;
-		
+
 	struct detailed_pixel_timing *pt = &timing->data.pixel_data;
 	unsigned hactive = (pt->hactive_hblank_hi & 0xf0) << 4 | pt->hactive_lo;
 	unsigned vactive = (pt->vactive_vblank_hi & 0xf0) << 4 | pt->vactive_lo;
@@ -972,14 +972,14 @@ static struct drm_display_mode *rtk_drm_mode_detailed(struct edid *edid,struct d
 	unsigned hsync_pulse_width = (pt->hsync_vsync_offset_pulse_width_hi & 0x30) << 4 | pt->hsync_pulse_width_lo;
 	unsigned vsync_offset = (pt->hsync_vsync_offset_pulse_width_hi & 0xc) << 2 | pt->vsync_offset_pulse_width_lo >> 4;
 	unsigned vsync_pulse_width = (pt->hsync_vsync_offset_pulse_width_hi & 0x3) << 4 | (pt->vsync_offset_pulse_width_lo & 0xf);
-		
+
 	/* ignore tiny modes */
 	if (hactive < 64 || vactive < 64)
 		return NULL;
-		
+
 	mode = kzalloc(sizeof(struct drm_display_mode), GFP_KERNEL);
     if (!mode)
-        return NULL;	
+        return NULL;
 
 //	if (pt->misc & DRM_EDID_PT_STEREO) {
 //		HDMI_ERROR("stereo mode not supported");
@@ -995,29 +995,29 @@ static struct drm_display_mode *rtk_drm_mode_detailed(struct edid *edid,struct d
 //		HDMI_ERROR("Incorrect Detailed timing.Wrong Hsync/Vsync pulse width");
 //		return NULL;
 //	}
-	
+
 	mode->clock = le16_to_cpu(timing->pixel_clock) * 10;
- 
+
 	mode->hdisplay = hactive;
 	mode->hsync_start = mode->hdisplay + hsync_offset;
 	mode->hsync_end = mode->hsync_start + hsync_pulse_width;
 	mode->htotal = mode->hdisplay + hblank;
-        
+
 	mode->vdisplay = vactive;
 	mode->vsync_start = mode->vdisplay + vsync_offset;
 	mode->vsync_end = mode->vsync_start + vsync_pulse_width;
 	mode->vtotal = mode->vdisplay + vblank;
-	
+
 	/* Some EDIDs have bogus h/vtotal values */
 	if (mode->hsync_end > mode->htotal)
 		mode->htotal = mode->hsync_end + 1;
 	if (mode->vsync_end > mode->vtotal)
 		mode->vtotal = mode->vsync_end + 1;
-		
+
 
 	drm_mode_do_interlace_quirk(mode, pt);
 
-	
+
 //	if (quirks & EDID_QUIRK_DETAILED_SYNC_PP) {
 //		pt->misc |= DRM_EDID_PT_HSYNC_POSITIVE | DRM_EDID_PT_VSYNC_POSITIVE;
 //	}
@@ -1033,15 +1033,15 @@ static struct drm_display_mode *rtk_drm_mode_detailed(struct edid *edid,struct d
 //		mode->width_mm *= 10;
 //		mode->height_mm *= 10;
 //	}
-		
+
 	mode->vscan = (mode->flags & DRM_MODE_FLAG_DBLSCAN) ? 2 : 1;
-	
+
 	mode->vrefresh = rtk_drm_mode_vrefresh(mode);
 
 //	mode->type = DRM_MODE_TYPE_DRIVER;
 
 	return mode;
-	
+
 }
 
 static void rtk_do_detailed_mode(struct detailed_timing *timing, void *c)
@@ -1049,11 +1049,11 @@ static void rtk_do_detailed_mode(struct detailed_timing *timing, void *c)
 	struct detailed_mode_closure *closure = c;
     struct drm_display_mode *newmode;
 	int j;
-	
-	if (timing->pixel_clock) {	
-		
+
+	if (timing->pixel_clock) {
+
 		newmode=rtk_drm_mode_detailed(closure->edid,timing,closure->quirks);
-		
+
 		if (!newmode)
 			return;
 		else
@@ -1061,14 +1061,14 @@ static void rtk_do_detailed_mode(struct detailed_timing *timing, void *c)
 			DPTX_EDID_DBG("[%s] Detailied Timing: Hdisplay(%u), Vdisplay(%u), Clock(%u), vrefresh(%u), flags(0x%x)\n",__FUNCTION__,
 							newmode->hdisplay,newmode->vdisplay,newmode->clock,newmode->vrefresh,newmode->flags);
 
-			for (j=0; j< ARRAY_SIZE(edid_cea_modes); j++) 
+			for (j=0; j< ARRAY_SIZE(edid_cea_modes); j++)
 			{
 				if( newmode->hdisplay == edid_cea_modes[j].hdisplay &&
 					newmode->vdisplay == edid_cea_modes[j].vdisplay &&
 					newmode->clock == edid_cea_modes[j].clock &&
 					newmode->vrefresh == edid_cea_modes[j].vrefresh &&
 				  ((newmode->flags & DRM_MODE_FLAG_INTERLACE) == (edid_cea_modes[j].flags & DRM_MODE_FLAG_INTERLACE)))
-				{	
+				{
 					DPTX_EDID_DBG("clk = %d, refresh = %d\n", newmode->clock, newmode->vrefresh);
 					DPTX_EDID_DBG("[%s] vic=%d\n",__FUNCTION__,j+1);
 					if(j<64)
@@ -1076,13 +1076,13 @@ static void rtk_do_detailed_mode(struct detailed_timing *timing, void *c)
 					else if(j<128)
 						closure->cap->vic2 |= 1ULL << (j-64);
 
-					closure->modes++;					
-				}		
+					closure->modes++;
+				}
 			}
 		}
-		
+
 		kfree(newmode);
-	}		
+	}
 }
 
 static int rtk_add_standard_mode(struct sink_capabilities_t *sink_cap, struct edid *edid)
@@ -1133,7 +1133,7 @@ static int rtk_add_standard_mode(struct sink_capabilities_t *sink_cap, struct ed
 
 static int rtk_add_detailed_modes(struct sink_capabilities_t *sink_cap, struct edid *edid,u32 quirks)
 {
-	
+
 	struct detailed_mode_closure closure = {
 		sink_cap,
 		edid,
@@ -1148,11 +1148,11 @@ static int rtk_add_detailed_modes(struct sink_capabilities_t *sink_cap, struct e
 	rtk_for_each_detailed_block((u8 *)edid, rtk_do_detailed_mode, &closure);
 
 	return closure.modes;
-	
+
 }
 
 static int add_established_modes(struct edid *edid, u32 *est_format)
-{	
+{
 	unsigned long est_bits = edid->established_timings.t1 |
 		(edid->established_timings.t2 << 8) |
 		((edid->established_timings.mfg_rsvd & 0x80) << 9);
@@ -1162,21 +1162,21 @@ static int add_established_modes(struct edid *edid, u32 *est_format)
 		if (est_bits & (1<<i)) {
 			modes++;
 			}
-		}	
+		}
 		*est_format=est_bits;
-	
+
 		return modes;
 }
 
 static int do_cea_modes (u8 *db, u8 len, u64 *cea_format, u64 *cea_format2)
 {
-	u8 * mode; 
+	u8 * mode;
 	u64 cea_mode=0;
 	int modes = 0;
-	
+
 	for (mode = db; mode < db + len; mode++)
 	{
-		cea_mode = (*mode & 127) - 1; /* CEA modes are numbered 1..127 */				
+		cea_mode = (*mode & 127) - 1; /* CEA modes are numbered 1..127 */
 		if (cea_mode < ARRAY_SIZE(edid_cea_modes))
 		{
 			if(cea_mode<=63)
@@ -1190,11 +1190,11 @@ static int do_cea_modes (u8 *db, u8 len, u64 *cea_format, u64 *cea_format2)
 			}
             if( (mode-db) < 16)
 				vdb[mode-db]= *mode;
-						
-			modes++;			
+
+			modes++;
 		}
 	}
-	
+
 	return modes;
 }
 
@@ -1263,7 +1263,7 @@ static int add_cea_modes(struct edid *edid, u64 *video_format, u64 *video_format
 
 			if (cea_db_tag(db) == VIDEO_BLOCK)
 				modes += do_cea_modes (db+1, dbl,video_format,video_format2);
-				
+
 		}
 	}
 
@@ -1308,14 +1308,14 @@ static bool cea_db_is_hdmi_forum_vsdb(const u8 *db)
 static void print_cea_modes(u64 cea_format, u64 cea_format2, u64 cea_format2_420)
 {
 	int i,freq;
-	
+
 	if(cea_format==0){
 		DPTX_EDID_ERR("no matching video format found\n");
 		return;
 	}
-		
+
 	DPTX_EDID_DBG(" VIDEO DATA: \n");
-	
+
 	for (i = 0; i < ARRAY_SIZE(edid_cea_modes); i++)
 	{
 		if(i<64)
@@ -1404,12 +1404,12 @@ static void parse_hdmi_ycbcr420_video_db(struct sink_capabilities_t *sink_cap, c
 static bool parse_hdmi_extdb(struct sink_capabilities_t *sink_cap, const u8 *db)
 {
 	int dbl;
-	
+
 	if (cea_db_tag(db) != USE_EXTENDED_TAG)
 		return false;
-	
+
 	dbl = cea_db_payload_len(db);
-	
+
 	switch (*(db+1)) {
 			case VIDEO_CAPABILITY_DATA_BLOCK:
 				DPTX_EDID_DBG("[%s] VIDEO_CAPABILITY_DATA_BLOCK (%u bytes)\n",__FUNCTION__,dbl);
@@ -1448,9 +1448,9 @@ static bool parse_hdmi_extdb(struct sink_capabilities_t *sink_cap, const u8 *db)
 				DPTX_EDID_DBG("[%s] Unknow Extend Tag(%u) (%u bytes)\n",__FUNCTION__,*(db+1),dbl);
 				break;
 			}
-		
-		return true;	
-			
+
+		return true;
+
 }
 
 static void parse_hdmi_vsdb(struct sink_capabilities_t *sink_cap, const u8 *db)
@@ -1464,12 +1464,12 @@ static void parse_hdmi_vsdb(struct sink_capabilities_t *sink_cap, const u8 *db)
 	int i;
 	u8 vic_len=0, hdmi_3d_len = 0;
 	u16 mask=0;
-	
+
 	if (len >= 4) {
 		sink_cap->cec_phy_addr[0] = db[4];
 		sink_cap->cec_phy_addr[1] = db[5];
 	}
-	
+
 	if (len >= 6) {
 		sink_cap->eld[5] |= (db[6] >> 7) & 1;  /* Supports_AI */
 		sink_cap->DC_Y444 = (db[6] >> 3) & 1;  /* Supports 4:4:4 in deep color modes */
@@ -1486,7 +1486,7 @@ static void parse_hdmi_vsdb(struct sink_capabilities_t *sink_cap, const u8 *db)
 		sink_cap->latency_present[1] = (db[8] >> 6) & 1; /* I_Latency_Fields_Present */
 		HDMI_Video_present			 = (db[8] >> 5) & 1; /* HDMI_Video_Present */
 	}
-	
+
 	if (db[8] & (1 << 7)){
 		offset += 2;
 		if (len >= 9)
@@ -1496,63 +1496,63 @@ static void parse_hdmi_vsdb(struct sink_capabilities_t *sink_cap, const u8 *db)
 	}
 
 	/* I_Latency_Fields_Present */
-	if (db[8] & (1 << 6)){	
+	if (db[8] & (1 << 6)){
 		offset += 2;
 		if (len >= 11)
 			sink_cap->video_latency[1] = db[11];
 		if (len >= 12)
-			sink_cap->audio_latency[1] = db[12];	
+			sink_cap->audio_latency[1] = db[12];
 	}
-	
+
 	if(HDMI_Video_present)
 	{
 		offset++;
 		if (len >= 8+offset){
-			//H_3D_present = db[8+offset] & (1 << 7);	
-			sink_cap-> _3D_present = (db[8+offset] >> 7) & 1;	
+			//H_3D_present = db[8+offset] & (1 << 7);
+			sink_cap-> _3D_present = (db[8+offset] >> 7) & 1;
 			multi_present= (db[8+offset] & 0x60) >> 5;
 			//printk("present offset=%d db[8+offset]=0x%x\n",offset,db[8+offset]);
 		}
-		
+
 		offset++;
 		if (len >= 8+offset){
 			vic_len = db[8+offset] >> 5;
-			hdmi_3d_len = db[8+offset] & 0x1f;					
+			hdmi_3d_len = db[8+offset] & 0x1f;
 		}
-		
+
 		for(i = 1; i <= vic_len; i++)
-		{					
+		{
 			sink_cap-> extended_vic |= (1 << db[8+offset+i]);
 			DPTX_EDID_DBG("sink_cap-> extended_vic = %x db[8+%d+%d]=%x\n", sink_cap-> extended_vic,offset,i,db[8+offset+i]);
 		}
-			
+
 		for (i = 0; i < vic_len && len >= (9 + offset + i); i++) {
 			u8 vic;
 			vic = db[9 + offset + i];
 		}
 		offset += 1 + vic_len;
-	
+
 		/* 3D_Structure_ALL */
 		if(multi_present == 1 || multi_present == 2)
 			sink_cap->structure_all = (db[8 + offset] << 8) | db[9 + offset];
-								
+
 		/* check if 3D_MASK is present */
 		if (multi_present == 2){
-			mask = (db[10 + offset] << 8) | db[11 + offset];				
-	
+			mask = (db[10 + offset] << 8) | db[11 + offset];
+
 			for (i = 0; i < 16 ; i++){
 				if((mask>>i) & 1){
 				sink_cap->_3D_vic[i]= vdb[i];
 				DPTX_EDID_DBG("sink_cap->_3D_vic[%d]=%d\n",i,sink_cap->_3D_vic[i]);
 				}
 			}
-			
-		}				
+
+		}
 		else
 			mask = 0xffff;
-	}	
-	
-	DPTX_EDID_DBG("cec addr:0x%x 0x%x\n",sink_cap->cec_phy_addr[0],sink_cap->cec_phy_addr[1]);	
+	}
+
+	DPTX_EDID_DBG("cec addr:0x%x 0x%x\n",sink_cap->cec_phy_addr[0],sink_cap->cec_phy_addr[1]);
 	DPTX_EDID_DBG("HDMI: DVI dual %d, "
 		    "max TMDS clock %d, "
 		    "latency present %d %d, "
@@ -1566,11 +1566,11 @@ static void parse_hdmi_vsdb(struct sink_capabilities_t *sink_cap, const u8 *db)
 		    sink_cap->video_latency[1],
 		    sink_cap->audio_latency[0],
 		    sink_cap->audio_latency[1]);
-			
+
 	DPTX_EDID_DBG("HDMI 3D: HDMI_Video_present 0x%x _3D_present 0x%x ,multi_present 0x%x\n",HDMI_Video_present,sink_cap-> _3D_present,multi_present);
 	DPTX_EDID_DBG("vic_len %d,hdmi_3d_len %d\n",vic_len,hdmi_3d_len);
 	DPTX_EDID_DBG("structure_all 0x%x,mask 0x%x\n",sink_cap->structure_all,mask);
-				
+
 }
 
 static void parse_hdmi_forum_vsdb(struct sink_capabilities_t *sink_cap, const u8 *db)
@@ -1614,14 +1614,14 @@ static void rtk_parse_eld(uint8_t *eld,struct sink_capabilities_t *sink_cap)
 	while (sad_count > 0) {
 
         sink_cap-> audio_data.ADB[i].coding_type = ((sad[0] & 0x78)>>3);
-		sink_cap-> audio_data.ADB[i].channel_count = max((unsigned)sink_cap->audio_data.ADB[i].channel_count,((sad[0]&7)+1u));		
+		sink_cap-> audio_data.ADB[i].channel_count = max((unsigned)sink_cap->audio_data.ADB[i].channel_count,((sad[0]&7)+1u));
 		sink_cap-> audio_data.ADB[i].sample_freq_all |= sad[1];
-		
+
 		if(sink_cap-> audio_data.ADB[i].coding_type == 0x01) /* PCM */
-			sink_cap-> audio_data.ADB[i].sample_size_all = sad[2];	
+			sink_cap-> audio_data.ADB[i].sample_size_all = sad[2];
 		else
-			sink_cap-> audio_data.ADB[i].max_bit_rate_divided_by_8KHz = sad[2]; 
-	
+			sink_cap-> audio_data.ADB[i].max_bit_rate_divided_by_8KHz = sad[2];
+
 		switch (sad[0] & 0x78) {
 		case 0x08: /* PCM */
 			max_channels = max(max_channels,((sad[0]&7)+1u));
@@ -1639,7 +1639,7 @@ static void rtk_parse_eld(uint8_t *eld,struct sink_capabilities_t *sink_cap)
 
 	//sink_cap->sampling_rate_cap = rate_mask;
 	//sink_cap->max_channel_cap = max_channels;
-	
+
 }
 
 void dptx_edid_to_eld(struct edid *edid, struct sink_capabilities_t *sink_cap)
@@ -1716,7 +1716,7 @@ void dptx_edid_to_eld(struct edid *edid, struct sink_capabilities_t *sink_cap)
 				/* Speaker Allocation Data Block */
 				DPTX_EDID_DBG("[%s] SPEAKER_BLOCK (%u bytes)\n",__FUNCTION__,dbl);
 				if (dbl >= 1){
-					eld[7] = db[1];					
+					eld[7] = db[1];
 					sink_cap-> audio_data.SADB_length= dbl;
 					memcpy(sink_cap-> audio_data.SADB ,&db[1],sizeof(sink_cap->audio_data.SADB));
 				}
@@ -1736,7 +1736,7 @@ void dptx_edid_to_eld(struct edid *edid, struct sink_capabilities_t *sink_cap)
 			case USE_EXTENDED_TAG:
 				/* HDMI USE_EXTENDED_TAG Block */
 				parse_hdmi_extdb(sink_cap, db);
-				break;	
+				break;
 			default:
 				DPTX_EDID_ERR("[%s] Unknow tag(0x%x)\n", __FUNCTION__, cea_db_tag(db));
 				break;
@@ -1756,12 +1756,12 @@ int dptx_add_edid_modes(struct edid *edid, struct sink_capabilities_t *sink_cap)
 	int num_modes = 0;
 	u32 quirks=0;
 
-	if (edid == NULL) 
+	if (edid == NULL)
 		return 0;
-	
-	if (!rtk_edid_is_valid(edid)) 
+
+	if (!rtk_edid_is_valid(edid))
 		return 0;
-	
+
 	/*
 	 * EDID spec says modes should be preferred in this order:
 	 * - preferred detailed mode
@@ -1776,21 +1776,21 @@ int dptx_add_edid_modes(struct edid *edid, struct sink_capabilities_t *sink_cap)
 	 *
 	 * XXX order for additional mode types in extension blocks?
 	 */
-	
+
 	num_modes +=rtk_add_standard_mode(sink_cap, edid);
 	num_modes +=rtk_add_detailed_modes(sink_cap,edid,quirks);
 	DPTX_EDID_DBG("Detailed Timing Descriptor\n");
 	print_cea_modes(sink_cap->vic, sink_cap->vic2, sink_cap->vic2_420);
-	
+
 	//num_modes += add_cvt_modes(connector, edid);
 	//num_modes += add_standard_modes(connector, edid);
 	num_modes += add_established_modes(edid,&sink_cap->est_modes);
 	//if (edid->features & DRM_EDID_FEATURE_DEFAULT_GTF)
 		//num_modes += add_inferred_modes(connector, edid);
-	
+
 	num_modes += add_cea_modes(edid,&sink_cap->vic,&sink_cap->vic2);
 	rtk_add_display_info(edid,&sink_cap->display_info);
-	
+
 	return num_modes;
 }
 

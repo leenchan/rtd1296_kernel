@@ -45,7 +45,6 @@
 #include <linux/cleancache.h>
 
 #include "ext4.h"
-#include <trace/events/android_fs.h>
 
 /*
  * Call ext4_decrypt on every single page, reusing the encryption
@@ -55,15 +54,15 @@ static void completion_pages(struct work_struct *work)
 {
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
 	struct ext4_crypto_ctx *ctx =
-		container_of(work, struct ext4_crypto_ctx, work);
-	struct bio	*bio	= ctx->bio;
+		container_of(work, struct ext4_crypto_ctx, r.work);
+	struct bio	*bio	= ctx->r.bio;
 	struct bio_vec	*bv;
 	int		i;
 
 	bio_for_each_segment_all(bv, bio, i) {
 		struct page *page = bv->bv_page;
 
-		int ret = ext4_decrypt(ctx, page);
+		int ret = ext4_decrypt(page);
 		if (ret) {
 			WARN_ON_ONCE(1);
 			SetPageError(page);
@@ -87,17 +86,6 @@ static inline bool ext4_bio_encrypted(struct bio *bio)
 #endif
 }
 
-static void
-ext4_trace_read_completion(struct bio *bio, int err)
-{
-	struct page *first_page = bio->bi_io_vec[0].bv_page;
-
-	if (first_page != NULL)
-		trace_android_fs_dataread_end(first_page->mapping->host,
-					      page_offset(first_page),
-					      bio->bi_iter.bi_size);
-}
-
 /*
  * I/O completion handler for multipage BIOs.
  *
@@ -110,30 +98,27 @@ ext4_trace_read_completion(struct bio *bio, int err)
  * status of that page is hard.  See end_buffer_async_read() for the details.
  * There is no point in duplicating all that complexity.
  */
-static void mpage_end_io(struct bio *bio, int err)
+static void mpage_end_io(struct bio *bio)
 {
 	struct bio_vec *bv;
 	int i;
 
-	if (trace_android_fs_dataread_start_enabled())
-		ext4_trace_read_completion(bio, err);
-
 	if (ext4_bio_encrypted(bio)) {
 		struct ext4_crypto_ctx *ctx = bio->bi_private;
 
-		if (err) {
+		if (bio->bi_error) {
 			ext4_release_crypto_ctx(ctx);
 		} else {
-			INIT_WORK(&ctx->work, completion_pages);
-			ctx->bio = bio;
-			queue_work(ext4_read_workqueue, &ctx->work);
+			INIT_WORK(&ctx->r.work, completion_pages);
+			ctx->r.bio = bio;
+			queue_work(ext4_read_workqueue, &ctx->r.work);
 			return;
 		}
 	}
 	bio_for_each_segment_all(bv, bio, i) {
 		struct page *page = bv->bv_page;
 
-		if (!err) {
+		if (!bio->bi_error) {
 			SetPageUptodate(page);
 		} else {
 			ClearPageUptodate(page);
@@ -143,24 +128,6 @@ static void mpage_end_io(struct bio *bio, int err)
 	}
 
 	bio_put(bio);
-}
-
-static void
-ext4_submit_bio_read(struct bio *bio)
-{
-	if (trace_android_fs_dataread_start_enabled()) {
-		struct page *first_page = bio->bi_io_vec[0].bv_page;
-
-		if (first_page != NULL) {
-			trace_android_fs_dataread_start(
-				first_page->mapping->host,
-				page_offset(first_page),
-				bio->bi_iter.bi_size,
-				current->pid,
-				current->comm);
-		}
-	}
-	submit_bio(READ, bio);
 }
 
 int ext4_mpage_readpages(struct address_space *mapping,
@@ -198,8 +165,8 @@ int ext4_mpage_readpages(struct address_space *mapping,
 		if (pages) {
 			page = list_entry(pages->prev, struct page, lru);
 			list_del(&page->lru);
-			if (add_to_page_cache_lru(page, mapping,
-						  page->index, GFP_KERNEL))
+			if (add_to_page_cache_lru(page, mapping, page->index,
+				  mapping_gfp_constraint(mapping, GFP_KERNEL)))
 				goto next_page;
 		}
 
@@ -304,7 +271,7 @@ int ext4_mpage_readpages(struct address_space *mapping,
 		 */
 		if (bio && (last_block_in_bio != blocks[0] - 1)) {
 		submit_and_realloc:
-			ext4_submit_bio_read(bio);
+			submit_bio(READ, bio);
 			bio = NULL;
 		}
 		if (bio == NULL) {
@@ -317,7 +284,7 @@ int ext4_mpage_readpages(struct address_space *mapping,
 					goto set_error_page;
 			}
 			bio = bio_alloc(GFP_KERNEL,
-				min_t(int, nr_pages, bio_get_nr_vecs(bdev)));
+				min_t(int, nr_pages, BIO_MAX_PAGES));
 			if (!bio) {
 				if (ctx)
 					ext4_release_crypto_ctx(ctx);
@@ -336,14 +303,14 @@ int ext4_mpage_readpages(struct address_space *mapping,
 		if (((map.m_flags & EXT4_MAP_BOUNDARY) &&
 		     (relative_block == map.m_len)) ||
 		    (first_hole != blocks_per_page)) {
-			ext4_submit_bio_read(bio);
+			submit_bio(READ, bio);
 			bio = NULL;
 		} else
 			last_block_in_bio = blocks[blocks_per_page - 1];
 		goto next_page;
 	confused:
 		if (bio) {
-			ext4_submit_bio_read(bio);
+			submit_bio(READ, bio);
 			bio = NULL;
 		}
 		if (!PageUptodate(page))
@@ -356,6 +323,6 @@ int ext4_mpage_readpages(struct address_space *mapping,
 	}
 	BUG_ON(pages && !list_empty(pages));
 	if (bio)
-		ext4_submit_bio_read(bio);
+		submit_bio(READ, bio);
 	return 0;
 }

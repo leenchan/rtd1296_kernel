@@ -32,27 +32,6 @@
 #include <sound/pcm_params.h>
 #include <sound/timer.h>
 
-#ifdef RTK_TRACE_ALSA_EN
-#define RTK_TRACE_ALSA(format, ...) printk(KERN_ALERT format, ##__VA_ARGS__);
-#define RTK_TRACE_ALSA_SEC(sec, format, ...)    \
-{\
-    static long count = 0;\
-    if((jiffies - count) > HZ * sec)\
-    {\
-        count = jiffies;\
-        printk(KERN_ALERT format, ##__VA_ARGS__);\
-    }\
-}
-#else
-#define RTK_TRACE_ALSA(format, ...)
-#define RTK_TRACE_ALSA_SEC(sec, format, ...)
-#endif
-
-#ifdef CONFIG_SND_REALTEK
-int snd_realtek_capture_check_hdmirx_enable(void);
-char *snd_realtek_capture_get_stream_name(void);
-#endif
-
 #ifdef CONFIG_SND_PCM_XRUN_DEBUG
 #define CREATE_TRACE_POINTS
 #include "pcm_trace.h"
@@ -822,7 +801,7 @@ void snd_interval_mulkdiv(const struct snd_interval *a, unsigned int k,
  * negative error code.
  */
 int snd_interval_ratnum(struct snd_interval *i,
-			unsigned int rats_count, struct snd_ratnum *rats,
+			unsigned int rats_count, const struct snd_ratnum *rats,
 			unsigned int *nump, unsigned int *denp)
 {
 	unsigned int best_num, best_den;
@@ -941,7 +920,8 @@ EXPORT_SYMBOL(snd_interval_ratnum);
  * negative error code.
  */
 static int snd_interval_ratden(struct snd_interval *i,
-			       unsigned int rats_count, struct snd_ratden *rats,
+			       unsigned int rats_count,
+			       const struct snd_ratden *rats,
 			       unsigned int *nump, unsigned int *denp)
 {
 	unsigned int best_num, best_diff, best_den;
@@ -1360,7 +1340,7 @@ EXPORT_SYMBOL(snd_pcm_hw_constraint_ranges);
 static int snd_pcm_hw_rule_ratnums(struct snd_pcm_hw_params *params,
 				   struct snd_pcm_hw_rule *rule)
 {
-	struct snd_pcm_hw_constraint_ratnums *r = rule->private;
+	const struct snd_pcm_hw_constraint_ratnums *r = rule->private;
 	unsigned int num = 0, den = 0;
 	int err;
 	err = snd_interval_ratnum(hw_param_interval(params, rule->var),
@@ -1384,10 +1364,10 @@ static int snd_pcm_hw_rule_ratnums(struct snd_pcm_hw_params *params,
 int snd_pcm_hw_constraint_ratnums(struct snd_pcm_runtime *runtime, 
 				  unsigned int cond,
 				  snd_pcm_hw_param_t var,
-				  struct snd_pcm_hw_constraint_ratnums *r)
+				  const struct snd_pcm_hw_constraint_ratnums *r)
 {
 	return snd_pcm_hw_rule_add(runtime, cond, var,
-				   snd_pcm_hw_rule_ratnums, r,
+				   snd_pcm_hw_rule_ratnums, (void *)r,
 				   var, -1);
 }
 
@@ -1396,7 +1376,7 @@ EXPORT_SYMBOL(snd_pcm_hw_constraint_ratnums);
 static int snd_pcm_hw_rule_ratdens(struct snd_pcm_hw_params *params,
 				   struct snd_pcm_hw_rule *rule)
 {
-	struct snd_pcm_hw_constraint_ratdens *r = rule->private;
+	const struct snd_pcm_hw_constraint_ratdens *r = rule->private;
 	unsigned int num = 0, den = 0;
 	int err = snd_interval_ratden(hw_param_interval(params, rule->var),
 				  r->nrats, r->rats, &num, &den);
@@ -1419,10 +1399,10 @@ static int snd_pcm_hw_rule_ratdens(struct snd_pcm_hw_params *params,
 int snd_pcm_hw_constraint_ratdens(struct snd_pcm_runtime *runtime, 
 				  unsigned int cond,
 				  snd_pcm_hw_param_t var,
-				  struct snd_pcm_hw_constraint_ratdens *r)
+				  const struct snd_pcm_hw_constraint_ratdens *r)
 {
 	return snd_pcm_hw_rule_add(runtime, cond, var,
-				   snd_pcm_hw_rule_ratdens, r,
+				   snd_pcm_hw_rule_ratdens, (void *)r,
 				   var, -1);
 }
 
@@ -1896,20 +1876,17 @@ void snd_pcm_period_elapsed(struct snd_pcm_substream *substream)
 		return;
 	runtime = substream->runtime;
 
-	if (runtime->transfer_ack_begin)
-		runtime->transfer_ack_begin(substream);
-
 	snd_pcm_stream_lock_irqsave(substream, flags);
 	if (!snd_pcm_running(substream) ||
 	    snd_pcm_update_hw_ptr0(substream, 1) < 0)
 		goto _end;
 
+#ifdef CONFIG_SND_PCM_TIMER
 	if (substream->timer_running)
 		snd_timer_interrupt(substream->timer, 1);
+#endif
  _end:
 	snd_pcm_stream_unlock_irqrestore(substream, flags);
-	if (runtime->transfer_ack_end)
-		runtime->transfer_ack_end(substream);
 	kill_fasync(&runtime->fasync, SIGIO, POLL_IN);
 }
 
@@ -1964,35 +1941,13 @@ static int wait_for_avail(struct snd_pcm_substream *substream,
 		else
 			avail = snd_pcm_capture_avail(runtime);
 		if (avail >= runtime->twake)
-		{
 			break;
-		}
-
-#ifdef CONFIG_SND_REALTEK
-        RTK_TRACE_ALSA_SEC(3, "%s %s %s @ %s\n", substream->name, substream->pcm->id, substream->pcm->name, __func__);
-        if((! strcmp(substream->pcm->name, snd_realtek_capture_get_stream_name())) 
-            && (! is_playback))
-		{
-            // only for capture case
-            if(snd_realtek_capture_check_hdmirx_enable() == 0)
-            {
-                // HDMI-RX is plug out
-                printk(KERN_ALERT "ALSA: HDMI-RX plug out @ %s %d\n", __func__, __LINE__);
-        		set_current_state(TASK_INTERRUPTIBLE);
-    			err = -EIO;
-    			break;
-            }
-		}
-#endif
-
 		snd_pcm_stream_unlock_irq(substream);
 
 		tout = schedule_timeout(wait_time);
 
 		snd_pcm_stream_lock_irq(substream);
 		set_current_state(TASK_INTERRUPTIBLE);
-
-
 		switch (runtime->status->state) {
 		case SNDRV_PCM_STATE_SUSPENDED:
 			err = -ESTRPIPE;
@@ -2282,7 +2237,6 @@ static snd_pcm_sframes_t snd_pcm_lib_read1(struct snd_pcm_substream *substream,
 	snd_pcm_uframes_t avail;
 	int err = 0;
 
-    RTK_TRACE_ALSA_SEC(3, " %x %s @ %s %d\n", size, substream->name, __func__, __LINE__);
 	if (size == 0)
 		return 0;
 
@@ -2290,7 +2244,6 @@ static snd_pcm_sframes_t snd_pcm_lib_read1(struct snd_pcm_substream *substream,
 	switch (runtime->status->state) {
 	case SNDRV_PCM_STATE_PREPARED:
 		if (size >= runtime->start_threshold) {
-            RTK_TRACE_ALSA(" @ %s %d\n", __func__, __LINE__);
 			err = snd_pcm_start(substream);
 			if (err < 0)
 				goto _end_unlock;
@@ -2332,9 +2285,7 @@ static snd_pcm_sframes_t snd_pcm_lib_read1(struct snd_pcm_substream *substream,
 					runtime->control->avail_min ? : 1);
 			err = wait_for_avail(substream, &avail);
 			if (err < 0)
-			{
 				goto _end_unlock;
-			}
 			if (!avail)
 				continue; /* draining */
 		}
@@ -2353,9 +2304,7 @@ static snd_pcm_sframes_t snd_pcm_lib_read1(struct snd_pcm_substream *substream,
 		err = transfer(substream, appl_ofs, data, offset, frames);
 		snd_pcm_stream_lock_irq(substream);
 		if (err < 0)
-		{
 			goto _end_unlock;
-		}
 		switch (runtime->status->state) {
 		case SNDRV_PCM_STATE_XRUN:
 			err = -EPIPE;

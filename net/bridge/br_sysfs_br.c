@@ -102,8 +102,15 @@ static ssize_t ageing_time_show(struct device *d,
 
 static int set_ageing_time(struct net_bridge *br, unsigned long val)
 {
-	br->ageing_time = clock_t_to_jiffies(val);
-	return 0;
+	int ret;
+
+	if (!rtnl_trylock())
+		return restart_syscall();
+
+	ret = br_set_ageing_time(br, val);
+	rtnl_unlock();
+
+	return ret;
 }
 
 static ssize_t ageing_time_store(struct device *d,
@@ -815,15 +822,9 @@ static ssize_t brforward_read(struct file *filp, struct kobject *kobj,
 	if (off % sizeof(struct __fdb_entry) != 0)
 		return -EINVAL;
 
-#ifdef CONFIG_RTK_GUEST_ZONE
-	n =  br_fdb_fillbuf(br, buf,
-			    count / sizeof(struct __fdb_entry),
-			    off / sizeof(struct __fdb_entry), 0);
-#else
 	n =  br_fdb_fillbuf(br, buf,
 			    count / sizeof(struct __fdb_entry),
 			    off / sizeof(struct __fdb_entry));
-#endif
 
 	if (n > 0)
 		n *= sizeof(struct __fdb_entry);

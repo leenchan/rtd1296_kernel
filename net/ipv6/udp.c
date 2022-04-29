@@ -182,10 +182,12 @@ static inline int compute_score(struct sock *sk, struct net *net,
 		score++;
 	}
 
+	if (sk->sk_incoming_cpu == raw_smp_processor_id())
+		score++;
+
 	return score;
 }
 
-#define SCORE2_MAX (1 + 1 + 1)
 static inline int compute_score2(struct sock *sk, struct net *net,
 				 const struct in6_addr *saddr, __be16 sport,
 				 const struct in6_addr *daddr,
@@ -223,6 +225,9 @@ static inline int compute_score2(struct sock *sk, struct net *net,
 		score++;
 	}
 
+	if (sk->sk_incoming_cpu == raw_smp_processor_id())
+		score++;
+
 	return score;
 }
 
@@ -251,8 +256,7 @@ begin:
 				hash = udp6_ehashfn(net, daddr, hnum,
 						    saddr, sport);
 				matches = 1;
-			} else if (score == SCORE2_MAX)
-				goto exact_match;
+			}
 		} else if (score == badness && reuseport) {
 			matches++;
 			if (reciprocal_scale(hash, matches) == 0)
@@ -269,7 +273,6 @@ begin:
 		goto begin;
 
 	if (result) {
-exact_match:
 		if (unlikely(!atomic_inc_not_zero_hint(&result->sk_refcnt, 2)))
 			result = NULL;
 		else if (unlikely(compute_score2(result, net, saddr, sport,
@@ -644,7 +647,7 @@ int udpv6_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 
 		/* if we're overly short, let UDP handle it */
 		encap_rcv = ACCESS_ONCE(up->encap_rcv);
-		if (skb->len > sizeof(struct udphdr) && encap_rcv) {
+		if (encap_rcv) {
 			int ret;
 
 			/* Verify checksum before giving to encap */
@@ -1499,7 +1502,8 @@ int __net_init udp6_proc_init(struct net *net)
 	return udp_proc_register(net, &udp6_seq_afinfo);
 }
 
-void udp6_proc_exit(struct net *net) {
+void udp6_proc_exit(struct net *net)
+{
 	udp_proc_unregister(net, &udp6_seq_afinfo);
 }
 #endif /* CONFIG_PROC_FS */
@@ -1546,7 +1550,6 @@ struct proto udpv6_prot = {
 	.compat_getsockopt = compat_udpv6_getsockopt,
 #endif
 	.clear_sk	   = udp_v6_clear_sk,
-	.diag_destroy      = udp_abort,
 };
 
 static struct inet_protosw udpv6_protosw = {

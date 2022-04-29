@@ -16,15 +16,17 @@
 #include <linux/acpi.h>
 #include <linux/of.h>
 #include <linux/cpufeature.h>
+#include <linux/tick.h>
 
 #include "base.h"
 
-static DEFINE_PER_CPU(struct device *, cpu_sys_devices);
-
-#ifdef CONFIG_ARCH_RTD129x //CPU core 1-3 power gating, jamestai20160118
+#ifdef CONFIG_ARCH_RTD129X //CPU core 1-3 power gating, jamestai20160118
 extern void rtk_cpu_power_down(int cpu);
 extern void rtk_cpu_power_up(int cpu);
 #endif
+
+
+static DEFINE_PER_CPU(struct device *, cpu_sys_devices);
 
 static int cpu_subsys_match(struct device *dev, struct device_driver *drv)
 {
@@ -45,7 +47,7 @@ static void change_cpu_under_node(struct cpu *cpu,
 	cpu->node_id = to_nid;
 }
 
-static int __ref cpu_subsys_online(struct device *dev)
+static int cpu_subsys_online(struct device *dev)
 {
 	struct cpu *cpu = container_of(dev, struct cpu, dev);
 	int cpuid = dev->id;
@@ -56,9 +58,10 @@ static int __ref cpu_subsys_online(struct device *dev)
 	if (from_nid == NUMA_NO_NODE)
 		return -ENODEV;
 
-#ifdef CONFIG_ARCH_RTD129x //CPU core 1-3 power gating, jamestai20160118
+#ifdef CONFIG_ARCH_RTD129X //CPU core 1-3 power gating, jamestai20160118
 	rtk_cpu_power_up(cpuid);
 #endif
+
 	ret = cpu_up(cpuid);
 	/*
 	 * When hot adding memory to memoryless node and enabling a cpu
@@ -73,7 +76,7 @@ static int __ref cpu_subsys_online(struct device *dev)
 
 static int cpu_subsys_offline(struct device *dev)
 {
-#ifdef CONFIG_ARCH_RTD129x //CPU core 1-3 power gating, jamestai20160118
+#ifdef CONFIG_ARCH_RTD129X //CPU core 1-3 power gating, jamestai20160118
 	int ret = 0;
 	ret = cpu_down(dev->id);
 	rtk_cpu_power_down(dev->id);
@@ -280,6 +283,30 @@ static ssize_t print_cpus_offline(struct device *dev,
 }
 static DEVICE_ATTR(offline, 0444, print_cpus_offline, NULL);
 
+static ssize_t print_cpus_isolated(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	int n = 0, len = PAGE_SIZE-2;
+
+	n = scnprintf(buf, len, "%*pbl\n", cpumask_pr_args(cpu_isolated_map));
+
+	return n;
+}
+static DEVICE_ATTR(isolated, 0444, print_cpus_isolated, NULL);
+
+#ifdef CONFIG_NO_HZ_FULL
+static ssize_t print_cpus_nohz_full(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	int n = 0, len = PAGE_SIZE-2;
+
+	n = scnprintf(buf, len, "%*pbl\n", cpumask_pr_args(tick_nohz_full_mask));
+
+	return n;
+}
+static DEVICE_ATTR(nohz_full, 0444, print_cpus_nohz_full, NULL);
+#endif
+
 static void cpu_device_release(struct device *dev)
 {
 	/*
@@ -446,6 +473,10 @@ static struct attribute *cpu_root_attrs[] = {
 	&cpu_attrs[2].attr.attr,
 	&dev_attr_kernel_max.attr,
 	&dev_attr_offline.attr,
+	&dev_attr_isolated.attr,
+#ifdef CONFIG_NO_HZ_FULL
+	&dev_attr_nohz_full.attr,
+#endif
 #ifdef CONFIG_GENERIC_CPU_AUTOPROBE
 	&dev_attr_modalias.attr,
 #endif

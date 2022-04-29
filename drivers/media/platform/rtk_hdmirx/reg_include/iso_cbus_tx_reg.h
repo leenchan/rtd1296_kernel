@@ -1,13 +1,15 @@
-/*
- * iso_cbus_tx_reg.h - RTK hdmi rx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+/**************************************************************
+// Spec Version                  : 1.0
+// Parser Version                : DVR_Parser_6.11(120105)
+// CModelGen Version             : 5.1 2012.01.05
+// Naming Rule                   :  Module_Register_Name
+// Naming Rule                   : Module_Register_Name_reg
+// Parse Option                  : Only Parse _op1
+// Parse Address Region          : All Address Region 
+// Decode bit number             : 12 bits
+// Firmware Header Generate Date : 2015/10/1 11:20:51
+***************************************************************/
+
 
 #ifndef _ISO_CBUS_TX_REG_H_INCLUDED_
 #define _ISO_CBUS_TX_REG_H_INCLUDED_

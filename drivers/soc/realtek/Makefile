@@ -1,5 +1,3 @@
 
-obj-$(CONFIG_ARCH_RTD129x)	+= rtd129x/
-obj-$(CONFIG_RTK_XEN_SUPPORT)  += xen/
-obj-$(CONFIG_RTK_CWMP_TREE)	+= cwmp/
-
+obj-$(CONFIG_ARCH_RTD129X)	+= rtd129x/
+obj-$(CONFIG_ARCH_RTD119X)	+= rtd119x/

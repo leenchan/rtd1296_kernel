@@ -40,21 +40,8 @@ ion_phys_addr_t ion_carveout_allocate(struct ion_heap *heap,
 {
 	struct ion_carveout_heap *carveout_heap =
 		container_of(heap, struct ion_carveout_heap, heap);
+	unsigned long offset = gen_pool_alloc(carveout_heap->pool, size);
 
-        unsigned long offset = gen_pool_alloc(carveout_heap->pool, size);
-/*
-//fix this later, try pool->algo, check lib/genalloc.c
-	//20130408 charleslin: supports allocate aligned memory
-	unsigned long offset;
-	if(align > PAGE_SIZE)
-	{
-		offset = gen_pool_alloc_align(carveout_heap->pool, size, (align / PAGE_SIZE) - 1);
-        }
-	else
-	{
-		offset = gen_pool_alloc(carveout_heap->pool, size);
-        }
-*/
 	if (!offset)
 		return ION_CARVEOUT_ALLOCATE_FAIL;
 

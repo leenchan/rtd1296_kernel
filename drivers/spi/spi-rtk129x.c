@@ -1,13 +1,17 @@
 /*
- * Realtek SPI driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+* Realtek SPI driver
+*
+* Copyright(c) 2015 Realtek Corporation.
+*
+* This program is free software; you can redistribute it and/or modify it
+* under the terms of version 2 of the GNU General Public License as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful, but WITHOUT
+* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+* FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+* more details.
+*/
 
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -22,7 +26,10 @@
 #include <linux/of_address.h>
 #include <linux/of_gpio.h>
 #include <linux/suspend.h>
+#include <linux/clkdev.h>   // clk_get
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
+#include <linux/reset-helper.h> // rstc_get
 #include <linux/reset.h>
 
 #define SPI_CONTROL		0x0
@@ -90,7 +97,7 @@
 #define RTK_SPI_MAX_READ_LEN 16
 
 #define RTK_SPI_BASE_CLK		256000000
-#define RTK_SPI_MAX_CLK			 25600000	/* for RF4CE device */
+#define RTK_SPI_MAX_CLK			 12800000	/* for RF4CE device */
 
 static int cs_ctrl_gpio = -1;
 
@@ -417,8 +424,8 @@ static int rtk_gspi_probe(struct platform_device *pdev)
 	struct rtk_gspi_platform_data *platp = pdev->dev.platform_data;
 	struct rtk_gspi *hw;
 	struct spi_master *master;
-	struct clk *clk = clk_get(&pdev->dev, NULL);
-	struct reset_control *rstc = reset_control_get(&pdev->dev, NULL);
+	struct clk *clk = clk_get(NULL, "clk_en_gspi");
+	struct reset_control *rstc = rstc_get("rstn_gspi");
 
 	int err = -ENODEV;
 
@@ -461,7 +468,7 @@ static int rtk_gspi_probe(struct platform_device *pdev)
 	hw->base = of_iomap(pdev->dev.of_node, 0);
 	if (!hw->base)
 		goto exit_busy;
-	writel(SPI_CLK_DIV(8) | BIT(8), hw->base + SPI_CONTROL);//Clock 15.43MHz, clk_div:16, phase adj
+	writel(SPI_CLK_DIV(9) | BIT(8), hw->base + SPI_CONTROL);//Clock 12.35MHz //clk div:20, phase adj
 	writel(DEFAULT_TIMING,  hw->base + SPI_CS_TIMING);
 	writel(DEFAULT_AUX,     hw->base + SPI_AUX_CTRL);
 
@@ -523,6 +530,7 @@ static int rtk_gspi_suspend(struct device *dev)
 		printk(KERN_ERR "[RTK_SPI] %s Suspend mode\n", __func__);
 	}
 
+
 	printk(KERN_ERR "[RTK_SPI] Exit %s\n", __func__);
 
 	return 0;
@@ -531,6 +539,8 @@ static int rtk_gspi_suspend(struct device *dev)
 static int rtk_gspi_resume(struct device *dev)
 {
 	struct rtk_gspi *hw = dev_get_drvdata(dev);
+	struct clk *clk = clk_get(NULL, "clk_en_gspi");
+	struct reset_control *rstc = rstc_get("rstn_gspi");
 
 	printk(KERN_ERR "[RTK_SPI] Enter %s\n", __func__);
 
@@ -542,8 +552,11 @@ static int rtk_gspi_resume(struct device *dev)
 		printk(KERN_ERR "[RTK_SPI] %s Suspend mode\n", __func__);
 	}
 
+	/* Enable clk and release reset module */
+	reset_control_deassert(rstc);	// release reset
+	clk_prepare_enable(clk);		// enable clk
 
-	writel(SPI_CLK_DIV(8) | BIT(8), hw->base + SPI_CONTROL);//Clock 15.43MHz, clk_div:16, phase adj
+	writel(SPI_CLK_DIV(9) | BIT(8), hw->base + SPI_CONTROL);//Clock 12.35MHz //clk div:20, phase adj
 	writel(DEFAULT_TIMING,  hw->base + SPI_CS_TIMING);
 	writel(DEFAULT_AUX,     hw->base + SPI_AUX_CTRL);
 

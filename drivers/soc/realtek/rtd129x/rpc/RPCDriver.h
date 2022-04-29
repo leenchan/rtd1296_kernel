@@ -1,15 +1,3 @@
-/*
- * Realtek RPC driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- */
-
-
 #ifndef _RPCDRIVER_H
 #define _RPCDRIVER_H
 
@@ -56,7 +44,6 @@
 #include <asm/cacheflush.h>
 
 #define R_PROGRAM       98
-#define AUDIO_SYSTEM    201
 #define AUDIO_AGENT     202
 #define VIDEO_AGENT     300
 
@@ -315,7 +302,7 @@ static inline uint32_t get_ring_data(const char *func, RPC_DEV *dev, uint32_t ou
     int tail = dev->ringEnd - out;
 
     if(size < datasize){
-        pr_debug("%s: Size not enough %d < %d\n", func, size, datasize);
+        pr_warn("%s: Size not enough %d < %d\n", func, size, datasize);
         return 0;
     }
 
@@ -366,17 +353,16 @@ static inline void convert_rpc_struct(const char *func, RPC_STRUCT *rpc)
     rpc->mycontext = ntohl(rpc->mycontext);
 }
 
-extern volatile void __iomem *rpc_refclk_base;
 static inline void show_rpc_struct(const char *func, RPC_STRUCT *rpc)
 {
 #ifdef RPC_SUPPORT_MULTI_CALLER_SEND_TID_PID
-    pr_debug("%s: program:%u version:%u procedure:%u taskID:%u sysTID:%u sysPID:%u size:%u context:%x 90k:%u %s\n",
+    pr_err("%s: program:%u version:%u procedure:%u taskID:%u sysTID:%u sysPID:%u size:%u context:%x %s\n",
         func, rpc->programID, rpc->versionID, rpc->procedureID, rpc->taskID, rpc->sysTID, rpc->sysPID, rpc->parameterSize,
-        rpc->mycontext, readl(rpc_refclk_base), in_atomic() ? "atomic" : "");
+        rpc->mycontext, in_atomic() ? "atomic" : "");
 #else
-    pr_debug("%s: program:%u version:%u procedure:%u taskID:%u sysPID:%u size:%u context:%x 90k:u %s\n",
+    pr_err("%s: program:%u version:%u procedure:%u taskID:%u sysPID:%u size:%u context:%x %s\n",
         func, rpc->programID, rpc->versionID, rpc->procedureID, rpc->taskID, rpc->sysPID, rpc->parameterSize,
-        rpc->mycontext, readl(rpc_refclk_base), in_atomic() ? "atomic" : "");
+        rpc->mycontext, in_atomic() ? "atomic" : "");
 #endif
 }
 
@@ -403,15 +389,15 @@ static inline void peek_rpc_struct(const char *func, RPC_DEV *dev)
             return;
         arg = ntohl(arg);
         if(rpc.procedureID == 1)
-            pr_debug("%s: alloc %u bytes\n", func, arg);
+            pr_info("%s: alloc %u bytes\n", func, arg);
         else
-            pr_debug("%s: free addr %x\n", func, arg);
+            pr_info("%s: free addr %x\n", func, arg);
     }else if(rpc.programID == REPLYID && rpc.versionID == REPLYID){
         out = get_ring_data(func, dev, out, (char *)&pid, sizeof(uint32_t));
         if(out == 0)
             return;
         pid = ntohl(pid);
-        pr_debug("%s: reply to taskid:%u\n", func, pid);
+        pr_info("%s: reply to taskid:%u\n", func, pid);
     }
 }
 

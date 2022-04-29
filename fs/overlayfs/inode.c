@@ -12,8 +12,7 @@
 #include <linux/xattr.h>
 #include "overlayfs.h"
 
-static int ovl_copy_up_last(struct dentry *dentry, struct iattr *attr,
-			    bool no_data)
+static int ovl_copy_up_truncate(struct dentry *dentry)
 {
 	int err;
 	struct dentry *parent;
@@ -30,10 +29,8 @@ static int ovl_copy_up_last(struct dentry *dentry, struct iattr *attr,
 	if (err)
 		goto out_dput_parent;
 
-	if (no_data)
-		stat.size = 0;
-
-	err = ovl_copy_up_one(parent, dentry, &lowerpath, &stat, attr);
+	stat.size = 0;
+	err = ovl_copy_up_one(parent, dentry, &lowerpath, &stat);
 
 out_dput_parent:
 	dput(parent);
@@ -66,11 +63,10 @@ int ovl_setattr(struct dentry *dentry, struct iattr *attr)
 	if (!err) {
 		upperdentry = ovl_dentry_upper(dentry);
 
-		mutex_lock(&upperdentry->d_inode->i_mutex);
-
 		if (attr->ia_valid & (ATTR_KILL_SUID|ATTR_KILL_SGID))
 			attr->ia_valid &= ~ATTR_MODE;
 
+		mutex_lock(&upperdentry->d_inode->i_mutex);
 		err = notify_change(upperdentry, attr, NULL);
 		if (!err)
 			ovl_copyattr(upperdentry->d_inode, dentry->d_inode);
@@ -159,11 +155,12 @@ struct ovl_link_data {
 	void *cookie;
 };
 
-static void *ovl_follow_link(struct dentry *dentry, struct nameidata *nd)
+static const char *ovl_follow_link(struct dentry *dentry, void **cookie)
 {
-	void *ret;
 	struct dentry *realdentry;
 	struct inode *realinode;
+	struct ovl_link_data *data = NULL;
+	const char *ret;
 
 	realdentry = ovl_dentry_real(dentry);
 	realinode = realdentry->d_inode;
@@ -171,28 +168,28 @@ static void *ovl_follow_link(struct dentry *dentry, struct nameidata *nd)
 	if (WARN_ON(!realinode->i_op->follow_link))
 		return ERR_PTR(-EPERM);
 
-	ret = realinode->i_op->follow_link(realdentry, nd);
-	if (IS_ERR(ret))
-		return ret;
-
 	if (realinode->i_op->put_link) {
-		struct ovl_link_data *data;
-
 		data = kmalloc(sizeof(struct ovl_link_data), GFP_KERNEL);
-		if (!data) {
-			realinode->i_op->put_link(realdentry, nd, ret);
+		if (!data)
 			return ERR_PTR(-ENOMEM);
-		}
 		data->realdentry = realdentry;
-		data->cookie = ret;
-
-		return data;
-	} else {
-		return NULL;
 	}
+
+	ret = realinode->i_op->follow_link(realdentry, cookie);
+	if (IS_ERR_OR_NULL(ret)) {
+		kfree(data);
+		return ret;
+	}
+
+	if (data)
+		data->cookie = *cookie;
+
+	*cookie = data;
+
+	return ret;
 }
 
-static void ovl_put_link(struct dentry *dentry, struct nameidata *nd, void *c)
+static void ovl_put_link(struct inode *unused, void *c)
 {
 	struct inode *realinode;
 	struct ovl_link_data *data = c;
@@ -201,7 +198,7 @@ static void ovl_put_link(struct dentry *dentry, struct nameidata *nd, void *c)
 		return;
 
 	realinode = data->realdentry->d_inode;
-	realinode->i_op->put_link(data->realdentry, nd, data->cookie);
+	realinode->i_op->put_link(realinode, data->cookie);
 	kfree(data);
 }
 
@@ -221,7 +218,8 @@ static int ovl_readlink(struct dentry *dentry, char __user *buf, int bufsiz)
 	return realinode->i_op->readlink(realpath.dentry, buf, bufsiz);
 }
 
-bool ovl_is_private_xattr(const char *name)
+
+static bool ovl_is_private_xattr(const char *name)
 {
 	return strncmp(name, OVL_XATTR_PRE_NAME, OVL_XATTR_PRE_LEN) == 0;
 }
@@ -279,8 +277,7 @@ ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size)
 	struct path realpath;
 	enum ovl_path_type type = ovl_path_real(dentry, &realpath);
 	ssize_t res;
-	size_t len;
-	char *s;
+	int off;
 
 	res = vfs_listxattr(realpath.dentry, list, size);
 	if (res <= 0 || size == 0)
@@ -290,19 +287,17 @@ ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size)
 		return res;
 
 	/* filter out private xattrs */
-	for (s = list, len = res; len;) {
-		size_t slen = strnlen(s, len) + 1;
+	for (off = 0; off < res;) {
+		char *s = list + off;
+		size_t slen = strlen(s) + 1;
 
-		/* underlying fs providing us with an broken xattr list? */
-		if (WARN_ON(slen > len))
-			return -EIO;
+		BUG_ON(off + slen > res);
 
-		len -= slen;
 		if (ovl_is_private_xattr(s)) {
 			res -= slen;
-			memmove(s, s + slen, len);
+			memmove(s, s + slen, res - off);
 		} else {
-			s += slen;
+			off += slen;
 		}
 	}
 
@@ -373,7 +368,7 @@ struct inode *ovl_d_select_inode(struct dentry *dentry, unsigned file_flags)
 			return ERR_PTR(err);
 
 		if (file_flags & O_TRUNC)
-			err = ovl_copy_up_last(dentry, NULL, true);
+			err = ovl_copy_up_truncate(dentry);
 		else
 			err = ovl_copy_up(dentry);
 		ovl_drop_write(dentry);
@@ -382,6 +377,9 @@ struct inode *ovl_d_select_inode(struct dentry *dentry, unsigned file_flags)
 
 		ovl_path_upper(dentry, &realpath);
 	}
+
+	if (realpath.dentry->d_flags & DCACHE_OP_SELECT_INODE)
+		return realpath.dentry->d_op->d_select_inode(realpath.dentry, file_flags);
 
 	return d_backing_inode(realpath.dentry);
 }

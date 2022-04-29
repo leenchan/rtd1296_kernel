@@ -21,9 +21,6 @@
 #include <linux/export.h>
 #include <linux/rculist.h>
 #include "br_private.h"
-#if defined(CONFIG_RTL_819X)&&defined(CONFIG_RTL865X_LANPORT_RESTRICTION)
-#include <net/rtl/rtl_nic.h>
-#endif
 #if defined(CONFIG_RTL_IGMP_SNOOPING)
 #include <linux/ip.h>
 #include <linux/in.h>
@@ -44,20 +41,7 @@
 #endif /* CONFIG_RTL_IGMP_SNOOPING && CONFIG_NETFILTER */
 #if defined(CONFIG_RTL_HARDWARE_MULTICAST)
 #include <net/rtl/rtl865x_multicast.h>
-#if defined(CONFIG_RTL_IGMP_PROXY_MULTIWAN)
-#include <net/rtl/rtl_multi_wan.h>
-#endif
 #endif /* CONFIG_RTL_HARDWARE_MULTICAST */
-#if defined(CONFIG_RTL_DNS_TRAP)
-#include <net/rtl/rtl_dnstrap.h>
-#endif
-#if defined(CONFIG_RTL_HTTP_REDIRECT)
-extern int redirect_on;
-extern unsigned int http_redirect_enter(struct sk_buff *skb);
-extern int is_http_packet(struct sk_buff *skb);
-extern int is_http_resp_packet(struct sk_buff *skb);
-
-#endif
 
 extern int igmpsnoopenabled;
 #if defined (CONFIG_RTL_MLD_SNOOPING)
@@ -66,14 +50,6 @@ extern int mldSnoopEnabled;
 extern unsigned int brIgmpModuleIndex;
 extern unsigned int br0SwFwdPortMask;
 
-#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-extern unsigned int brIgmpModuleIndex_2;
-extern unsigned int br1SwFwdPortMask;
-#endif
-
-#if defined (CONFIG_RTL_HW_MCAST_WIFI)
-extern int hwwifiEnable;
-#endif
 #if defined(CONFIG_RTL_VLAN_8021Q) && (defined(CONFIG_RTL_MULTICAST_PORT_MAPPING) || defined(CONFIG_RTL_CUSTOM_PASSTHRU))
 extern int linux_vlan_enable;
 #endif /* CONFIG_RTL_VLAN_8021Q && (CONFIG_RTL_MULTICAST_PORT_MAPPING) || CONFIG_RTL_CUSTOM_PASSTHRU) */
@@ -86,24 +62,12 @@ extern int IGMPProxyOpened;
 #include <linux/in6.h>
 #include <linux/icmpv6.h>
 //#define	DBG_ICMPv6	//enable it to debug icmpv6 check
-#if 1
 static char ICMPv6_check(struct sk_buff *skb , unsigned char *gmac, unsigned int *gIndex,unsigned int *moreFlag);
-#else
-static char ICMPv6_check(struct sk_buff *skb , unsigned char *gmac);
-#endif
 #endif /* IPV6_MCAST_TO_UNICAST */
 
 #endif /* MCAST_TO_UNICAST */
 
-#if defined(CONFIG_DOMAIN_NAME_QUERY_SUPPORT) || defined(CONFIG_RTL_ULINKER)
-#include <net/udp.h>
-#endif
-
-#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-static char igmp_type_check(struct sk_buff *skb, unsigned char *gmac,unsigned int *gIndex,unsigned int *moreFlag, int type);
-#else
 static char igmp_type_check(struct sk_buff *skb, unsigned char *gmac,unsigned int *gIndex,unsigned int *moreFlag);
-#endif
 static void br_update_igmp_snoop_fdb(unsigned char op,
 				     struct net_bridge *br,
 				     struct net_bridge_port *p,
@@ -129,12 +93,9 @@ extern int rtl865x_ipMulticastHardwareAccelerate(struct net_bridge *br,
 						 unsigned int srcVlanId,
 						 unsigned int srcIpAddr,
 						 struct net_bridge_mdb_entry *mdst);
-/*extern int32 rtl865x_getFwdDescriptor(struct net_bridge *br,
-									  		 rtl865x_mcast_fwd_descriptor_t *descriptor,
-									  		 struct br_ip bip);*/
-#if defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
+#if defined(CONFIG_RTL_8197F)
 extern int re865x_getIpv6TransportProtocol(struct ipv6hdr* ipv6h);
-#endif/* CONFIG_RTL_8198C || CONFIG_RTL_8197F */
+#endif/* CONFIG_RTL_8197F */
 #endif/* CONFIG_RTL_HARDWARE_MULTICAST */
 #endif/* CONFIG_BRIDGE_IGMP_SNOOPING */
 
@@ -142,82 +103,44 @@ extern int re865x_getIpv6TransportProtocol(struct ipv6hdr* ipv6h);
 br_should_route_hook_t __rcu *br_should_route_hook __read_mostly;
 EXPORT_SYMBOL(br_should_route_hook);
 
-#ifdef CONFIG_RTL_HW_VLAN_SUPPORT
-#define CONFIG_RTL_HW_VLAN_SUPPORT_HW_NAT //mark_hwv
-extern int rtl_vlan_pass_frame_up(struct sk_buff *skb); //from rtl_nic.c
-#endif
+static int
+br_netif_receive_skb(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	return netif_receive_skb(skb);
+}
 
 static int br_pass_frame_up(struct sk_buff *skb)
 {
 	struct net_device *indev, *brdev = BR_INPUT_SKB_CB(skb)->brdev;
 	struct net_bridge *br = netdev_priv(brdev);
+	struct net_bridge_vlan_group *vg;
 	struct pcpu_sw_netstats *brstats = this_cpu_ptr(br->stats);
-	struct net_port_vlans *pv;
-
-#ifdef CONFIG_RTL_HW_VLAN_SUPPORT_HW_NAT
-	//drop packet that is bridge group...etc , they should not go to protocol stack futehr.
-	if(!rtl_vlan_pass_frame_up(skb))
-	{
-		kfree_skb(skb);
-		return ;
-	}
-#endif
 
 	u64_stats_update_begin(&brstats->syncp);
 	brstats->rx_packets++;
 	brstats->rx_bytes += skb->len;
 	u64_stats_update_end(&brstats->syncp);
 
+	vg = br_vlan_group_rcu(br);
 	/* Bridge is just like any other port.  Make sure the
 	 * packet is allowed except in promisc modue when someone
 	 * may be running packet capture.
 	 */
-	pv = br_get_vlan_info(br);
 	if (!(brdev->flags & IFF_PROMISC) &&
-	    !br_allowed_egress(br, pv, skb)) {
+	    !br_allowed_egress(vg, skb)) {
 		kfree_skb(skb);
 		return NET_RX_DROP;
 	}
 
 	indev = skb->dev;
 	skb->dev = brdev;
-	skb = br_handle_vlan(br, pv, skb);
+	skb = br_handle_vlan(br, vg, skb);
 	if (!skb)
 		return NET_RX_DROP;
-#ifdef CONFIG_RTK_GUEST_ZONE
-	skb->__unused = 0;
-	if (br_port_get_rcu(skb->dev)->zone_type == ZONE_TYPE_GUEST) {
-		if (br->lock_client_num > 0) {
-			int i, found=0;
-			for (i=0; i<br->lock_client_num; i++) {
-				if (!memcmp(eth_hdr(skb)->h_source, br->lock_client_list[i], 6)) {
-					found = 1;
-					break;
-				}
-			}
-			if (!found) {
-#ifdef DEBUG_GUEST_ZONE
-				GZDEBUG("Drop because lock client list!!\n");
-#endif
-				kfree_skb(skb);
-				return;
-			}
-			skb->__unused = 0xe5;
-		}
-		else {
-			if (!memcmp(eth_hdr(skb)->h_dest, br->dev->dev_addr, 6))
-				skb->__unused = 0xe5;
-		}
-	}
-#endif
 
-#if defined(CONFIG_RTL_IP_POLICY_ROUTING_SUPPORT)
-	if (skb->switch_port == NULL)
-		skb->switch_port = skb->dev->name;
-#endif
-	return NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN, NULL, skb,
-		       indev, NULL,
-		       netif_receive_skb_sk);
+	return NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
+		       dev_net(indev), NULL, skb, indev, NULL,
+		       br_netif_receive_skb);
 }
 
 static void br_do_proxy_arp(struct sk_buff *skb, struct net_bridge *br,
@@ -279,9 +202,6 @@ static void br_do_proxy_arp(struct sk_buff *skb, struct net_bridge *br,
 	}
 }
 
-#if defined(CONFIG_RTL865X_LANPORT_RESTRICTION)
-extern int rtl865x_BlkCheck(const unsigned char *addr);
-#endif
 #if defined(CONFIG_RTL_MLD_SNOOPING)
 extern int re865x_getIpv6TransportProtocol(struct ipv6hdr* ipv6h);
 #endif
@@ -298,7 +218,7 @@ extern int rtl865x_ipMulticastHardwareAccelerate(struct net_bridge *br, unsigned
 						 unsigned int srcIpAddr, unsigned int destIpAddr);
 #endif
 #if defined(CONFIG_RTL_MLD_SNOOPING)
-#if defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
+#if defined(CONFIG_RTL_8197F)
 #if defined(CONFIG_RTL_MULTICAST_PORT_MAPPING)
 extern int rtl865x_ipv6MulticastHardwareAccelerate(struct net_bridge *br, unsigned int brFwdPortMask,
 						   unsigned int srcPort,unsigned int srcVlanId,
@@ -308,7 +228,7 @@ extern int rtl865x_ipv6MulticastHardwareAccelerate(struct net_bridge *br, unsign
 						   unsigned int srcPort,unsigned int srcVlanId,
 						   struct in6_addr srcIpAddr,struct in6_addr destIpAddr);
 #endif /* CONFIG_RTL_MULTICAST_PORT_MAPPING */
-#endif
+#endif /* CONFIG_RTL_8197F */
 #endif /* CONFIG_RTL_MLD_SNOOPING */
 #endif /* CONFIG_RTL_IGMP_SNOOPING */
 #endif /* CONFIG_RTL_HARDWARE_MULTICAST */
@@ -487,7 +407,6 @@ unsigned int rtl865x_getPortMaskbyVlan(struct net_bridge *br,struct sk_buff *skb
 		{
 			if (p->dev->vlan_id == src_vid)
 			{
-				//panic_printk("vlanid:%s, [%s:%d]\n", strvlanid, __FUNCTION__, __LINE__);
 				PortMask |= (1 << p->port_no);
 			}
 		}
@@ -498,7 +417,7 @@ unsigned int rtl865x_getPortMaskbyVlan(struct net_bridge *br,struct sk_buff *skb
 #endif /*CONFIG_RTL_CUSTOM_PASSTHRU && CONFIG_RTL_VLAN_8021Q && CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG */
 
 /* note: already called with rcu_read_lock */
-int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
+int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	const unsigned char *dest = eth_hdr(skb)->h_dest;
 	struct net_bridge_port *p = br_port_get_rcu(skb->dev);
@@ -519,35 +438,18 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 	unsigned int srcVlanId = skb->srcVlanId;
 #endif
 #endif
-#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-	int type = 0;
-#endif
 
 	if (!p || p->state == BR_STATE_DISABLED)
 		goto drop;
 
-	if (!br_allowed_ingress(p->br, nbp_get_vlan_info(p), skb, &vid))
-		goto out; // drop in br_allowed_ingress
+	if (!br_allowed_ingress(p->br, nbp_vlan_group_rcu(p), skb, &vid))
+		goto out;
 
 	/* insert into forwarding database after filtering to avoid spoofing */
 	br = p->br;
-	if ((p->flags & BR_LEARNING)
-#if defined(CONFIG_RTL_DNS_TRAP)
-		&&(!is_dns_packet((struct sk_buff*)skb))
-#endif
-#if defined(CONFIG_RTL_HTTP_REDIRECT)
-		&&(!is_http_resp_packet((struct sk_buff *)skb))
-#endif
-	)
+	if (p->flags & BR_LEARNING)
 		br_fdb_update(br, p, eth_hdr(skb)->h_source, vid, false);
 
-#if defined (CONFIG_RTL865X_LANPORT_RESTRICTION)
-	if (rtl865x_BlkCheck(eth_hdr(skb)->h_source) == TRUE)
-	{
-		kfree_skb(skb);
-		goto out;
-	}
-#endif
 #if defined(CONFIG_BRIDGE_IGMP_SNOOPING) || !defined(CONFIG_RTL_IGMP_SNOOPING)
 	if (!is_broadcast_ether_addr(dest) && is_multicast_ether_addr(dest) &&
 	    br_multicast_rcv(br, p, skb, vid))
@@ -599,16 +501,6 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 						}
 					}
 				}
-#if defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
-				else if(IPV6_MULTICAST_MAC(dest))
-				{
-					struct ipv6hdr *ipv6h=(struct ipv6hdr *)skb_network_header(skb);
-					unsigned char proto = re865x_getIpv6TransportProtocol(ipv6h);
-					if(proto==IPPROTO_UDP||proto==IPPROTO_TCP)
-					{
-					}
-				}
-#endif/*CONFIG_RTL_8198C || CONFIG_RTL_8197F*/
 			}
 #endif/*CONFIG_RTL_HARDWARE_MULTICAST*/
 			skb = NULL;
@@ -664,21 +556,7 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 #endif /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
 
 	if (skb) {
-#if defined(CONFIG_RTL_WLAN_BLOCK_RELAY)
-				if(rtl_wlan_block_relay_enable && dst){
-					if(!memcmp(skb->dev->name,RTL_WLAN_INT_PREFIX,sizeof(RTL_WLAN_INT_PREFIX)-1)){
-						if(!memcmp(dst->dst->dev->name,RTL_WLAN_INT_PREFIX,sizeof(RTL_WLAN_INT_PREFIX)-1))
-							goto drop;
-					}
-				}
-#endif
-
-#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-				type = rtl_is_pppoe_igmp_bridge_frame(skb, 0, dest);
-				if ((is_multicast_ether_addr(dest) && (igmpsnoopenabled || mldSnoopEnabled))||(type != 0))
-#else
 				if (is_multicast_ether_addr(dest) && (igmpsnoopenabled || mldSnoopEnabled))
-#endif
 				{
 				struct iphdr *iph = NULL;
 #if defined(CONFIG_RTL_MLD_SNOOPING)
@@ -688,8 +566,6 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 #if defined(CONFIG_RTL_HARDWARE_MULTICAST)
 				unsigned int srcPort = skb->srcPort;
 				unsigned int srcVlanId = skb->srcVlanId;
-//				if(net_ratelimit())
-//					printk("[%s:%d]srcPort is %d,srcVlanId is %d.\n",__FUNCTION__,__LINE__,srcPort,srcVlanId);
 #endif/*CONFIG_RTL_HARDWARE_MULTICAST*/
 
 				unsigned char proto = 0;
@@ -714,46 +590,23 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 
 			#if defined(CONFIG_RTL_MULTICAST_PORT_MAPPING)
 				unsigned int mapPortMask = 0xFFFFFFFF;
-			#if defined(CONFIG_RTL_IGMP_PROXY_MULTIWAN)
-				struct smux_dev_info *dev_info;
-			#endif
 			#endif
 
-			#if defined (CONFIG_RTL_HW_MCAST_WIFI)
-				rtl865x_tblDrv_mCast_t * existMulticastEntry;
-			#endif
-
-#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-				if (!(br->dev->flags & IFF_PROMISC)
-					&&( (MULTICAST_MAC(dest)  && (eth_hdr(skb)->h_proto == htons(ETH_P_IP))) || type != 0)
-					&& igmpsnoopenabled)
-#else
 				if (!(br->dev->flags & IFF_PROMISC)
 					&& MULTICAST_MAC(dest)
 					&& (eth_hdr(skb)->h_proto == htons(ETH_P_IP))
 					&& igmpsnoopenabled)
-#endif /* CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD */
 				{
 					iph = (struct iphdr *)skb_network_header(skb);
 
-				#if defined(CONFIG_USB_UWIFI_HOST)
-					if(iph->daddr == htonl(0xEFFFFFFA) || iph->daddr == htonl(0xE1010101))
-				#else
 					if (iph->daddr == htonl(0xEFFFFFFA) || iph->daddr == htonl(0xE00000FB))
-				#endif
-
 					{
 						/*for microsoft upnp*/
 						reserved = 1;
 					}
-#if 0
-					if((iph->daddr&0xFFFFFF00)==0xE0000000)
-					reserved=1;
-#endif
 					proto = iph->protocol;
 					if (proto == IPPROTO_IGMP)
 					{
-						//printk("[%s:%d]process IGMP\n",__FUNCTION__,__LINE__);
 #if defined(CONFIG_NETFILTER)
 						//filter igmp pkts by upper hook like iptables
 						if (IgmpRxFilter_Hook != NULL)
@@ -781,11 +634,7 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 #endif/*CONFIG_NETFILTER*/
 						while (moreFlag)
 						{
-#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-							tmpOp=igmp_type_check(skb, macAddr, &gIndex, &moreFlag, type);
-#else
 							tmpOp = igmp_type_check(skb, macAddr, &gIndex, &moreFlag);
-#endif
 							if (tmpOp > 0)
 							{
 								operation = (unsigned char)tmpOp;
@@ -812,24 +661,13 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 				#if defined(CONFIG_RT_MULTIPLE_BR_SUPPORT)
 						rtl_igmpMldProcess(igmpModuleIndex, skb_mac_header(skb), p->port_no, &fwdPortMask);
 				#else /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
-					#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-						if(!strcmp(br->dev->name,RTL_PS_BR1_DEV_NAME))
-						{
-							rtl_igmpMldProcess(brIgmpModuleIndex_2, skb_mac_header(skb), p->port_no, &fwdPortMask);
-							//flooding igmp packet
-							fwdPortMask=(~(1<<(p->port_no))) & 0xFFFFFFFF;
-						}
-						else
-					#endif
 						rtl_igmpMldProcess(brIgmpModuleIndex, skb_mac_header(skb), p->port_no, &fwdPortMask);
 				#endif /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
 						br_multicast_forward(br, fwdPortMask, skb, 0);
 					}
 					else if (((proto == IPPROTO_UDP) || (proto == IPPROTO_TCP) || (proto == Any_0_hop_protocl)) && (reserved == 0))
 					{
-				#if !defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
 						iph = (struct iphdr *)skb_network_header(skb);
-				#endif
 						multicastDataInfo.ipVersion = 4;
 						multicastDataInfo.sourceIp[0] = (uint32)(iph->saddr);
 						multicastDataInfo.groupAddr[0] = (uint32)(iph->daddr);
@@ -838,55 +676,18 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 				#if defined(CONFIG_RT_MULTIPLE_BR_SUPPORT)
 						ret = rtl_getMulticastDataFwdInfo(igmpModuleIndex, &multicastDataInfo, &multicastFwdInfo);
 				#else /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
-				#ifdef CONFIG_RTK_VLAN_WAN_TAG_SUPPORT
-						if(!strcmp(br->dev->name,RTL_PS_BR1_DEV_NAME))
-						{
-							ret= rtl_getMulticastDataFwdInfo(brIgmpModuleIndex_2, &multicastDataInfo, &multicastFwdInfo);
-						}
-						else
-				#endif
 						ret = rtl_getMulticastDataFwdInfo(brIgmpModuleIndex, &multicastDataInfo, &multicastFwdInfo);
 				#endif /* CONFIG_RT_MULTIPLE_BR_SUPPORT */
 
 
-				#if defined (CONFIG_RTL_HW_MCAST_WIFI)
-						if(hwwifiEnable)
-						{
-							existMulticastEntry=rtl865x_findMCastEntry(multicastDataInfo.groupAddr[0], multicastDataInfo.sourceIp[0], (unsigned short)srcVlanId, (unsigned short)srcPort);
-							if(existMulticastEntry!=NULL)
-							{
-								/*it's already in cache, only forward to wlan */
-				#if defined (CONFIG_RT_MULTIPLE_BR_SUPPORT)
-								multicastFwdInfo.fwdPortMask &= swFwdPortMask;
-				#else
-								multicastFwdInfo.fwdPortMask &= br0SwFwdPortMask;
-
-				#endif
-							}
-						}
-				#endif
 						br_multicast_forward(br, multicastFwdInfo.fwdPortMask, skb, 0);
-				#if defined (CONFIG_RTL_HW_MCAST_WIFI)
-						if((hwwifiEnable && (ret==SUCCESS)) ||
-				  		   (hwwifiEnable ==0 && (ret==SUCCESS) && (multicastFwdInfo.cpuFlag==0)))
-				#else
 						if ((ret == SUCCESS) && (multicastFwdInfo.cpuFlag == 0))
-				#endif
 						{
 					#if defined(CONFIG_RTL_HARDWARE_MULTICAST)
 							if ((srcVlanId != 0) && (srcPort != 0xFFFF))
 							{
 					#if defined(CONFIG_RTL_MULTICAST_PORT_MAPPING)
-					#if defined CONFIG_RTL_IGMP_PROXY_MULTIWAN
-								if(skb->from_dev)
-								{
-									dev_info = SMUX_DEV_INFO(skb->from_dev);
-									mapPortMask = dev_info->member;
-								}
-								else
-									mapPortMask = 0xFFFFFFFF;
-							//printk("srcPort = %d, fwdPortMask = %x, [%s:%d]\n", srcPort,  multicastFwdInfo.fwdPortMask, __FUNCTION__, __LINE__);
-					#elif defined(CONFIG_RTL_VLAN_8021Q)
+					#if defined(CONFIG_RTL_VLAN_8021Q)
 								if (linux_vlan_enable)
 									mapPortMask = rtl865x_getPhyPortMapMaskbyVlan(br, skb);
 								else
@@ -910,7 +711,6 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 					}
 					else
 					{
-						//if(net_ratelimit())printk("[%s:%d]process Other:%d\n",__FUNCTION__,__LINE__,proto);
 						br_flood_forward(br, skb);
 					}
 				}
@@ -926,11 +726,6 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 					/*icmp protocol*/
 					if (proto == IPPROTO_ICMPV6)
 					{
-#if 0
-						if(net_ratelimit())
-							printk("[%s:%d]ipv6 ICMPV6,\n",__FUNCTION__,__LINE__);
-
-#endif
 #if defined(IPV6_MCAST_TO_UNICAST)
 						while (moreFlag)
 						{
@@ -1015,18 +810,7 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 						}
 				#endif /* CONFIG_RTL_CUSTOM_PASSTHRU && CONFIG_RTL_VLAN_8021Q && CONFIG_RTL_8021Q_VLAN_SUPPORT_SRC_TAG */
 						br_multicast_forward(br, multicastFwdInfo.fwdPortMask, skb, 0);
-#if 0
-						if(net_ratelimit())
-							printk("[%s:%d]ipv6 TCP&&UDP,ret=%d,mask=%X,cpuFlag=%d,srcVlanId=%d,srcPort=%d\n",
-							__FUNCTION__,
-							__LINE__,
-							ret,
-							multicastFwdInfo.fwdPortMask,
-							multicastFwdInfo.cpuFlag,
-							srcVlanId,
-							srcPort);
-#endif
-#if (defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)) && defined(CONFIG_RTL_HARDWARE_MULTICAST)
+#if defined(CONFIG_RTL_8197F) && defined(CONFIG_RTL_HARDWARE_MULTICAST)
 						if ((ret == SUCCESS) && (multicastFwdInfo.cpuFlag == 0))
 						{
 							if ((srcVlanId != 0) && (srcPort != 0xFFFF))
@@ -1036,35 +820,19 @@ int br_handle_frame_finish(struct sock *sk, struct sk_buff *skb)
 								memcpy(&sip,multicastDataInfo.sourceIp, sizeof(struct in6_addr));
 								memcpy(&dip,multicastDataInfo.groupAddr, sizeof(struct in6_addr));
 						#if defined(CONFIG_RTL_MULTICAST_PORT_MAPPING)
-							#if defined(CONFIG_RTL_IGMP_PROXY_MULTIWAN)
-								if(skb->from_dev)
-								{
-									dev_info = SMUX_DEV_INFO(skb->from_dev);
-									mapPortMask = dev_info->member;
-								}
-								else
-									mapPortMask = 0xFFFFFFFF;
-								//printk("srcPort = %d, fwdPortMask = %x, [%s:%d]\n", srcPort,	multicastFwdInfo.fwdPortMask, __FUNCTION__, __LINE__);
-							#elif defined(CONFIG_RTL_VLAN_8021Q)
+							#if defined(CONFIG_RTL_VLAN_8021Q)
 								if(linux_vlan_enable)
 									mapPortMask = rtl865x_getPhyPortMapMaskbyVlan(br, skb);
 								else
 									mapPortMask = 0xFFFFFFFF;
-							#endif
+							#endif /* CONFIG_RTL_VLAN_8021Q */
 							rtl865x_ipv6MulticastHardwareAccelerate(br, multicastFwdInfo.fwdPortMask, srcPort, srcVlanId, sip, dip, mapPortMask);
 						#else /* CONFIG_RTL_MULTICAST_PORT_MAPPING */
-						#if defined(CONFIG_RTK_VLAN_SUPPORT)
-								if(rtk_vlan_support_enable == 0)
-								{
-									rtl865x_ipv6MulticastHardwareAccelerate(br, multicastFwdInfo.fwdPortMask,srcPort,srcVlanId, sip,dip);
-								}
-						#else
 								rtl865x_ipv6MulticastHardwareAccelerate(br, multicastFwdInfo.fwdPortMask, srcPort, srcVlanId, sip, dip);
-						#endif
 						#endif /* CONFIG_RTL_MULTICAST_PORT_MAPPING */
 							}
 						}
-#endif /* (CONFIG_RTL_8198C || CONFIG_RTL_8197F) && CONFIG_RTL_HARDWARE_MULTICAST */
+#endif /* CONFIG_RTL_8197F && CONFIG_RTL_HARDWARE_MULTICAST */
 					}
 					else
 					{
@@ -1097,7 +865,7 @@ drop:
 EXPORT_SYMBOL_GPL(br_handle_frame_finish);
 
 /* note: already called with rcu_read_lock */
-static int br_handle_local_finish(struct sock *sk, struct sk_buff *skb)
+static int br_handle_local_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
 	struct net_bridge_port *p = br_port_get_rcu(skb->dev);
 	u16 vid = 0;
@@ -1128,20 +896,6 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 	skb = skb_share_check(skb, GFP_ATOMIC);
 	if (!skb)
 		return RX_HANDLER_CONSUMED;
-
-#if defined(CONFIG_RTL_DNS_TRAP)
-	if (dns_filter_enable)
-	{
-		br_dns_filter_enter(skb);
-	}
-#endif
-#if defined(CONFIG_RTL_HTTP_REDIRECT)
-	if(redirect_on && is_http_packet(skb))
-	{
-		//printk("%s:%d .... skbHead-skbData=%d\n",__FUNCTION__,__LINE__,skb->head-skb->data);
-		http_redirect_enter(skb);
-	}
-#endif
 
 	p = br_port_get_rcu(skb->dev);
 
@@ -1181,8 +935,9 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 		}
 
 		/* Deliver packet to local host only */
-		if (NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN, NULL, skb,
-			    skb->dev, NULL, br_handle_local_finish)) {
+		if (NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
+			    dev_net(skb->dev), NULL, skb, skb->dev, NULL,
+			    br_handle_local_finish)) {
 			return RX_HANDLER_CONSUMED; /* consumed by filter */
 		} else {
 			*pskb = skb;
@@ -1206,8 +961,8 @@ forward:
 		if (ether_addr_equal(p->br->dev->dev_addr, dest))
 			skb->pkt_type = PACKET_HOST;
 
-		NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING, NULL, skb,
-			skb->dev, NULL,
+		NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING,
+			dev_net(skb->dev), NULL, skb, skb->dev, NULL,
 			br_handle_frame_finish);
 		break;
 	default:
@@ -1240,100 +995,6 @@ static void CIPV6toMac(unsigned char* icmpv6_McastAddr, unsigned char *gmac)
 }
 
 
-#if 0
-static char ICMPv6_check(struct sk_buff *skb , unsigned char *gmac)
-{
-
-	struct ipv6hdr *ipv6h;
-	char* protoType;
-
-	/* check IPv6 header information */
-	//ipv6h = skb->nh.ipv6h;
-	ipv6h = (struct ipv6hdr *)skb_network_header(skb);
-	if(ipv6h->version != 6){
-		//printk("ipv6h->version != 6\n");
-		return -1;
-	}
-
-
-	/*Next header: IPv6 hop-by-hop option (0x00)*/
-	if(ipv6h->nexthdr == 0)	{
-		protoType = (unsigned char*)( (unsigned char*)ipv6h + sizeof(struct ipv6hdr) );
-	}else{
-		//printk("ipv6h->nexthdr != 0\n");
-		return -1;
-	}
-
-	if(protoType[0] == 0x3a){
-
-		//printk("recv icmpv6 packet\n");
-		struct icmp6hdr* icmpv6h = (struct icmp6hdr*)(protoType + 8);
-		unsigned char* icmpv6_McastAddr ;
-
-		if(icmpv6h->icmp6_type == 0x83){
-
-			icmpv6_McastAddr = (unsigned char*)((unsigned char*)icmpv6h + 8);
-			#ifdef	DBG_ICMPv6
-			printk("Type: 0x%x (Multicast listener report) \n",icmpv6h->icmp6_type);
-			#endif
-
-		}else if(icmpv6h->icmp6_type == 0x8f){
-
-			icmpv6_McastAddr = (unsigned char*)((unsigned char*)icmpv6h + 8 + 4);
-			#ifdef	DBG_ICMPv6
-			printk("Type: 0x%x (Multicast listener report v2) \n",icmpv6h->icmp6_type);
-			#endif
-		}else if(icmpv6h->icmp6_type == 0x84){
-
-			icmpv6_McastAddr = (unsigned char*)((unsigned char*)icmpv6h + 8 );
-			#ifdef	DBG_ICMPv6
-			printk("Type: 0x%x (Multicast listener done ) \n",icmpv6h->icmp6_type);
-			#endif
-		}
-		else{
-			#ifdef	DBG_ICMPv6
-			printk("Type: 0x%x (unknow type)\n",icmpv6h->icmp6_type);
-			#endif
-			return -1;
-		}
-
-		#ifdef	DBG_ICMPv6
-		printk("MCAST_IPV6Addr:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x \n",
-			icmpv6_McastAddr[0],icmpv6_McastAddr[1],icmpv6_McastAddr[2],icmpv6_McastAddr[3],
-			icmpv6_McastAddr[4],icmpv6_McastAddr[5],icmpv6_McastAddr[6],icmpv6_McastAddr[7],
-			icmpv6_McastAddr[8],icmpv6_McastAddr[9],icmpv6_McastAddr[10],icmpv6_McastAddr[11],
-			icmpv6_McastAddr[12],icmpv6_McastAddr[13],icmpv6_McastAddr[14],icmpv6_McastAddr[15]);
-		#endif
-
-		CIPV6toMac(icmpv6_McastAddr, gmac);
-
-		#ifdef	DBG_ICMPv6
-		printk("group_mac [%02x:%02x:%02x:%02x:%02x:%02x] \n",
-			gmac[0],gmac[1],gmac[2],
-			gmac[3],gmac[4],gmac[5]);
-		#endif
-
-
-
-		if(icmpv6h->icmp6_type == 0x83){
-
-			return 1;//icmpv6 listener report (add)
-		}
-		else if(icmpv6h->icmp6_type == 0x8f){
-			return 1;//icmpv6 listener report v2 (add)
-		}
-		else if(icmpv6h->icmp6_type == 0x84){
-			return 2;//icmpv6 Multicast listener done (del)
-		}
-	}
-	else{
-		//printk("protoType[0] != 0x3a\n");
-		return -1;//not icmpv6 type
-	}
-
-	return -1;
-}
-#else
 //add mld v2 support
 static char ICMPv6_check(struct sk_buff *skb , unsigned char *gmac, unsigned int *gIndex,unsigned int *moreFlag)
 {
@@ -1344,10 +1005,8 @@ static char ICMPv6_check(struct sk_buff *skb , unsigned char *gmac, unsigned int
 	*moreFlag = 0;
 
 	/* check IPv6 header information */
-	//ipv6h = skb->nh.ipv6h;
 	ipv6h = (struct ipv6hdr *)skb_network_header(skb);
 	if (ipv6h->version != 6) {
-		//printk("ipv6h->version != 6\n");
 		return -1;
 	}
 
@@ -1359,13 +1018,11 @@ static char ICMPv6_check(struct sk_buff *skb , unsigned char *gmac, unsigned int
 	}
 	else
 	{
-		//printk("ipv6h->nexthdr != 0\n");
 		return -1;
 	}
 
 	if (protoType[0] == 0x3a)
 	{
-		//printk("recv icmpv6 packet\n");
 		struct icmp6hdr* icmpv6h = (struct icmp6hdr*)(protoType + 8);
 		unsigned char *icmpv6_McastAddr;
 
@@ -1444,7 +1101,6 @@ static char ICMPv6_check(struct sk_buff *skb , unsigned char *gmac, unsigned int
 				*gIndex = *gIndex + 1;
 
 				icmpv6_McastAddr = (unsigned char *)&mldv2grec->grec_mca;
-				//printk("%s:%d,groupAddr is %d.%d.%d.%d\n",__FUNCTION__,__LINE__,NIPQUAD(groupAddr));
 				if (icmpv6_McastAddr[0] != 0xFF)
 					return -1;
 				CIPV6toMac(icmpv6_McastAddr, gmac);
@@ -1522,13 +1178,11 @@ static char ICMPv6_check(struct sk_buff *skb , unsigned char *gmac, unsigned int
 	}
 	else
 	{
-		//printk("protoType[0] != 0x3a\n");
 		return -1;//not icmpv6 type
 	}
 
 	return -1;
 }
-#endif
 #endif /* IPV6_MCAST_TO_UNICAST */
 
 /*2008-01-15,for porting igmp snooping to linux kernel 2.6*/
@@ -1547,11 +1201,7 @@ void ConvertMulticatIPtoMacAddr(__u32 group, unsigned char *gmac)
 		u32tmp >>= 8;
 	}
 }
-#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-static char igmp_type_check(struct sk_buff *skb, unsigned char *gmac,unsigned int *gIndex,unsigned int *moreFlag, int type)
-#else
 static char igmp_type_check(struct sk_buff *skb, unsigned char *gmac,unsigned int *gIndex,unsigned int *moreFlag)
-#endif
 {
 	struct iphdr *iph;
 	__u8 hdrlen;
@@ -1560,11 +1210,6 @@ static char igmp_type_check(struct sk_buff *skb, unsigned char *gmac,unsigned in
 	unsigned int groupAddr = 0;// add  for fit igmp v3
 	*moreFlag = 0;
 	/* check IP header information */
-#if defined(CONFIG_RTL_PROCESS_PPPOE_IGMP_FOR_BRIDGE_FORWARD)
-	if(type != 0)
-		iph = rtl_get_pppoe_ipv4_hdr(skb->data, 0, skb->protocol);
-	else
-#endif
 
 	iph = (struct iphdr *)skb_network_header(skb);
 	hdrlen = iph->ihl << 2;
@@ -1601,7 +1246,6 @@ static char igmp_type_check(struct sk_buff *skb, unsigned char *gmac,unsigned in
 		/*for support igmp v3 ; plusWang add 2009-0311*/
 		struct igmpv3_report *igmpv3report = (struct igmpv3_report * )igmph;
 		struct igmpv3_grec *igmpv3grec = NULL;
-		//printk("%s:%d,*gIndex is %d,igmpv3report->ngrec is %d\n",__FUNCTION__,__LINE__,*gIndex,igmpv3report->ngrec);
 		if (*gIndex >= ntohs(igmpv3report->ngrec))
 		{
 			*moreFlag = 0;
@@ -1638,7 +1282,6 @@ static char igmp_type_check(struct sk_buff *skb, unsigned char *gmac,unsigned in
 			/*gIndex move to next group*/
 			*gIndex = *gIndex + 1;
 			groupAddr = ntohl(igmpv3grec->grec_mca);
-			//printk("%s:%d,groupAddr is %d.%d.%d.%d\n",__FUNCTION__,__LINE__,NIPQUAD(groupAddr));
 			if (!IN_MULTICAST(groupAddr))
 			{
 				return -1;
@@ -1710,7 +1353,7 @@ static void br_update_igmp_snoop_fdb(unsigned char op, struct net_bridge *br, st
 
 	br_vlan_get_tag(skb, &vid);
 
-#if defined (MCAST_TO_UNICAST)
+#if defined(MCAST_TO_UNICAST)
 	if (!dest)
 		return;
 	if (!MULTICAST_MAC(dest)
@@ -1723,7 +1366,7 @@ static void br_update_igmp_snoop_fdb(unsigned char op, struct net_bridge *br, st
 	}
 #endif /* MCAST_TO_UNICAST */
 
-#if defined(CONFIG_RTL_HARDWARE_MULTICAST) || defined(CONFIG_RTL865X_LANPORT_RESTRICTION)
+#if defined(CONFIG_RTL_HARDWARE_MULTICAST)
 
 	if (skb->srcPort != 0xFFFF)
 	{
@@ -1734,7 +1377,7 @@ static void br_update_igmp_snoop_fdb(unsigned char op, struct net_bridge *br, st
 		port_comein = 0x80;
 	}
 
-#else
+#else /* CONFIG_RTL_HARDWARE_MULTICAST */
 	if (p && p->dev && p->dev->name && !memcmp(p->dev->name, RTL_PS_LAN_P0_DEV_NAME, 4))
 	{
 		port_comein = 0x01;
@@ -1745,8 +1388,7 @@ static void br_update_igmp_snoop_fdb(unsigned char op, struct net_bridge *br, st
 		port_comein = 0x80;
 	}
 
-#endif
-//	src=(unsigned char*)(skb->mac.raw+ETH_ALEN);
+#endif /* CONFIG_RTL_HARDWARE_MULTICAST */
 	src = (unsigned char*)(skb_mac_header(skb) + ETH_ALEN);
 	/* check whether entry exist */
 	dst = __br_fdb_get(br, dest, vid);
@@ -1789,7 +1431,6 @@ static void br_update_igmp_snoop_fdb(unsigned char op, struct net_bridge *br, st
 			{
 				dst->portlist |= 0x80;
 				port_comein = 0x80;
-				//dev = __dev_get_by_name(&init_net,RTL_PS_WLAN0_DEV_NAME);
 				#ifdef CONFIG_RTL_VLAN_8021Q
 				int i;
 				memcpy(str_devName, p->dev->name, 16);

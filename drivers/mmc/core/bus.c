@@ -149,14 +149,12 @@ static int mmc_bus_suspend(struct device *dev)
 	struct mmc_card *card = mmc_dev_to_card(dev);
 	struct mmc_host *host = card->host;
 	int ret;
-        printk(KERN_ERR "mmc_bus_suspend\n");
 
 	ret = pm_generic_suspend(dev);
 	if (ret)
 		return ret;
 
 	ret = host->bus_ops->suspend(host);
-
 	return ret;
 }
 
@@ -165,7 +163,6 @@ static int mmc_bus_resume(struct device *dev)
 	struct mmc_card *card = mmc_dev_to_card(dev);
 	struct mmc_host *host = card->host;
 	int ret;
-	printk(KERN_ERR "mmc_bus_resume\n");
 
 	ret = host->bus_ops->resume(host);
 	if (ret)
@@ -173,7 +170,6 @@ static int mmc_bus_resume(struct device *dev)
 			mmc_hostname(host), ret);
 
 	ret = pm_generic_resume(dev);
-
 	return ret;
 }
 #endif
@@ -264,7 +260,7 @@ struct mmc_card *mmc_alloc_card(struct mmc_host *host, struct device_type *type)
 {
 	struct mmc_card *card;
 
-	card = kzalloc(sizeof(struct mmc_card), GFP_KERNEL | GFP_DMA);
+	card = kzalloc(sizeof(struct mmc_card), GFP_KERNEL);
 	if (!card)
 		return ERR_PTR(-ENOMEM);
 
@@ -302,17 +298,18 @@ int mmc_add_card(struct mmc_card *card)
 	switch (card->type) {
 	case MMC_TYPE_MMC:
 		type = "MMC";
-		sector_t real_size = card->ext_csd.sectors;
-		if(real_size > 0x2200000 )    //32gb
-			real_size = 0x3900000;		
-		else if( (real_size > 0x1200000) && (real_size < 0x2200000) ) //16gb
-			real_size = 0x1c80000;
-		else if( (real_size > 0xb40000) && (real_size < 0x1200000) )  //8gb
+		sector_t real_size =card->ext_csd.sectors;
+		if( real_size > 0x2200000 )	//32GB 	
+			real_size = 0x3900000 ;
+		else if ( (real_size > 0x1200000) && (real_size < 0x2200000) ) //16GB
+			real_size = 0x1C80000;
+		else if ( (real_size > 0xb40000) && (real_size < 0x1200000) ) //8GB 
 			real_size = 0xe40000;
-		else
-			real_size = 0x720000;     //4gb
-		card->ext_csd.sectors = real_size;
+		else							   // 4GB 
+			real_size = 0x720000; 
+		card->ext_csd.sectors = real_size; //write back
 		break;
+		
 	case MMC_TYPE_SD:
 		type = "SD";
 		if (mmc_card_blockaddr(card)) {

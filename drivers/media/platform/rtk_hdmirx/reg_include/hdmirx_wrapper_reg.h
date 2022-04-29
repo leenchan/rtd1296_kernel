@@ -1,13 +1,15 @@
-/*
- * hdmirx_wrapper_reg.h - RTK hdmi rx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+/**************************************************************
+// Spec Version                  : 1.01
+// Parser Version                : DVR_Parser_6.11(120105)
+// CModelGen Version             : 5.1 2012.01.05
+// Naming Rule                   :  Register_Name
+// Naming Rule                   : Name
+// Parse Option                  : Only Parse _op1
+// Parse Address Region          : All Address Region 
+// Decode bit number             : 12 bits
+// Firmware Header Generate Date : 2015/3/13 14:49:52
+***************************************************************/
+
 
 #ifndef _HDMIRX_WRAPPER_REG_H_INCLUDED_
 #define _HDMIRX_WRAPPER_REG_H_INCLUDED_

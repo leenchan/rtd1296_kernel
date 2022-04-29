@@ -242,19 +242,7 @@ static inline struct package_appid *to_package_appid(struct config_item *item)
 	return item ? container_of(item, struct package_appid, item) : NULL;
 }
 
-static struct configfs_attribute package_appid_attr_add_pid = {
-	.ca_owner = THIS_MODULE,
-	.ca_name = "appid",
-	.ca_mode = S_IRUGO | S_IWUGO,
-};
-
-static struct configfs_attribute *package_appid_attrs[] = {
-	&package_appid_attr_add_pid,
-	NULL,
-};
-
 static ssize_t package_appid_attr_show(struct config_item *item,
-				      struct configfs_attribute *attr,
 				      char *page)
 {
 	ssize_t count;
@@ -263,7 +251,6 @@ static ssize_t package_appid_attr_show(struct config_item *item,
 }
 
 static ssize_t package_appid_attr_store(struct config_item *item,
-				       struct configfs_attribute *attr,
 				       const char *page, size_t count)
 {
 	struct package_appid *package_appid = to_package_appid(item);
@@ -285,6 +272,19 @@ static ssize_t package_appid_attr_store(struct config_item *item,
 	return count;
 }
 
+static struct configfs_attribute package_appid_attr_add_pid = {
+	.ca_owner = THIS_MODULE,
+	.ca_name = "appid",
+	.ca_mode = S_IRUGO | S_IWUGO,
+	.show = package_appid_attr_show,
+	.store = package_appid_attr_store,
+};
+
+static struct configfs_attribute *package_appid_attrs[] = {
+	&package_appid_attr_add_pid,
+	NULL,
+};
+
 static void package_appid_release(struct config_item *item)
 {
 	printk(KERN_INFO "sdcardfs: removing %s\n", item->ci_dentry->d_name.name);
@@ -295,8 +295,6 @@ static void package_appid_release(struct config_item *item)
 
 static struct configfs_item_operations package_appid_item_ops = {
 	.release		= package_appid_release,
-	.show_attribute		= package_appid_attr_show,
-	.store_attribute	= package_appid_attr_store,
 };
 
 static struct config_item_type package_appid_type = {
@@ -331,19 +329,7 @@ static struct config_item *sdcardfs_packages_make_item(struct config_group *grou
 	return &package_appid->item;
 }
 
-static struct configfs_attribute sdcardfs_packages_attr_description = {
-	.ca_owner = THIS_MODULE,
-	.ca_name = "packages_gid.list",
-	.ca_mode = S_IRUGO,
-};
-
-static struct configfs_attribute *sdcardfs_packages_attrs[] = {
-	&sdcardfs_packages_attr_description,
-	NULL,
-};
-
 static ssize_t packages_attr_show(struct config_item *item,
-					 struct configfs_attribute *attr,
 					 char *page)
 {
 	struct hashtable_entry *hash_cur;
@@ -366,6 +352,18 @@ static ssize_t packages_attr_show(struct config_item *item,
 	return count;
 }
 
+static struct configfs_attribute sdcardfs_packages_attr_description = {
+	.ca_owner = THIS_MODULE,
+	.ca_name = "packages_gid.list",
+	.ca_mode = S_IRUGO,
+	.show = packages_attr_show,
+};
+
+static struct configfs_attribute *sdcardfs_packages_attrs[] = {
+	&sdcardfs_packages_attr_description,
+	NULL,
+};
+
 static void sdcardfs_packages_release(struct config_item *item)
 {
 
@@ -375,7 +373,6 @@ static void sdcardfs_packages_release(struct config_item *item)
 
 static struct configfs_item_operations sdcardfs_packages_item_ops = {
 	.release	= sdcardfs_packages_release,
-	.show_attribute	= packages_attr_show,
 };
 
 /*

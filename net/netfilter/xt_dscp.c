@@ -16,12 +16,6 @@
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter/xt_dscp.h>
 
-#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
-#include <net/rtl/rtl_types.h>
-#include <net/rtl/rtl865x_netif.h>
-#endif
-
-
 MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
 MODULE_DESCRIPTION("Xtables: DSCP/TOS field match");
 MODULE_LICENSE("GPL");
@@ -51,29 +45,6 @@ dscp_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	return (dscp == info->dscp) ^ !!info->invert;
 #endif /* CONFIG_RTL_HW_QOS_SUPPORT && CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY */
 }
-
-#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
-static int dscp_match2acl(const char *tablename,
-			  const void *ip,
-			  const struct xt_match *match,
-			  void *matchinfo,
-			  void *acl_rule,
-			  unsigned int *invflags)
-{
-
-	const struct xt_dscp_info *info = matchinfo;
-	rtl865x_AclRule_t *rule = (rtl865x_AclRule_t *)acl_rule;
-
-	if(ip == NULL || matchinfo == NULL || rule == NULL)
-		return 1;
-
-	rule->ruleType_ = RTL865X_ACL_IP;
-	rule->tos_ = ipv4_get_dsfield((struct iphdr *)ip);
-	rule->tosMask_ = XT_DSCP_MASK;
-
-	return 0;
-}
-#endif
 
 #if defined(CONFIG_RTL_HW_QOS_SUPPORT) && defined(CONFIG_RTL_SW_QUEUE_DECISION_PRIORITY)
 static bool
@@ -178,10 +149,6 @@ static struct xt_match dscp_mt_reg[] __read_mostly = {
 		.match		= dscp_mt,
 		.matchsize	= sizeof(struct xt_dscp_info),
 		.me		= THIS_MODULE,
-#if defined(CONFIG_RTL_IPTABLES_RULE_2_ACL)
-		.match2acl	= dscp_match2acl,
-#endif
-
 	},
 	{
 		.name		= "dscp",

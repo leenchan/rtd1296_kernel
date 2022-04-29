@@ -34,9 +34,6 @@
 #include <hdcp2_messages.h>
 #include <hdcp2_session.h>
 
-
-H2_RepeaterAuthSendRxIdList_PayLoad g_repeater_auth_rx_payload;
-unsigned char bhdcp_repeater_get_state ;
 #ifdef TEST_HDCP2_2_RX_DRIVER
 /**
  * Unpack rtx into H2_AKEInitPayLoad from the AKE_INIT message.
@@ -53,15 +50,6 @@ unsigned char bhdcp_repeater_get_state ;
  * @return 0 on success.
  * @return Negative number on error.
  */
- 
-
-void HdmiRx_save_hdcp2p2_repeater_state(struct H2_RepeaterAuthSendRxIdList_PayLoad *repeater_info)
-{
-	memcpy(&g_repeater_auth_rx_payload,repeater_info,sizeof(g_repeater_auth_rx_payload));
-	bhdcp_repeater_get_state = 1;
-	return;
-}
-
 int h2MsgAkeInitUnpack(const unsigned char *pMsg, unsigned int length, H2_AKEInitPayLoad *payload)
 {
 	unsigned char msgId;
@@ -404,6 +392,7 @@ int h2MsgAkeSendHprimePack(unsigned char *pMsg, unsigned int *pLength, const H2_
 
 	 drvif_Hdmi_HDCP2_2_Write_Data_to_TX((unsigned int*)pMsg, *pLength);
 
+	pr_debug("cloud write teset ");
 	  #endif
 		rc = 0;
 		break;
@@ -637,74 +626,6 @@ int h2MsgSkeSendEksUnpack(const unsigned char *pMsg, unsigned int length, H2_SKE
 	return rc;
 }
 
-int h2MsgRepeaterAuthStreamReadyPack(unsigned char *pMsg, unsigned int *pLength,
-					      const H2_RepeaterAuthStreamReady_PayLoad *payload)
-{
-int rc = 0;
-	unsigned int ulSize = 0;
-	unsigned int ii;
-	do {
-
-      /** If pMsg is NULL, return how many bytes are needed for the
-       * message in *pLength
-       */
-		if (NULL != payload) {
-			#if 0
-			if ((payload->maxDevsExceeded) || (payload->maxCascadeExceeded)) {
-				ulSize = 3;
-			} else {
-				ulSize = REPEATERAUTHLIST_BASE_SIZE + payload->deviceCount * RECEIVERID_SIZE;
-			}
-			#else
-			ulSize = Mprime_SIZE+1;
-			*pLength = ulSize ;
-			#endif
-		}
-		if (NULL == payload) {
-
-	 /** Need payload to determine message size */
-			rc = -1;
-			break;
-		}
-		if (NULL == pMsg) {
-			if (NULL != pLength) {
-				*pLength = ulSize;
-				rc = 0;
-				break;
-			} else {
-
-	    /** Need pLength or pMsg */
-				rc = -1;
-				break;
-			}
-		}
-
-		if ((pLength) && (*pLength < ulSize)) {
-			H2DBGLOG((ENABLE, "Error: Message is not large enough\n"));
-			*pLength = ulSize;
-			rc = 1;
-			break;
-		}
-		//pr_err("TTTTTTTTTTTTTT4444444444444444444\n ");
-		pMsg[0] = REPEATERAUTH_STREAM_READY;
-
-		memcpy(pMsg + 1, &(payload->MPrime[0]), Mprime_SIZE);  //?????????? need check
-						 /** Copy Lprime */
-
-		if (pLength) {
-			*pLength = ulSize;
-		}
-		#if ENABLE_DDC_WRITE  //if data prepare ready
-			drvif_Hdmi_HDCP2_2_Write_Data_to_TX(pMsg, *pLength);
-		#endif
-		rc = 0;
-		break;
-	} while (0);
-	return rc;
-
-}
-
-extern unsigned char stream_manage_flag;
 int h2MsgRepeaterAuthSendReceiverIdListPack(unsigned char *pMsg, unsigned int *pLength,
 					      const H2_RepeaterAuthSendRxIdList_PayLoad *payload,
 					      const H2uint8 *rcvrIds)
@@ -718,16 +639,11 @@ int h2MsgRepeaterAuthSendReceiverIdListPack(unsigned char *pMsg, unsigned int *p
        * message in *pLength
        */
 		if (NULL != payload) {
-			#if 0
 			if ((payload->maxDevsExceeded) || (payload->maxCascadeExceeded)) {
 				ulSize = 3;
 			} else {
 				ulSize = REPEATERAUTHLIST_BASE_SIZE + payload->deviceCount * RECEIVERID_SIZE;
 			}
-			#else
-			ulSize = 1+2+3+16+(5*payload->deviceCount);
-			*pLength = ulSize ;
-			#endif
 		}
 		if (NULL == payload) {
 
@@ -762,86 +678,28 @@ int h2MsgRepeaterAuthSendReceiverIdListPack(unsigned char *pMsg, unsigned int *p
 			break;
 		}
 		pMsg[0] = REP_AUTH_SEND_RXID_LIST;
-		#if 1
-              //remap to Rxinfo 
-              //big endian
-		pMsg[1] =payload->Rxinfo[0];
-		pMsg[2] =payload->Rxinfo[1] ; //Rxinfor[7:0]
-		#else
 		pMsg[1] = payload->maxDevsExceeded;
 		pMsg[2] = payload->maxCascadeExceeded;
-		#endif
 		if ((payload->maxDevsExceeded) || (payload->maxCascadeExceeded)) {
 			ulSize = 3;
 			rc = 0;
-			//break;
+			break;
 		}
-		#if 1
-		pMsg[3] = payload->Seq_num[2]; //
-		pMsg[4] = payload->Seq_num[1];
-		pMsg[5] = payload->Seq_num[0];
-		#else
 		pMsg[3] = payload->deviceCount;
 		pMsg[4] = payload->depth;
-		#endif
-		memcpy(pMsg + 6, &(payload->VPrime[0]), (V_SIZE/2));  //?????????? need check
+		memcpy(pMsg + 5, payload->VPrime, V_SIZE);
 						 /** Copy Lprime */
 		for (ii = 0; ii < payload->deviceCount; ii++) {
-			memcpy(pMsg + 6 + (V_SIZE/2) + ii * RECEIVERID_SIZE,
+			memcpy(pMsg + 5 + V_SIZE + ii * RECEIVERID_SIZE,
 				rcvrIds + ii * RECEIVERID_SIZE,
 				RECEIVERID_SIZE);
 		}
 		if (pLength) {
 			*pLength = ulSize;
 		}
-		#if ENABLE_DDC_WRITE  //if data prepare ready
-		if (stream_manage_flag) {
-			usleep_range(100000, 101000);
-			stream_manage_flag = 0;
-		}
-		drvif_Hdmi_HDCP2_2_Write_Data_to_TX(pMsg, *pLength);
-		Set_Rx_status_Ready();
-		#endif
 		rc = 0;
 		break;
 	} while (0);
-	return rc;
-}
-
-int h2MsgRepeaterAuthStraeamManageUnpack(const unsigned char *pMsg, unsigned int length, H2_RepeaterAuthStreamManage_PayLoad *payload)
-{
-	unsigned char msgId;
-	int rc = 0;
-	do {
-
-      /** if pMsg or payload are NULL, return error. */
-		if ((NULL == pMsg) || (NULL == payload)) {
-			rc = -1;
-			break;
-		}
-		msgId = *pMsg;
-
-      /** Check msgId */
-		if (msgId != REPEATERAUTH_STREAM_MANAGE) {
-			H2DBGLOG((ENABLE, "Message received is not SKE_SEND_EKS!\n"));
-			rc = -1;
-			break;
-		}
-#if 0
-      /** Check length */
-		if (length < (EDKEYKS_SIZE + RIV_SIZE + 1)) {
-			H2DBGLOG((ENABLE, "Length is invalid!\r\n"));
-			rc = -1;
-			break;
-		}
-#endif
-      /** Copy data */
-		memcpy(payload->seq_num_M, pMsg + 1, seq_num_M_SIZE);
-		memcpy(payload->Manage_k, pMsg + seq_num_M_SIZE + 1, Manage_k_SIZE);
-		memcpy(payload->Stream_Type, pMsg + seq_num_M_SIZE +Manage_k_SIZE+ 1, Stream_Type_SIZE);
-		rc = 0;
-	} while (0);
-
 	return rc;
 }
 

@@ -1,12 +1,3 @@
-/*
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- * Copyright (C) 2017 Cheng-Yu Lee <cylee12@realtek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-
 #ifndef _LINUX_CORE_CONTROL_H
 #define _LINUX_CORE_CONTROL_H
 
@@ -27,13 +18,13 @@ struct notifier_block;
 struct core_controller;
 
 struct core_control_notification_args {
-	int abort;
+    int abort;
 };
 
 #ifdef CONFIG_HOTPLUG_CPU
 
 int of_core_control_read_cpumask(struct device_node *np,
-	const char *prop_name, struct cpumask *out);
+    const char *prop_name, struct cpumask *out);
 bool core_control_is_enabled(void);
 int core_control_get_available_cpus(struct cpumask *out);
 bool core_control_is_cpu_available(int cpu);

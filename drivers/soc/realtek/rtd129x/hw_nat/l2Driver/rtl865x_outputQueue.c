@@ -44,6 +44,7 @@
 
 #if defined(CONFIG_RTD_1295_HWNAT)
 #include <net/rtl/rtl_nic.h>
+#include <linux/proc_fs.h>
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 #if defined CONFIG_RTL_8367_QOS_SUPPORT

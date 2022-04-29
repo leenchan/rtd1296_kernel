@@ -406,12 +406,6 @@
 #define FTDI_4N_GALAXY_DE_3_PID	0xF3C2
 
 /*
- * Ivium Technologies product IDs
- */
-#define FTDI_PALMSENS_PID	0xf440
-#define FTDI_IVIUM_XSTAT_PID	0xf441
-
-/*
  * Linx Technologies product ids
  */
 #define LINX_SDMUSBQSS_PID	0xF448	/* Linx SDM-USB-QS-S */
@@ -677,12 +671,6 @@
 #define INTREPID_VID		0x093C
 #define INTREPID_VALUECAN_PID	0x0601
 #define INTREPID_NEOVI_PID	0x0701
-
-/*
- * WICED USB UART
- */
-#define WICED_VID		0x0A5C
-#define WICED_USB20706V2_PID	0x6422
 
 /*
  * Definitions for ID TECH (www.idt-net.com) devices
@@ -1394,7 +1382,7 @@
 #define FTDI_CTI_NANO_PID	0xF60B
 
 /*
- * ZeitControl cardsystems GmbH rfid-readers http://zeitconrol.de
+ * ZeitControl cardsystems GmbH rfid-readers http://zeitcontrol.de
  */
 /* TagTracer MIFARE*/
 #define FTDI_ZEITCONTROL_TAGTRACE_MIFARE_PID	0xF7C0

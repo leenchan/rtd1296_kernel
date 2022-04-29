@@ -27,6 +27,7 @@
 #include <linux/genalloc.h>
 #include <sound/memalloc.h>
 
+//Added by PC for audio kernel
 //rtk add
 #define USE_ION_AUDIO_HEAP
 
@@ -138,7 +139,7 @@ static void snd_malloc_dev_iram(struct snd_dma_buffer *dmab, size_t size)
 	dmab->addr = 0;
 
 	if (dev->of_node)
-		pool = of_get_named_gen_pool(dev->of_node, "iram", 0);
+		pool = of_gen_pool_get(dev->of_node, "iram", 0);
 
 	if (!pool)
 		return;
@@ -196,6 +197,7 @@ int snd_dma_alloc_pages(int type, struct device *device, size_t size,
 	dmab->bytes = 0;
 	switch (type) {
 	case SNDRV_DMA_TYPE_CONTINUOUS:
+	//Added by PC for audio kernel
 //rtk begin
         dmab->area = dma_alloc_coherent(NULL, size, &dmab->addr, GFP_KERNEL);
 //		dmab->area = snd_malloc_pages(size,
@@ -223,7 +225,7 @@ int snd_dma_alloc_pages(int type, struct device *device, size_t size,
 		snd_malloc_sgbuf_pages(device, size, dmab, NULL);
 		break;
 #endif
-//rtk begin
+//rtk begin//Added by PC for audio kernel
 #ifdef CONFIG_ION_RTK_PHOENIX
 #ifdef USE_ION_AUDIO_HEAP
     case SNDRV_DMA_TYPE_ION_PLAYBACK:
@@ -337,6 +339,7 @@ void snd_dma_free_pages(struct snd_dma_buffer *dmab)
 {
 	switch (dmab->dev.type) {
 	case SNDRV_DMA_TYPE_CONTINUOUS:
+	//Added by PC for audio kernel
 //rtk begin
         dma_free_coherent(NULL, dmab->bytes, dmab->area, dmab->addr);
         //snd_free_pages(dmab->area, dmab->bytes);
@@ -357,7 +360,7 @@ void snd_dma_free_pages(struct snd_dma_buffer *dmab)
 		snd_free_sgbuf_pages(dmab);
 		break;
 #endif
-//rtk begin
+//rtk begin//Added by PC for audio kernel
 #ifdef CONFIG_ION_RTK_PHOENIX
 #ifdef USE_ION_AUDIO_HEAP
     case SNDRV_DMA_TYPE_ION_PLAYBACK:

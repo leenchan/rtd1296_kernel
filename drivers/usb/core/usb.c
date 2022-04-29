@@ -66,8 +66,15 @@ int usb_disabled(void)
 EXPORT_SYMBOL_GPL(usb_disabled);
 
 #ifdef	CONFIG_PM
+
+#ifdef CONFIG_ARCH_RTD119X
+static int usb_autosuspend_delay = -1;		/* Default delay value,
+						 * in seconds */
+#else
 static int usb_autosuspend_delay = 2;		/* Default delay value,
 						 * in seconds */
+#endif
+
 module_param_named(autosuspend, usb_autosuspend_delay, int, 0644);
 MODULE_PARM_DESC(autosuspend, "default autosuspend delay");
 
@@ -510,7 +517,7 @@ struct usb_device *usb_alloc_dev(struct usb_device *parent,
 	if (root_hub)	/* Root hub always ok [and always wired] */
 		dev->authorized = 1;
 	else {
-		dev->authorized = usb_hcd->authorized_default;
+		dev->authorized = !!HCD_DEV_AUTHORIZED(usb_hcd);
 		dev->wusb = usb_bus_is_wusb(bus) ? 1 : 0;
 	}
 	return dev;

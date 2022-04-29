@@ -1,14 +1,3 @@
-/*
- * Realtek SD card driver
- *
- * Authors:
- * Copyright (C) 2015 Realtek Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-
 #include <linux/blkdev.h>
 #include <linux/clk.h>
 #include <linux/debugfs.h>
@@ -55,7 +44,7 @@
 #include "rtk-sdmmc.h"
 
 #define DRIVER_NAME    "rtk-sdmmc"
-#define BANNER      "Realtek SD/MMC Host Driver"
+#define BANNER      "Realtek SD/MMC Host Driver(BPI)"
 
 #define SD_ALLOC_LENGTH    2048
 #define MAX_PHASE    31
@@ -93,19 +82,13 @@ extern void set_gpio18_low(void);
 #ifndef TOGGLE_GPIO_LOW18
         #define TOGGLE_GPIO_LOW18
 #endif*/
-enum eINT_enable_mode {
-	CMD_RSP_ONLY = 0,
-	DATA_ONLY,
-	CMD_RSP_DATA_WRITE,
-	CMD_RSP_DATA_READ,
-	CMD_RSP_DATA_WRITE_TUNNING,
-	CMD_RSP_DATA_READ_TUNNING,
-	DATA_WRITE_ONLY,
-	DATA_READ_ONLY,
-};
 
-static volatile u32 data_xfer_mode;
-
+#ifdef BPI
+#else
+static int sdmmc_on = 1;
+module_param(sdmmc_on, int, 0444);
+MODULE_PARM_DESC(sdmmc_on, "1:on; 0:off;");
+#endif
 DECLARE_COMPLETION(rtk_sdmmc_wait);
 static int rtk_sdmmc_send_stop_cmd(struct mmc_command *cmd, struct rtk_sdmmc_host *rtk_host,int flag);
 static int rtk_sdmmc_send_cmd_get_rsp(struct sdmmc_cmd_pkt *cmd_info);
@@ -116,9 +99,6 @@ static void rtk_sdmmc_plug(unsigned long data);
 static void rtk_sdmmc_cmd12_fun(unsigned long data);
 static void rtk_sdmmc_set_access_mode(struct rtk_sdmmc_host *rtk_host,u8 level);
 void remove_sdcard(struct rtk_sdmmc_host *rtk_host);
-#ifdef CONFIG_MMC_RTK_EMMC
-int get_RTK_initial_flag(void);
-#endif
 void rtk_sdmmc_sync(struct rtk_sdmmc_host *rtk_host);
 static void rtk_sdmmc_speed(struct rtk_sdmmc_host *rtk_host, enum sdmmc_clock_speed sd_speed);
 static unsigned int sd_in_receive_data_state; //CMD25_WO_STOP_COMMAND
@@ -143,6 +123,7 @@ struct mmc_command cmd12_stop_cmd;
 #endif
 
 struct rtk_sdmmc_host *rtk_global_host = NULL;
+//int get_RTK_initial_flag(void);
 void mmc_blk_set_ro(struct mmc_card* card);
 bool INT4_flag=false;
 bool CMD8_SD1=false;
@@ -153,7 +134,7 @@ int mini_SD=0;
 bool broken_flag=false;
 u32 g_ro = 0;
 int irq_counter=0;
-int irq_error_bit=1;
+
 #ifdef CONFIG_RTK_XEN_SUPPORT
 #define XEN 1
 #else
@@ -163,6 +144,52 @@ int irq_error_bit=1;
 //static struct workqueue_struct *cmd12_qu;
 //static struct delayed_work rtk_cmd12_delayed_work;
 //=============================================
+
+#ifdef BPI
+#else
+void rtk_sdmmc_chk_param(u32 *pparam, u32 len, u8 *ptr)
+{
+	u32 value,i;
+	*pparam = 0;
+	for(i=0;i<len;i++){
+		value = ptr[i] - '0';
+		// KWarning: checked ok by alexkh@realtek.com
+		if((value >= 0) && (value <=9))
+		{
+			*pparam+=value<<(4*(len-1-i));
+			continue;
+		}
+		value = ptr[i] - 'a';
+		// KWarning: checked ok by alexkh@realtek.com
+		if((value >= 0) && (value <=5))
+		{
+			value+=10;
+			*pparam+=value<<(4*(len-1-i));
+			continue;
+		}
+		value = ptr[i] - 'A';
+		// KWarning: checked ok by alexkh@realtek.com
+		if((value >= 0) && (value <=5))
+		{
+			value+=10;
+			*pparam+=value<<(4*(len-1-i));
+			continue;
+		}
+	}
+}
+
+static int rtk_sdmmc_onoff(char * buf){
+	/*
+        example:
+        sdmmc_on=0
+        sdmmc_on=1
+	*/
+	rtk_sdmmc_chk_param(&sdmmc_on,1,buf+1);
+	printk("BPI: %s: sdmmc_on(%d)\n", DRIVER_NAME,sdmmc_on);
+	return 0;
+}
+__setup("sdmmc_on",rtk_sdmmc_onoff);
+#endif
 
 void rtk_sdmmc_wait_stop_cmd_irq_done(void)
 {
@@ -189,7 +216,6 @@ void card_broken(struct rtk_sdmmc_host *rtk_host)
         printk(KERN_ERR "SD Card is broken!!!\n");
         
 	writel(0x0, sdmmc_base + CR_SD_DMA_CTL3); //stop dma control
-	data_xfer_mode = CMD_RSP_ONLY;
         writeb(0xff, sdmmc_base + CR_CARD_STOP); //SD Card module transfer stop and idle state
         writeb(0x40, sdmmc_base + SD_BUS_STATUS);
         mdelay(10);
@@ -310,19 +336,18 @@ void remove_sdcard(struct rtk_sdmmc_host *rtk_host) {
         rtk_host->ins_event = EVENT_REMOV;
         rtk_host->rtflags &= ~RTKCR_FCARD_DETECTED;
         det_time = 1;
-#ifdef CONFIG_MACH_RTK1195
         //reset
         timeout = jiffies + msecs_to_jiffies(100);
 
         while(time_before(jiffies, timeout)){
              rtk_lockapi_lock(flags2, __FUNCTION__);    //lock 0x98012xxx for fear that emmc access followed by 98xx_x9xx or 98xxx8xx
-             if((!(readl(rtk_host->emmc + EMMC_DMA_CTL3) & 0x01)) && (readb(rtk_host->sdio + SDIO_NORML_INT_STA) & 0x02)) {
+             if((!(readl(rtk_host->emmc + EMMC_DMA_CTL3) & 0x01)) /*&& (readb(rtk_host->sdio + SDIO_NORML_INT_STA) & 0x02)*/) { //; jim just skip this and need to check with james
                     rtk_lockapi_unlock(flags2, __FUNCTION__);  //unlock
                     break;
              }
              rtk_lockapi_unlock(flags2, __FUNCTION__);  //unlock
         }
-#endif
+
         //writel(readl(pll_base + 0x0C) | (0x1 << 25) | (0x1 << 31), pll_base + 0x0C);
         //writel(readl(sdmmc_base + 0x20) | 0x00000002, sdmmc_base + 0x20);    //add by jim for test, change the state to reset the SD IP
         //writel(readl(sdmmc_base + 0x20) | 0x00000003, sdmmc_base + 0x20);
@@ -331,7 +356,6 @@ void remove_sdcard(struct rtk_sdmmc_host *rtk_host) {
     	writel(readl(sdmmc_base + 0x20) | 0x00000001, sdmmc_base + 0x20);   //reset the DMA
 	
         writel(0x0, sdmmc_base + CR_SD_DMA_CTL3); //stop dma control
-	data_xfer_mode = CMD_RSP_ONLY;
         writeb(0xff, sdmmc_base + CR_CARD_STOP); //SD Card module transfer stop and idle state
 
         rtk_host->ops->card_power(rtk_host, 0); //power off, Jim add
@@ -386,27 +410,24 @@ static int rtk_sdmmc_pm_suspend(struct device *dev)
 		rtk_host->ins_event = EVENT_REMOV;
 		rtk_host->rtflags &= ~RTKCR_FCARD_DETECTED;
 		det_time = 1;
-#ifdef CONFIG_MACH_RTK1195
-		//reset, this is workaround for phoenix, phoenix 1195 DMA reset will have impact in EMMC SDIO, so we need to make sure that emmc and sdio dma is inactive now
+		//reset
 		timeout = jiffies + msecs_to_jiffies(100);
 
 		while(time_before(jiffies, timeout)){
 			rtk_lockapi_lock(flags2, __FUNCTION__);
-			if((!(readl(rtk_host->emmc + EMMC_DMA_CTL3) & 0x01)) && (readb(rtk_host->sdio + SDIO_NORML_INT_STA) & 0x02)){ //; jim skip this comment
+			if((!(readl(rtk_host->emmc + EMMC_DMA_CTL3) & 0x01)) /*&& (readb(rtk_host->sdio + SDIO_NORML_INT_STA) & 0x02)*/){ //; jim skip this comment
 				rtk_lockapi_unlock(flags2, __FUNCTION__);
 				break;
 			}
 			rtk_lockapi_unlock(flags2, __FUNCTION__);
 			//msleep(1);
 		}
-#endif
 		//writel(readl(pll_base + 0x0C) | (0x1 << 25) | (0x1 << 31), pll_base + 0x0C);
 			 
 		writel(readl(sdmmc_base + 0x20) & (~0x01), sdmmc_base + 0x20);    //modified by JIM 2016.9.1 for power saving, set L4 gated enabled
     		writel(readl(sdmmc_base + 0x20) | 0x00000001, sdmmc_base + 0x20);   //reset the DMA
 		
 		writel(0x0, sdmmc_base + CR_SD_DMA_CTL3); //stop dma control
-		data_xfer_mode = CMD_RSP_ONLY;
 		writeb(0xff, sdmmc_base + CR_CARD_STOP); //SD Card module transfer stop and idle state
 
 		rtk_host->ops->card_power(rtk_host, 0); //power off, Jim add
@@ -439,7 +460,7 @@ static int rtk_sdmmc_pm_resume(struct device *dev)
 	
 	if(get_RTK_PM_STATE() == PM_SD_SUSPEND_STANDBY) {
 		writel(0x0000003, pll_base + CR_PLL_SD1);
-		mdelay(10); //delay 500 ms to fit SD spec
+		mdelay(10);
 		writel(0x00002003, pll_base + CR_PLL_SD1); //PLL_SD1
 	}
 	else rtk_sdmmc_hw_initial(rtk_host);   //suspend will cause poweroff and the SD PLL will be set as default, so we need to initial the SD PLL and clock before resume
@@ -456,7 +477,6 @@ static int rtk_sdmmc_pm_resume(struct device *dev)
 		rtk_host->rtflags |= RTKCR_FCARD_DETECTED;
 		det_time = 1;
 		writel(0x00000000, sdmmc_base + CR_SD_DMA_CTL3); //stop dma control
-		data_xfer_mode = CMD_RSP_ONLY;
 		writeb(0x00, sdmmc_base + CR_CARD_STOP); //SD Card module transfer no stop
 		writeb(0x02, sdmmc_base + CARD_SELECT); //Specify the current active card module for the coming data transfer, bit 2:0 = 010
 		writeb(0x04, sdmmc_base + CR_CARD_OE); //arget module is SD/MMC card module, bit 2 =1
@@ -498,9 +518,6 @@ static void rtk_sdmmc_reset(struct rtk_sdmmc_host *rtk_host)
     void __iomem *sdmmc_base = rtk_host->sdmmc;
 
     writel(0x00000000, sdmmc_base + CR_SD_DMA_CTL3);
-    data_xfer_mode = CMD_RSP_ONLY;
-    writel(0x00000016, sdmmc_base + CR_SD_ISREN);
-    writel(0x00000007, sdmmc_base + CR_SD_ISREN);
     writeb(0x00, sdmmc_base + SD_TRANSFER);
     writeb(0xFF, sdmmc_base + CR_CARD_STOP); //SD Card module transfer stop and idle state.
     writeb(0x00, sdmmc_base + CR_CARD_STOP); //SD Card module transfer start.
@@ -1211,21 +1228,6 @@ int rtk_sdmmc_cpu_wait(char* drv_name, struct rtk_sdmmc_host *rtk_host, u8 cmdco
     unsigned long timeout = 0;
     void __iomem *sdmmc_base = rtk_host->sdmmc;
 poll=1;
-
-    writel(0x00000016, sdmmc_base + CR_SD_ISREN); //disable all
-    switch( data_xfer_mode ) {
-        case CMD_RSP_ONLY:
-        case CMD_RSP_DATA_WRITE:
-            writel(0x00000007, sdmmc_base + CR_SD_ISREN);
-            break;
-        case CMD_RSP_DATA_READ:
-        case DATA_ONLY:
-            writel(0x00000015, sdmmc_base + CR_SD_ISREN);
-            break;
-        default:
-            writel(0x00000007, sdmmc_base + CR_SD_ISREN);
-            break;
-    }
     rtk_sdmmc_sync(rtk_host);
 
     writeb((u8)(cmdcode | START_EN), sdmmc_base + SD_TRANSFER);
@@ -1285,86 +1287,39 @@ int rtk_sdmmc_int_wait(char* drv_name, struct rtk_sdmmc_host *rtk_host, u8 cmdco
     unsigned int sd_trans = 0;
     unsigned long old_jiffles = jiffies;
     void __iomem *sdmmc_base = rtk_host->sdmmc;
-    int cmd_type=0;
 
 poll=0;
     if(broken_flag==true) return CR_TRANSFER_FAIL;
     /* timeout timer fire */
     if (&rtk_host->timer){
-	if(rtk_host!=NULL && rtk_host->mrq!=NULL && rtk_host->mrq->cmd!=NULL &&
-	   (rtk_host->mrq->cmd->opcode==55 || rtk_host->mrq->cmd->opcode==41 || rtk_host->mrq->cmd->opcode==8 || (pre_cmd==41 && rtk_host->mrq->cmd->opcode==1))){
+	if(rtk_host!=NULL && rtk_host->mrq!=NULL && rtk_host->mrq->cmd!=NULL && (rtk_host->mrq->cmd->opcode==55 || rtk_host->mrq->cmd->opcode==41 || rtk_host->mrq->cmd->opcode==8
+	    || (pre_cmd==41 && rtk_host->mrq->cmd->opcode==1)))
 		timeout = msecs_to_jiffies(100) + rtk_host->timeout;
-		cmd_type=1;
-	}
-	else if(rtk_host!=NULL && rtk_host->mrq!=NULL && rtk_host->mrq->cmd!=NULL && (rtk_host->mrq->cmd->opcode==2 || rtk_host->mrq->cmd->opcode==3 || rtk_host->mrq->cmd->opcode==9
-		|| (pre_cmd==0 && rtk_host->mrq->cmd->opcode==1))) {
+	else if(rtk_host!=NULL && rtk_host->mrq!=NULL && rtk_host->mrq->cmd!=NULL && (rtk_host->mrq->cmd->opcode==2 || rtk_host->mrq->cmd->opcode==3 || rtk_host->mrq->cmd->opcode==9))
 		timeout = msecs_to_jiffies(600) + rtk_host->timeout;
-		cmd_type=2;
-	}
-        else {
-		timeout = msecs_to_jiffies(3000) + rtk_host->timeout;
-		cmd_type=3;
-	}
+        else timeout = msecs_to_jiffies(3000) + rtk_host->timeout;
         mod_timer(&rtk_host->timer, (jiffies + timeout));
-    }
-    writel(0x00000016, sdmmc_base + CR_SD_ISREN); //disable all
-    switch( data_xfer_mode ) {
-        case CMD_RSP_ONLY:
-        case DATA_WRITE_ONLY:
-        case CMD_RSP_DATA_WRITE:
-        case CMD_RSP_DATA_READ_TUNNING:
-            writel(0x00000007, sdmmc_base + CR_SD_ISREN);
-            break;
-        case CMD_RSP_DATA_READ:
-            writel(0x00000015, sdmmc_base + CR_SD_ISREN);
-            break;
-        default:
-            writel(0x00000007, sdmmc_base + CR_SD_ISREN);
     }
 
     rtk_sdmmc_sync(rtk_host);
 
     irq_counter=0;
-    irq_error_bit=0;
+
     writeb((u8) (cmdcode | START_EN), sdmmc_base + SD_TRANSFER); //cmd fire
 
     wait_for_completion(rtk_host->int_waiting);
 
     rtk_sdmmc_sync(rtk_host);
-    sd_trans = readb(sdmmc_base + SD_TRANSFER);
 
-    if(irq_error_bit==1) {	//error handling
-	if (rtk_host->cmd_opcode==55 && CMD8_SD1==true) {
-		CMD55_MMC=true; //MMC card
-		printk(KERN_ERR "Reject SD 1.x command\n");
-		ret = CR_TRANSFER_FAIL;
-	}
-	else {
-		if(rtk_host!=NULL)
-			printk(KERN_ERR "rtk_sdmmc_int_wait: reset the card and adjust the driving capacity, cmd=%d, SD_TRANSFER=0x%x\n",rtk_host->cmd_opcode, sd_trans);
-		driving_capacity++;
-		remove_sdcard(rtk_host);
-		ret = CR_TRANS_OK;
-	}
-    }
-    else if((sd_trans & (END_STATE | IDLE_STATE)) == (END_STATE | IDLE_STATE))
+    sd_trans = readb(sdmmc_base + SD_TRANSFER);
+    if((sd_trans & (END_STATE | IDLE_STATE)) == (END_STATE | IDLE_STATE))
         ret = CR_TRANS_OK;
-    else {
-	if(cmd_type==1) timeout = 10;
-	else if(cmd_type==2) timeout = 60;
-	else timeout = 300;
-        while(time_before(jiffies, old_jiffles + timeout)){
-            rtk_sdmmc_sync(rtk_host);
-            sd_trans = readb(sdmmc_base + SD_TRANSFER);
-            if((sd_trans & (END_STATE | IDLE_STATE)) == (END_STATE | IDLE_STATE)){
-                ret = CR_TRANS_OK;
-                break;
-            }
-	    else if((sd_trans & (ERR_STATUS)) == (ERR_STATUS)) {
-		if((num_online_cpus()==1||XEN) && rtk_host!=NULL && rtk_host->cmd_opcode==8) CMD8_SD1=true;
-		if((num_online_cpus()==1||XEN) && rtk_host!=NULL && rtk_host->cmd_opcode==55 && CMD8_SD1==true) CMD55_MMC=true;
-		ret = CR_TRANSFER_FAIL;
-		printk(KERN_ERR "%s(%d) trans error(error status) :\n cfg1: 0x%02x, cfg2: 0x%02x, cfg3: 0x%02x, trans: 0x%08x, st1: 0x%08x, st2: 0x%08x, bus: 0x%08x\n",
+    else if((sd_trans & (ERR_STATUS)) == (ERR_STATUS)) {
+	if((num_online_cpus()==1||XEN) && rtk_host!=NULL && rtk_host->cmd_opcode==8) CMD8_SD1=true;
+	if((num_online_cpus()==1||XEN) && rtk_host!=NULL && rtk_host->cmd_opcode==55 && CMD8_SD1==true) CMD55_MMC=true;
+
+	ret = CR_TRANSFER_FAIL;
+                printk(KERN_ERR "%s(%d) trans error(error status) :\n cfg1: 0x%02x, cfg2: 0x%02x, cfg3: 0x%02x, trans: 0x%08x, st1: 0x%08x, st2: 0x%08x, bus: 0x%08x\n",
                         __func__,
                         __LINE__,
                         readb(sdmmc_base + SD_CONFIGURE1),
@@ -1375,17 +1330,8 @@ poll=0;
                         readb(sdmmc_base + SD_STATUS2),
                         readb(sdmmc_base + SD_BUS_STATUS));
                 if(rtk_host!=NULL && rtk_host->mrq!=NULL && rtk_host->mrq->cmd!=NULL) printk(KERN_ERR "%s: error opcode = %d\n", __func__, rtk_host->mrq->cmd->opcode);
-		if(rtk_host!=NULL && rtk_host->mrq!=NULL && rtk_host->mrq->cmd!=NULL && rtk_host->mrq->cmd->opcode!=13 && rtk_host->mrq->cmd->opcode!=19 && CMD8_SD1!=true && CMD55_MMC!=true) {
-			driving_capacity++;
-			remove_sdcard(rtk_host);
-			ret = CR_TRANS_OK;
-		}
-		break;
-	    }else if(rtk_host!=NULL && !(rtk_host->rtflags & RTKCR_FCARD_DETECTED)){
+    }else if(rtk_host!=NULL && !(rtk_host->rtflags & RTKCR_FCARD_DETECTED)){
                 ret = CR_TRANSFER_FAIL;
-		break;
-	    }
-	}
     }
     
     if(ret == CR_TRANSFER_TO){
@@ -1451,7 +1397,7 @@ static int rtk_sdmmc_set_rspparam(struct sdmmc_cmd_pkt *cmd_info)
             }
             break;
         case MMC_SELECT_CARD: //cmd7
-	    if(cmd_info->cmd->flags == (MMC_RSP_R1 | MMC_CMD_AC)) {  //select
+	    if(cmd_info->cmd->flags == MMC_RSP_R1 | MMC_CMD_AC) {  //select
             	cmd_info->rsp_para1 = -1;
             	cmd_info->rsp_para2 = 0x41; //SD_R1b|CRC16_CAL_DIS;
             	cmd_info->rsp_para3 = 0x05;
@@ -1729,7 +1675,6 @@ static int rtk_sdmmc_send_stop_cmd(struct mmc_command *cmd, struct rtk_sdmmc_hos
     rtk_host->cmd_opcode = cmd_idx;
 //printk(KERN_ERR "send_stop_cmd: pre_cmd=%d, cmd=%d, INT4_flag=%d\n",pre_cmd,cmd_idx,INT4_flag);
     rtk_sdmmc_get_cmd_timeout(cmd_info);
-    data_xfer_mode = CMD_RSP_ONLY;
 	if(flag==1) ret = rtk_sdmmc_cpu_wait(DRIVER_NAME, rtk_host, SD_SENDCMDGETRSP);
 	else ret = rtk_sdmmc_int_wait(DRIVER_NAME, rtk_host, SD_SENDCMDGETRSP);
     rtk_sdmmc_sync(rtk_host);
@@ -1823,11 +1768,7 @@ static int rtk_sdmmc_stream_cmd(u16 cmdcode, struct sdmmc_cmd_pkt *cmd_info, u8 
             writel(RSP17_SEL | DDR_WR | DMA_XFER, sdmmc_base + CR_SD_DMA_CTL3);
         }else
             writel(DDR_WR | DMA_XFER, sdmmc_base + CR_SD_DMA_CTL3);
-	data_xfer_mode = CMD_RSP_DATA_READ;
-        if(cmd_info->cmd->opcode == MMC_SEND_TUNING_BLOCK) {
-		INT4_flag=false;
-		data_xfer_mode = CMD_RSP_DATA_READ_TUNNING;
-	}
+        if(cmd_info->cmd->opcode == MMC_SEND_TUNING_BLOCK) INT4_flag=false;
 
     }else if(cmd_info->cmd->data->flags & MMC_DATA_WRITE){
         rtk_sdmmc_debug("%s: DMA sa = 0x%x\nDMA len = 0x%x\nDMA set = 0x%x\n", __func__, (u32)sa, block_count, DMA_XFER);
@@ -1840,11 +1781,6 @@ static int rtk_sdmmc_stream_cmd(u16 cmdcode, struct sdmmc_cmd_pkt *cmd_info, u8 
             writel(RSP17_SEL | DMA_XFER, sdmmc_base + CR_SD_DMA_CTL3);
         }else
             writel(DMA_XFER, sdmmc_base + CR_SD_DMA_CTL3);
-
-	data_xfer_mode = CMD_RSP_DATA_WRITE;
-	if( cmdcode == SD_AUTOWRITE3 ) {
-		data_xfer_mode = DATA_WRITE_ONLY;
-        }
     }
 
     rtk_host->cmd_opcode = cmd_idx;
@@ -1852,10 +1788,8 @@ static int rtk_sdmmc_stream_cmd(u16 cmdcode, struct sdmmc_cmd_pkt *cmd_info, u8 
     //printk(KERN_ERR "rtk_stream_cmd invoke pre_cmd=%d, cmd=%d, INT4_flag=%d\n",pre_cmd,cmd_info->cmd->opcode,INT4_flag);
     ret = rtk_sdmmc_int_wait(DRIVER_NAME, rtk_host, cmdcode);
     /* Reset dat64_sel and rsp17_sel, #CMD19 DMA won't be auto-cleared */
-    if(cmd_info->cmd->opcode == MMC_SEND_TUNING_BLOCK) {
+    if(cmd_info->cmd->opcode == MMC_SEND_TUNING_BLOCK)
         writel(0x00000000, sdmmc_base + CR_SD_DMA_CTL3);
-	data_xfer_mode = CMD_RSP_ONLY;
-    }
 
     if(ret == CR_TRANS_OK){
         if((cmdcode == SD_AUTOREAD1) || (cmdcode == SD_AUTOWRITE1)){
@@ -2102,7 +2036,6 @@ static int rtk_sdmmc_send_cmd_get_rsp(struct sdmmc_cmd_pkt *cmd_info)
 
     rtk_sdmmc_get_cmd_timeout(cmd_info);
 
-    data_xfer_mode = CMD_RSP_ONLY;
     if(RESP_TYPE_17B & rsp_para2){
         INT4_flag=true;
         /*remap the resp dst buffer to un-cache*/
@@ -2117,7 +2050,7 @@ static int rtk_sdmmc_send_cmd_get_rsp(struct sdmmc_cmd_pkt *cmd_info)
         writel(sa, sdmmc_base + CR_SD_DMA_CTL1); //espeical for R2
         writel(0x00000001, sdmmc_base + CR_SD_DMA_CTL2); //espeical for R2
         writel(dma_val, sdmmc_base + CR_SD_DMA_CTL3); //espeical for R2
-	data_xfer_mode = CMD_RSP_DATA_READ;
+
     }else if(RESP_TYPE_6B & rsp_para2){
         //do nothing
     }
@@ -2272,7 +2205,6 @@ static void rtk_sdmmc_request(struct mmc_host *host, struct mmc_request *mrq)
     down(&cr_sd_sem);
     cmd = mrq->cmd;
     rtk_host->mrq = mrq;
-    data_xfer_mode = CMD_RSP_ONLY; // init each request
 	//printk(KERN_ERR "JIM debug rtk_sdmmc_request cmd->opcode = %d\n",cmd->opcode);
     /* Check SD card extension command support,jamestai20151008*/
     if(cmd->opcode == 58 || cmd->opcode == 59){
@@ -2423,8 +2355,8 @@ static void rtk_sdmmc_hw_initial(struct rtk_sdmmc_host *rtk_host)
     writel(readl(pll_base + CR_PLL_SD4) | 0x00000004, pll_base + CR_PLL_SD4);
     writel(readl(pll_base + CR_PLL_SD4) | 0x00000007, pll_base + CR_PLL_SD4);
 
-	writel(0x0000003, pll_base + CR_PLL_SD1);
-        mdelay(10); //delay 500 ms to fit SD spec
+    writel(0x0000003, pll_base + CR_PLL_SD1);
+    mdelay(10);
     writel(0x00002003, pll_base + CR_PLL_SD1); //PLL_SD1
 
     if(readl(sysbrdg_base+0x204)!=0x0) 
@@ -2441,7 +2373,7 @@ static void rtk_sdmmc_hw_initial(struct rtk_sdmmc_host *rtk_host)
         writel(0x40000000,sdmmc_base+0x2c);
     udelay(100);
     writel(0x00000006, pll_base + 0x01EC);     //JIM modified, 1AC->1EC
-    writel(0x04515893, pll_base + CR_PLL_SD2); //change from 4517893 to 4515893 for passing the EMI 
+    writel(0x04517893, pll_base + CR_PLL_SD2); //Reduce the impact of spectrum by Hsin-yin, jamestai20150302
     writel(0x00564388, pll_base + CR_PLL_SD3); //Set PLL clock rate, default clock 100MHz
 	//ritel(0x00324388,  pll_base + CR_PLL_SD3);
     mdelay(2);
@@ -2493,9 +2425,7 @@ static void rtk_sdmmc_hw_initial(struct rtk_sdmmc_host *rtk_host)
     writel(0x00000000, sdmmc_base + CR_SD_PAD_CTL); //change to 3.3v
 
     writel(0x00000016, sdmmc_base + CR_SD_ISR); //enable interrupt
-    //writel(0x00000017, sdmmc_base + CR_SD_ISREN);
-    writel(0x00000016, sdmmc_base + CR_SD_ISREN); // disable all
-    writel(0x00000007, sdmmc_base + CR_SD_ISREN);
+    writel(0x00000017, sdmmc_base + CR_SD_ISREN);
     rtk_sdmmc_sync(rtk_host);
 
     writeb(0x02, sdmmc_base + CARD_SELECT); //for emmc, select SD ip
@@ -2563,7 +2493,7 @@ static int rtk_sdmmc_switch_voltage(struct mmc_host *mmc, struct mmc_ios *ios)
         rtk_sdmmc_sync(rtk_host);
 
 	writel(0x0000003, pll_base + CR_PLL_SD1);
-        msleep(500); //delay 500 ms to fit SD spec
+	msleep(500);
 
         writel(0x0004003, pll_base + CR_PLL_SD1);
         mdelay(10); //delay 5 ms to fit SD spec
@@ -2692,11 +2622,6 @@ static void rtk_sdmmc_plug(unsigned long data)
     void __iomem *pll_base = rtk_host->pll;
 
     unsigned long flags2;
-#ifdef CONFIG_MMC_RTK_EMMC
-    if(get_RTK_initial_flag()==0) {
-        return;       //we must wait for EMMC driver initial done
-    }
-#endif
 
     reginfo = readb(sdmmc_base + CARD_EXIST);
     if((reginfo & SD_EXISTENCE) ^ (rtk_host->int_status_old & SD_EXISTENCE)){
@@ -2713,7 +2638,6 @@ static void rtk_sdmmc_plug(unsigned long data)
             CMD55_MMC=false;
 
             writel(0x00000000, sdmmc_base + CR_SD_DMA_CTL3); //stop dma control
-	    data_xfer_mode = CMD_RSP_ONLY;
             writeb(0x00, sdmmc_base + CR_CARD_STOP); //SD Card module transfer no stop
             writeb(0x02, sdmmc_base + CARD_SELECT); //Specify the current active card module for the coming data transfer, bit 2:0 = 010
             writeb(0x04, sdmmc_base + CR_CARD_OE); //arget module is SD/MMC card module, bit 2 =1
@@ -2737,31 +2661,28 @@ static void rtk_sdmmc_plug(unsigned long data)
             rtk_lockapi_unlock(flags2, __FUNCTION__);
 	    mini_SD=0;
 	    broken_flag=false;
-#ifdef CONFIG_MACH_RTK1195
             /*reset*/
             timeout = jiffies + msecs_to_jiffies(100);
             while(time_before(jiffies, timeout)){
 		rtk_lockapi_lock(flags2, __FUNCTION__);
-               if((!(readl(rtk_host->emmc + EMMC_DMA_CTL3) & 0x01)) &&
-                    (readb(rtk_host->sdio + SDIO_NORML_INT_STA) & 0x02)){
+                if((!(readl(rtk_host->emmc + EMMC_DMA_CTL3) & 0x01)) /*&&
+                    (readb(rtk_host->sdio + SDIO_NORML_INT_STA) & 0x02)*/){ //;  skip this comment first and need to check if this is a mistake
                     	rtk_lockapi_unlock(flags2, __FUNCTION__);
 			break;
 		}
 		rtk_lockapi_unlock(flags2, __FUNCTION__);
             }
-#endif
 	    //writel(readl(pll_base + 0x0C) | (0x1 << 25) | (0x1 << 31), pll_base + 0x0C);
 	    //writel(readl(sdmmc_base + 0x20) | 0x00000002, sdmmc_base + 0x20);    //add by jim for test, change the state to reset the SD IP
 	    //writel(readl(sdmmc_base + 0x20) | 0x00000003, sdmmc_base + 0x20); 
 
             writel(0x0, sdmmc_base + CR_SD_DMA_CTL3); //stop dma control
-	    data_xfer_mode = CMD_RSP_ONLY;
             writeb(0xff, sdmmc_base + CR_CARD_STOP); //SD Card module transfer stop and idle state
 
             writeb(0x3b, sdmmc_base + CARD_CLOCK_EN_CTL); 
 
             rtk_host->ops->card_power(rtk_host, 0); //power off, Jim add
-	    printk(KERN_ERR "SD card is being removed now...!!!\n");
+	    printk(KERN_ERR "SD card is being removed now...!!!\n");	
         }
         rtk_sdmmc_sync(rtk_host);
 	rtk_lockapi_lock(flags2, __FUNCTION__);
@@ -2772,13 +2693,14 @@ static void rtk_sdmmc_plug(unsigned long data)
         sdmmc_rca = 0;
         mmc_detect_change(rtk_host->mmc, msecs_to_jiffies(det_time));
     }
-	//workaround for some manufacture SD hardware issue that will have delay of write protection detection
-    if(rtk_host->mmc->card  && !(g_ro & SD_WRITE_PROTECT) && (reginfo & SD_WRITE_PROTECT) && (reginfo & SD_EXISTENCE)) {
+           //workaround for some manufacture SD hardware issue that will have delay of write protectiondetection
+   if(rtk_host->mmc->card && !(g_ro & SD_WRITE_PROTECT) && (reginfo & SD_WRITE_PROTECT) && (reginfo & SD_EXISTENCE)) {
 	printk(KERN_INFO "The SD card is locked!!!\n");
 	g_ro = g_ro | SD_WRITE_PROTECT;
 	mmc_card_set_readonly(rtk_host->mmc->card);
 	mmc_blk_set_ro(rtk_host->mmc->card);
-    }
+   }
+
     rtk_host->int_status_old = reginfo;
     mod_timer(&rtk_host->plug_timer, jiffies + HZ/10);
 }
@@ -2821,7 +2743,7 @@ static void rtk_sdmmc_timeout(unsigned long data)
 	CMD8_SD1=true;    //SD 1.x
 	printk(KERN_ERR "Reject SD 2.x command\n");
     }
-    else if(rtk_host->cmd_opcode==55 && CMD8_SD1==true && (int_status==0x0||int_status==0x6)) {
+    else if(rtk_host->cmd_opcode==55 && CMD8_SD1==true && (int_status==0x0||int_status==0x16)) {
 	CMD55_MMC=true;   //MMC card
 	printk(KERN_ERR "Reject SD 1.x command\n");
     }
@@ -2927,49 +2849,35 @@ static irqreturn_t rtk_sdmmc_irq(int irq, void *data)
    
     rtk_sdmmc_sync(rtk_host);
     int_status = readl(sdmmc_base + CR_SD_ISR);
-#if 0
+
     if((num_online_cpus()==1||XEN) && (irq_counter++) > 10 && (!(int_status & ISRSTA_INT1)|| (int_status & ISRSTA_INT2))) {
-        if(rtk_host!=NULL && rtk_host->cmd_opcode==55 || rtk_host->cmd_opcode==41 || rtk_host->cmd_opcode==8 || rtk_host->cmd_opcode==1) {
-                complete(rtk_host->int_waiting);
-                writel(0x00000016, sdmmc_base + CR_SD_ISR);
-                rtk_sdmmc_sync(rtk_host);
-                return IRQ_HANDLED;
-        }
-        else if(rtk_host!=NULL && (rtk_host->cmd_opcode==13 || rtk_host->cmd_opcode==19) && (int_status & ISRSTA_INT2) && CMD8_SD1 == true && CMD55_MMC==true) {
-                complete(rtk_host->int_waiting);
-                writel(0x00000016, sdmmc_base + CR_SD_ISR);
-                rtk_sdmmc_sync(rtk_host);
-                return IRQ_HANDLED;
-        }
+	if(rtk_host!=NULL && rtk_host->cmd_opcode==55 || rtk_host->cmd_opcode==41 || rtk_host->cmd_opcode==8 || rtk_host->cmd_opcode==1) {
+	    complete(rtk_host->int_waiting);
+	    writel(0x00000016, sdmmc_base + CR_SD_ISR);
+	    rtk_sdmmc_sync(rtk_host);
+	    return IRQ_HANDLED;
+	}
+	else if(rtk_host!=NULL && (rtk_host->cmd_opcode==13 || rtk_host->cmd_opcode==19) && (int_status & ISRSTA_INT2) && CMD8_SD1 == true && CMD55_MMC==true) {
+	    complete(rtk_host->int_waiting);
+	    writel(0x00000016, sdmmc_base + CR_SD_ISR);
+	    rtk_sdmmc_sync(rtk_host);
+	    return IRQ_HANDLED;
+	}
     }
-    else if((num_online_cpus()==1||XEN) && (irq_counter++) > 100 && rtk_host!=NULL && rtk_host->cmd_opcode!=25 && rtk_host->cmd_opcode!=24) {  //single core cpu, we cannot wait for so long for fear that the irq will cause the system crash
-        complete(rtk_host->int_waiting);
-        writel(0x00000016, sdmmc_base + CR_SD_ISR);
-        rtk_sdmmc_sync(rtk_host);
-        return IRQ_HANDLED;
+    else if((num_online_cpus()==1||XEN) && (irq_counter++) > 100 && rtk_host!=NULL && rtk_host->cmd_opcode!=25 && rtk_host->cmd_opcode!=24) { //single core cpu, we cannot wait for so long for fear that the irq will cause the system crash
+	complete(rtk_host->int_waiting);
+	writel(0x00000016, sdmmc_base + CR_SD_ISR);
+	rtk_sdmmc_sync(rtk_host);
+	return IRQ_HANDLED;
     }
-#endif
-    if((int_status & ISRSTA_INT2) && rtk_host->cmd_opcode!=13 && rtk_host->cmd_opcode!=19 ) {
-	irq_error_bit=1;
-	goto clear_irq;
-    }
+
     if(INT4_flag==true) {
-#if 0
 	if(!(int_status & ISRSTA_INT1) || !(int_status & ISRSTA_INT4)) return IRQ_HANDLED;
-#endif
-	if(data_xfer_mode==CMD_RSP_DATA_READ || data_xfer_mode==DATA_ONLY)
-	{
-		if(!(int_status & ISRSTA_INT4)) return IRQ_HANDLED;
-	}
-	else {
-		if(!(int_status & ISRSTA_INT1)) return IRQ_HANDLED;
-	}
     }else {
 	if(!(int_status & ISRSTA_INT1)) return IRQ_HANDLED;
     }
-//    if((int_status & ISRSTA_INT2) && rtk_host->cmd_opcode!=13 && rtk_host->cmd_opcode!=19 ) return IRQ_HANDLED;    //if error bit is set, return except for tuning command
-//    if((int_status & ISRSTA_INT2) && pre_cmd==55 && rtk_host->cmd_opcode==13) return IRQ_HANDLED;                      //ACMD13 error, return
-clear_irq:
+    if((int_status & ISRSTA_INT2) && rtk_host->cmd_opcode!=13 && rtk_host->cmd_opcode!=19 ) return IRQ_HANDLED;    //if error bit is set, return except for tuning command
+    if((int_status & ISRSTA_INT2) && pre_cmd==55 && rtk_host->cmd_opcode==13) return IRQ_HANDLED;                      //ACMD13 error, return
     if(poll==0){
             del_timer(&rtk_host->timer);
             complete(rtk_host->int_waiting);
@@ -3012,13 +2920,30 @@ static int rtk_sdmmc_probe(struct platform_device *pdev)
     int ret = 0;
     int irq = 0;
 
+    /*if(get_RTK_initial_flag()==0) {
+        printk(KERN_ERR "This rtk-sdmmc module depends on the rtkemmc module first!!!\n");
+        return -EPROBE_DEFER;
+    }*/
+
     struct device_node *sdmmc_node = pdev->dev.of_node;
-    rtk_sdmmc_show_version();
+#ifdef BPI
+#else
+	if(!sdmmc_on) {
+		rtk_sdmmc_show_version();
+		printk("BPI: %s: sdmmc_on(%d) force disable rtk_sdmmc driver \n",__FUNCTION__, sdmmc_on);
+		return -ENXIO;
+	}
+	else {
+		printk("BPI: %s: sdmmc_on(%d) enable rtk_sdmmc driver \n",__FUNCTION__, sdmmc_on);
+	}
+#endif
     
+	rtk_sdmmc_show_version();
     do_stop_command_wo_complete = 0; // probe stage
     wait_stop_command_irq_done = 0; // probe stage
  
     sema_init( &cr_sd_sem, 1 );//probe stage  
+
     irq = irq_of_parse_and_map(sdmmc_node, 0);
     if(!irq){
         printk(KERN_ERR "%s: fail to parse of irq.\n", __func__);
@@ -3054,6 +2979,10 @@ static int rtk_sdmmc_probe(struct platform_device *pdev)
     rtk_host->dev = &pdev->dev;
     rtk_host->ops = &sdmmc_ops;
 
+#ifdef BPI
+#else
+    printk("BPI: reset rtk_sdmmc with rtk_sdmmc_hw_initial() ...\n");
+#endif
     rtk_sdmmc_hw_initial(rtk_host);
     
     spin_lock_init(&rtk_host->lock);

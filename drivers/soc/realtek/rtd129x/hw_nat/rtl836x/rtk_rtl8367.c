@@ -28,11 +28,14 @@
 #include "vlan.h"
 #include "rtl8367c_asicdrv_port.h"
 #include "port.h"
-
-
+#include "rtk_types.h"
+#include "smi.h"
+#include "led.h"
 
 extern void rtl836x_proc_init(void);
-
+#ifdef FORCE_PROBE_RTL8370B
+static void rtl836x_init_led(void);
+#endif
 static unsigned int rtl836x_irq;
 static void *irq_dev_id = (void *)&rtl836x_irq;
 static struct work_struct rtl836x_work;
@@ -148,14 +151,16 @@ static void init_interrupt(void)
     INIT_WORK(&rtl836x_work, rtl836x_work_func);
 }
 
-static void init_rgmii_port(void)
+#define RETRY_COUNT 5
+static void rtl_rgmii_init(void)
 {
-    /* Set extension port 0 to RGMII with Force mode, 1000M, Full-duplex, enable TX&RX pause*/
-    rtk_port_mac_ability_t mac_cfg;
+    int retry_count;
+
+    /* Set extension RGMIIPORT to RGMII with Force mode, 1000M, Full-duplex, enable TX&RX pause*/
     rtk_mode_ext_t mode;
+    rtk_port_mac_ability_t mac_cfg;
     rtk_api_ret_t ret;
 
-    mode = MODE_EXT_RGMII;
     mac_cfg.forcemode = MAC_FORCE;
     mac_cfg.speed = PORT_SPEED_1000M;
     mac_cfg.duplex = FULL_DUPLEX;
@@ -164,17 +169,122 @@ static void init_rgmii_port(void)
     mac_cfg.txpause = ENABLED;
     mac_cfg.rxpause = ENABLED;
 
-    if ((ret = rtk_port_macForceLinkExt_set(EXT_PORT0, mode, &mac_cfg)) != RT_ERR_OK)
-        pr_err("rtl836x RGMII init fail, ret = %d\n", ret);
+//    if ((ret = rtk_port_macForceLinkExt_set(EXT_PORT0, mode, &mac_cfg)) != RT_ERR_OK)
+//        pr_err("rtl836x RGMII init fail, ret = %d\n", ret);
 
+    
+//    if ((ret = rtk_port_rgmiiDelayExt_set(EXT_PORT0, 0, 0)) != RT_ERR_OK)
+//        pr_err("rtl836x RGMII init delay fail, ret = %d\n", ret);
 
-    if ((ret = rtk_port_rgmiiDelayExt_set(EXT_PORT0, 0, 0)) != RT_ERR_OK)
+    if(RGMIIPORT == EXT_PORT0)
+    {
+        retry_count = RETRY_COUNT;
+        mode = MODE_EXT_RGMII;
+        while(retry_count){
+            if((ret = rtk_port_macForceLinkExt_set(EXT_PORT0, mode,&mac_cfg)) == RT_ERR_OK){
+                pr_err("Enable EXT_PORT0 successfully, ret = %d\n", ret);
+                break;
+            }
+
+            pr_err("Enable EXT_PORT0 fail, ret = %d\n", ret);
+            retry_count--;
+            CLK_DURATION(DELAY);
+        }
+
+        retry_count = RETRY_COUNT;
+        mode = MODE_EXT_DISABLE;
+        while(retry_count){
+            if((ret = rtk_port_macForceLinkExt_set(EXT_PORT1, mode,&mac_cfg)) == RT_ERR_OK){
+                pr_err("Disable EXT_PORT1 successfully, ret = %d\n", ret);
+                break;
+            }
+
+            pr_err("Enable EXT_PORT1 fail, ret = %d\n", ret);
+            retry_count--;
+            CLK_DURATION(DELAY);
+        }
+    }
+    else if(RGMIIPORT == EXT_PORT1) 
+    {
+        retry_count = RETRY_COUNT;
+        mode = MODE_EXT_RGMII;
+        while(retry_count){
+            if((ret = rtk_port_macForceLinkExt_set(EXT_PORT1, mode,&mac_cfg)) == RT_ERR_OK){
+                pr_err("Enable EXT_PORT1 successfully, ret = %d\n", ret);
+                break;
+            }
+
+            pr_err("Enable EXT_PORT1 fail, ret = %d\n", ret);
+            retry_count--;
+            CLK_DURATION(DELAY);
+        }
+
+        retry_count = RETRY_COUNT;
+        mode = MODE_EXT_DISABLE;
+        while(retry_count){
+            if((ret = rtk_port_macForceLinkExt_set(EXT_PORT0, mode,&mac_cfg)) == RT_ERR_OK){
+                pr_err("Disable EXT_PORT0 successfully, ret = %d\n", ret);
+                break;
+            }
+
+            pr_err("Enable EXT_PORT0 fail, ret = %d\n", ret);
+            retry_count--;
+            CLK_DURATION(DELAY);
+        }
+    }
+    
+    CLK_DURATION(DELAY);
+    retry_count = RETRY_COUNT;
+    while(retry_count){
+        if ((ret = rtk_port_rgmiiDelayExt_set(RGMIIPORT, 0, 0)) == RT_ERR_OK){
+            break;
+        }
+
         pr_err("rtl836x RGMII init delay fail, ret = %d\n", ret);
+        retry_count--;
+        CLK_DURATION(DELAY);
+    }
 
 }
 
+#ifdef FORCE_PROBE_RTL8370B
+static void rtl836x_init_led()
+{
+	rtk_portmask_t pmask;
+	rtk_led_ability_t ability;
+
+	RTK_PORTMASK_CLEAR(pmask);
+	RTK_PORTMASK_PORT_SET(pmask, UTP_PORT0);
+	RTK_PORTMASK_PORT_SET(pmask, UTP_PORT1);
+	RTK_PORTMASK_PORT_SET(pmask, UTP_PORT2);
+	RTK_PORTMASK_PORT_SET(pmask, UTP_PORT3);
+	RTK_PORTMASK_PORT_SET(pmask, UTP_PORT4);
+	RTK_PORTMASK_PORT_SET(pmask, UTP_PORT5);
+	RTK_PORTMASK_PORT_SET(pmask, UTP_PORT6);
+	RTK_PORTMASK_PORT_SET(pmask, UTP_PORT7);
+
+	rtk_switch_init();
+	rtk_led_OutputEnable_set(1);
+	rtk_led_operation_set(LED_OP_SERIAL);
+	rtk_led_serialModePortmask_set(SERIAL_LED_0_2, &pmask);
+
+	rtk_led_groupConfig_set(LED_GROUP_0, LED_CONFIG_ACT);
+
+	ability.link_10m = 1;
+	ability.link_100m = 1;
+	ability.link_500m = 0;
+	ability.link_1000m = 0;
+	ability.act_rx = 0;
+	ability.act_tx = 0;
+	rtk_led_groupAbility_set(LED_GROUP_2, &ability);
+	smi_write(0x1b3a, 0x3fff);
+}
+#endif
+
 int rtl836x_init(void)
 {
+    int retry_count = 10;
+
     printk(KERN_INFO "rtl836x_init .....\n");
 
     init_mdio_gpio_mode();
@@ -183,17 +293,23 @@ int rtl836x_init(void)
 
     rtl836x_proc_init();
 
-    if( rtk_switch_init() != RT_ERR_OK ) {
+    while(retry_count) {
+        if( rtk_switch_init() == RT_ERR_OK ){
+            break;
+        }
+
         printk(KERN_ERR "rtk_switch_init fail.\n");
-    } else {
-        init_interrupt();
-
-        //rtk_l2_init();
-
-        init_rgmii_port();
-        schedule_work(&rtl836x_work);
+        retry_count--;
+        CLK_DURATION(DELAY);
     }
 
+    init_interrupt();
+    //rtk_l2_init();
+    rtl_rgmii_init();
+    schedule_work(&rtl836x_work);
+#ifdef FORCE_PROBE_RTL8370B
+	rtl836x_init_led();
+#endif
     return 0;
 }
 EXPORT_SYMBOL(rtl836x_init);

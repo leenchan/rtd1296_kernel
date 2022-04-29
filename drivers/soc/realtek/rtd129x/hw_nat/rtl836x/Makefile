@@ -1,6 +1,6 @@
 EXTRA_CFLAGS += -D__KERNEL__
-#EXTRA_CFLAGS += -DFORCE_PROBE_RTL8367C
-
+EXTRA_CFLAGS += -DFORCE_PROBE_RTL8367C
+#EXTRA_CFLAGS += -DFORCE_PROBE_RTL8370B
 rtk_rtl836x-objs =  acl.o \
                     acl.o \
                     cpu.o \

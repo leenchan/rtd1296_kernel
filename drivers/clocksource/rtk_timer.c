@@ -10,6 +10,7 @@
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/io.h>
+#include <linux/sched_clock.h>
 
 #define TIMER0                        0
 #define TIMER1                        1
@@ -67,7 +68,6 @@ int UMSK_TC_shift[2] = {
 
 static irqreturn_t rtk_clock_event_isr(int, void*);
 static int rtk_clkevt_set_next(int index, unsigned long, struct clock_event_device*);
-static void rtk_clkevt_set_mode(int index, enum clock_event_mode, struct clock_event_device*);
 int rtk_timer_control(unsigned char id, unsigned int cmd);
 int rtk_timer_get_value(unsigned char id);
 int rtk_timer_set_value(unsigned char id, unsigned int value);
@@ -79,8 +79,6 @@ struct _suspend_data {
     unsigned int value;
     unsigned char mode;
 };
-
-int oneshot_mode=0;
 
 static struct _suspend_data sTimerSuspendData[TIMER_MAX];
 
@@ -167,10 +165,11 @@ int rtk_timer_control(unsigned char id, unsigned int cmd)
 {
     switch (cmd) {
         case HWT_INT_CLEAR:
-            rtd_setbits(MISC_IO_ADDR(UMSK_ISR_OFFSET), UMSK_TC_shift[id]|0x1);
+            rtd_setbits(MISC_IO_ADDR(UMSK_ISR_OFFSET), UMSK_TC_shift[id]);
             break;
         case HWT_START:
             rtd_setbits(MISC_IO_ADDR(TCCR_OFFSET+(id<<2)), TIMERINFO_TIMER_ENABLE);
+            rtd_setbits(MISC_IO_ADDR(ISR_OFFSET), UMSK_TC_shift[id]); // Clear Interrupt Pending (must after enable)
             break;
         case HWT_STOP:
             rtd_clearbits(MISC_IO_ADDR(TCCR_OFFSET+(id<<2)), TIMERINFO_TIMER_ENABLE);
@@ -209,16 +208,82 @@ int rtk_timer_set_target(unsigned char id, unsigned int value)
     __raw_writel(value, MISC_IO_ADDR(TCTVR_OFFSET+(id<<2))); // set the timer's initial value
     return 0;
 }
+static int rtk_timer_set_state_resume(int nr, struct clock_event_device *evt)
+{
+    printk(KERN_INFO "[RTK-TIMER%d] set mode: CLOCK_EVT_MODE_RESUME\n", nr);
+    rtk_timer_set_value(nr, sTimerSuspendData[nr].value);
+    rtk_timer_set_target(nr, DIV_ROUND_UP(clk_freq, HZ));
+    rtk_timer_set_mode(nr, sTimerSuspendData[nr].mode);
+    rtk_timer_control(nr, HWT_RESUME);
+    rtk_timer_control(nr, HWT_INT_ENABLE);
+
+    return 0;
+}
+
+static int rtk_timer_set_state_shutdown(int nr, struct clock_event_device *evt)
+{
+    printk(KERN_INFO "[RTK-TIMER%d] set mode: CLOCK_EVT_MODE_SHUTDOWN\n", nr);
+    sTimerSuspendData[nr].value = rtk_timer_get_value(nr);
+    sTimerSuspendData[nr].mode = rtk_timer_get_mode(nr);
+    rtk_timer_control(nr, HWT_INT_DISABLE);
+    rtk_timer_control(nr, HWT_STOP);
+
+    return 0;
+}
+
+static int rtk_timer_set_state_periodic(int nr, struct clock_event_device *evt)
+{
+    printk(KERN_INFO "[RTK-TIMER%d] set mode: CLOCK_EVT_MODE_PERIODIC\n", nr);
+    rtk_timer_control(nr, HWT_INT_DISABLE);
+    rtk_timer_control(nr, HWT_STOP);
+    rtk_timer_set_value(nr, sTimerSuspendData[nr].value);
+    rtk_timer_set_target(nr, DIV_ROUND_UP(clk_freq, HZ));
+    rtk_timer_set_mode(nr, TIMER);
+    rtk_timer_control(nr, HWT_START);
+    rtk_timer_control(nr, HWT_INT_ENABLE);
+    return 0;
+}
+
+static int rtk_timer_set_state_oneshot(int nr, struct clock_event_device *evt)
+{
+    /* period set, and timer enabled in 'next event' hook */
+    printk(KERN_INFO "[RTK-TIMER%d] set mode: CLOCK_EVT_MODE_ONESHOT\n", nr);
+    rtk_timer_control(nr, HWT_INT_DISABLE);
+    rtk_timer_control(nr, HWT_STOP);
+    rtk_timer_set_value(nr, sTimerSuspendData[nr].value);
+    rtk_timer_set_target(nr, DIV_ROUND_UP(clk_freq, HZ));
+    rtk_timer_set_mode(nr, COUNTER);
+    rtk_timer_control(nr, HWT_START);
+    rtk_timer_control(nr, HWT_INT_ENABLE);
+
+    return 0;
+}
 
 static int rtk_timer0_set_next(unsigned long cycles, struct clock_event_device *evt)
 {
     return rtk_clkevt_set_next(TIMER0, cycles, evt);
 }
 
-static void rtk_timer0_set_mode(enum clock_event_mode mode, struct clock_event_device *evt)
+static int rtk_timer0_set_state_resume(struct clock_event_device *evt)
 {
-    rtk_clkevt_set_mode(TIMER0, mode, evt);
+    return rtk_timer_set_state_resume(TIMER0, evt);
 }
+
+static int rtk_timer0_set_state_shutdown(struct clock_event_device *evt)
+{
+    return rtk_timer_set_state_shutdown(TIMER0, evt);
+}
+
+static int rtk_timer0_set_state_periodic(struct clock_event_device *evt)
+{
+    return rtk_timer_set_state_periodic(TIMER0, evt);
+}
+
+static int rtk_timer0_set_state_oneshot(struct clock_event_device *evt)
+{
+    return rtk_timer_set_state_oneshot(TIMER0, evt);
+}
+
 static cycle_t rtk_read_sched_clock0(struct clocksource *cs)
 {
     return (cycle_t)rtk_timer_get_value(TIMER0);
@@ -241,7 +306,10 @@ static struct clock_event_device timer0_clockevent = {
     .shift = 32,
     .features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT,
     .set_next_event = rtk_timer0_set_next,
-    .set_mode = rtk_timer0_set_mode,
+    .set_state_shutdown = rtk_timer0_set_state_shutdown,
+    .set_state_periodic = rtk_timer0_set_state_periodic,
+    .set_state_oneshot  = rtk_timer0_set_state_oneshot,
+    .tick_resume	= rtk_timer0_set_state_resume,
 };
 
 static struct irqaction timer0_irq = {
@@ -254,9 +322,25 @@ static int rtk_timer1_set_next(unsigned long cycles, struct clock_event_device *
 {
     return rtk_clkevt_set_next(TIMER1, cycles, evt);
 }
-static void rtk_timer1_set_mode(enum clock_event_mode mode, struct clock_event_device *evt)
+
+static int rtk_timer1_set_state_resume(struct clock_event_device *evt)
 {
-    rtk_clkevt_set_mode(TIMER1, mode, evt);
+    return rtk_timer_set_state_resume(TIMER1, evt);
+}
+
+static int rtk_timer1_set_state_shutdown(struct clock_event_device *evt)
+{
+    return rtk_timer_set_state_shutdown(TIMER1, evt);
+}
+
+static int rtk_timer1_set_state_periodic(struct clock_event_device *evt)
+{
+    return rtk_timer_set_state_periodic(TIMER1, evt);
+}
+
+static int rtk_timer1_set_state_oneshot(struct clock_event_device *evt)
+{
+    return rtk_timer_set_state_oneshot(TIMER1, evt);
 }
 
 static cycle_t rtk_read_sched_clock1(struct clocksource *cs)
@@ -281,7 +365,10 @@ static struct clock_event_device timer1_clockevent = {
     .shift = 32,
     .features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT,
     .set_next_event = rtk_timer1_set_next,
-    .set_mode = rtk_timer1_set_mode,
+    .set_state_shutdown = rtk_timer1_set_state_shutdown,
+    .set_state_periodic = rtk_timer1_set_state_periodic,
+    .set_state_oneshot  = rtk_timer1_set_state_oneshot,
+    .tick_resume	= rtk_timer1_set_state_resume,
 };
 
 static struct irqaction timer1_irq = {
@@ -309,8 +396,9 @@ static irqreturn_t rtk_clock_event_isr(int irq, void *dev_id)
 
     rtd_setbits(MISC_IO_ADDR(ISR_OFFSET), UMSK_TC_shift[nr]);
 
-    if (oneshot_mode)
-    	rtk_timer_control(nr, HWT_INT_DISABLE);
+    if (!evt->event_handler) {
+        return IRQ_HANDLED;
+    }
 
     evt->event_handler(evt);
 
@@ -319,61 +407,17 @@ static irqreturn_t rtk_clock_event_isr(int irq, void *dev_id)
 
 static int rtk_clkevt_set_next(int nr, unsigned long cycles, struct clock_event_device *evt)
 {
+    unsigned int cnt = 0;
     int ret = 0;
 
-    rtk_timer_control(nr, HWT_STOP);
-    rtk_timer_set_target(nr, cycles);
-    rtk_timer_control(nr, HWT_START);
     rtk_timer_control(nr, HWT_INT_ENABLE);
+    cnt = rtk_timer_get_value(nr);
+    cnt += cycles;
+    rtk_timer_set_target(nr, cnt);
+
+    ret = ((rtk_timer_get_value(nr) - cnt) > 0) ? -ETIME : 0;
 
     return ret;
-}
-
-static void rtk_clkevt_set_mode(int nr, enum clock_event_mode mode, struct clock_event_device *evt)
-{
-    switch(mode){
-    case CLOCK_EVT_MODE_PERIODIC:
-    	oneshot_mode = 0;
-        printk(KERN_INFO "[RTK-TIMER%d] set mode: CLOCK_EVT_MODE_PERIODIC\n", nr);
-        rtk_timer_control(nr, HWT_INT_DISABLE);
-        rtk_timer_control(nr, HWT_STOP);
-        rtk_timer_set_value(nr, sTimerSuspendData[nr].value);
-        rtk_timer_set_target(nr, DIV_ROUND_UP(clk_freq, HZ));
-        rtk_timer_set_mode(nr, TIMER);
-        rtk_timer_control(nr, HWT_START);
-        rtk_timer_control(nr, HWT_INT_ENABLE);
-        break;
-    case CLOCK_EVT_MODE_ONESHOT:
-    	oneshot_mode = 1;
-        /* period set, and timer enabled in 'next event' hook */
-        printk(KERN_INFO "[RTK-TIMER%d] set mode: CLOCK_EVT_MODE_ONESHOT\n", nr);
-        rtk_timer_control(nr, HWT_INT_DISABLE);
-        rtk_timer_control(nr, HWT_STOP);
-        rtk_timer_set_value(nr, sTimerSuspendData[nr].value);
-        rtk_timer_set_target(nr, DIV_ROUND_UP(clk_freq, HZ));
-        rtk_timer_set_mode(nr, COUNTER);
-        rtk_timer_control(nr, HWT_START);
-        rtk_timer_control(nr, HWT_INT_ENABLE);
-        break;
-    case CLOCK_EVT_MODE_SHUTDOWN:
-        printk(KERN_INFO "[RTK-TIMER%d] set mode: CLOCK_EVT_MODE_SHUTDOWN\n", nr);
-        sTimerSuspendData[nr].value = rtk_timer_get_value(nr);
-        sTimerSuspendData[nr].mode = rtk_timer_get_mode(nr);
-        rtk_timer_control(nr, HWT_INT_DISABLE);
-        rtk_timer_control(nr, HWT_STOP);
-        break;
-    case CLOCK_EVT_MODE_RESUME:
-        printk(KERN_INFO "[RTK-TIMER%d] set mode: CLOCK_EVT_MODE_RESUME\n", nr);
-        rtk_timer_set_value(nr, sTimerSuspendData[nr].value);
-        rtk_timer_set_target(nr, DIV_ROUND_UP(clk_freq, HZ));
-        rtk_timer_set_mode(nr, sTimerSuspendData[nr].mode);
-        rtk_timer_control(nr, HWT_RESUME);
-        rtk_timer_control(nr, HWT_INT_ENABLE);
-        break;
-    case CLOCK_EVT_MODE_UNUSED:
-        printk(KERN_INFO "[RTK-TIMER%d] set mode: CLOCK_EVT_MODE_UNUSED\n", nr);
-        break;
-    }
 }
 
 void rtk_clockevent_init(int index, const char *name, void __iomem *base, int irq, unsigned long freq)
@@ -471,6 +515,7 @@ static void rtk129x_timer1_init(struct device_node *np)
     rtk_clockevent_init(TIMER1, np->name, iobase, irq, rate);
     rtk_clocksource_init(TIMER1);
 }
-
 CLOCKSOURCE_OF_DECLARE(realtek_timer0, "Realtek,rtd129x-timer0", rtk129x_timer0_init);
 CLOCKSOURCE_OF_DECLARE(realtek_timer1, "Realtek,rtd129x-timer1", rtk129x_timer1_init);
+CLOCKSOURCE_OF_DECLARE(rtk119x_timer0, "Realtek,rtd119x-timer0", rtk129x_timer0_init);
+CLOCKSOURCE_OF_DECLARE(rtk119x_timer1, "Realtek,rtd119x-timer1", rtk129x_timer1_init);

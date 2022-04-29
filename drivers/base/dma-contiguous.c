@@ -36,7 +36,7 @@
 
 struct cma *dma_contiguous_default_area;
 
-#if defined(CONFIG_RTD129x) && defined(CONFIG_CMA_AREAS)
+#if defined(CONFIG_RTD129X) && defined(CONFIG_CMA_AREAS)
 of_cma_info_t of_cma_info;
 #endif
 
@@ -50,7 +50,7 @@ of_cma_info_t of_cma_info;
  * Users, who want to set the size of global CMA area for their system
  * should use cma= kernel parameter.
  */
-static const phys_addr_t size_bytes = CMA_SIZE_MBYTES * SZ_1M;
+static const phys_addr_t size_bytes = (phys_addr_t)CMA_SIZE_MBYTES * SZ_1M;
 static phys_addr_t size_cmdline = -1;
 static phys_addr_t base_cmdline;
 static phys_addr_t limit_cmdline;
@@ -118,7 +118,7 @@ void __init dma_contiguous_reserve(phys_addr_t limit)
 
 	pr_debug("%s(limit %08lx)\n", __func__, (unsigned long)limit);
 
-#if defined(CONFIG_RTD129x) && defined(CONFIG_CMA_AREAS)
+#if defined(CONFIG_RTD129X) && defined(CONFIG_CMA_AREAS)
 	if( of_cma_info.region_enable && of_cma_info.region_cnt ) {
 		for( i=0; i<of_cma_info.region_cnt; i++) {
 			selected_size  = of_cma_info.region[i].size;
@@ -213,7 +213,7 @@ int __init dma_contiguous_reserve_area(phys_addr_t size, phys_addr_t base,
  * global one. Requires architecture specific dev_get_cma_area() helper
  * function.
  */
-struct page *dma_alloc_from_contiguous(struct device *dev, int count,
+struct page *dma_alloc_from_contiguous(struct device *dev, size_t count,
 				       unsigned int align)
 {
 	if (align > CONFIG_CMA_ALIGNMENT)

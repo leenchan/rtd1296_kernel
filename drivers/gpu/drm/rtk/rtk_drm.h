@@ -20,6 +20,7 @@
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_fb_helper.h>
 #include <linux/kthread.h>
+
 #include "rtk_drm_fb_ion.h"
 #include "../../../video/fbdev/rtk/rtk_fb.h"
 
@@ -33,10 +34,10 @@
 extern struct ion_device *rtk_phoenix_ion_device;
 
 #define DRIVER_AUTHOR    "Realtek"
-#define DRIVER_NAME      "rtk_drm"
+#define DRIVER_NAME      "realtek"
 #define DRIVER_DESC      "DRM module for RTK"
 #define DRIVER_LICENCE   "GPL"
-#define DRIVER_ALIAS     "platform:rtk_drm"
+#define DRIVER_ALIAS     "platform:realtek"
 #define DRIVER_DATE      "20170207"
 #define DRIVER_VERSION   "1.0"
 #define DRIVER_MAJOR      1
@@ -89,7 +90,7 @@ struct rtk_drm_plane_state {
 };
 
 struct rtk_drm_planes {
-    struct rtk_drm_plane *primary;
+    struct rtk_drm_plane * primary;
 };
 
 #ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
@@ -127,13 +128,13 @@ struct rtk_drm_encoder {
 };
 
 struct rtk_drm_private {
-    struct rtk_drm_crtc *      rtk_crtc;
-    struct drm_gem_object *    fbdev_bo;
-    struct rtk_drm_planes *    planes;
-    struct rtk_drm_connector * connector;
-    struct rtk_drm_encoder *   encoder;
+    struct rtk_drm_crtc *       rtk_crtc;
+    struct drm_gem_object *     fbdev_bo;
+    struct rtk_drm_planes *     planes;
+    struct rtk_drm_connector *  connector;
+    struct rtk_drm_encoder *    encoder;
 #ifdef RTK_USE_FBHELPER
-    struct drm_fbdev_ion *     fbhelper;
+    struct drm_fbdev_ion *      fbhelper;
 #endif
     struct task_struct *       vblank_task;
 

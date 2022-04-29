@@ -1,14 +1,3 @@
-/*
- * hdmitx_rpc.h - RTK hdmitx driver header file
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #ifndef _HDMITX_RPC_H_
 #define _HDMITX_RPC_H_
 
@@ -19,10 +8,10 @@ typedef u_int HRESULT;
 typedef struct RPCRES_LONG {
 	HRESULT result;
 	u_int data;
-} RPCRES_LONG;
+}RPCRES_LONG;
 
 
-typedef struct {
+typedef struct { 
 	u_int  info;
 	RPCRES_LONG retval;
 	u_int ret;
@@ -30,31 +19,32 @@ typedef struct {
 
 
 struct AUDIO_HDMI_SET {
-	u_int HDMI_Frequency;
+     u_int HDMI_Frequency;
 };
 typedef struct AUDIO_HDMI_SET AUDIO_HDMI_SET;
 
 
 struct AUDIO_HDMI_MUTE_INFO {
-	u_int instanceID;
-	char hdmi_mute;
+     u_int instanceID;
+     char hdmi_mute;
 };
 typedef struct AUDIO_HDMI_MUTE_INFO AUDIO_HDMI_MUTE_INFO;
 
 
 struct AUDIO_HDMI_OUT_VSDB_DATA {
-	u_int HDMI_VSDB_delay;
+     u_int HDMI_VSDB_delay;
 };
 typedef struct AUDIO_HDMI_OUT_VSDB_DATA AUDIO_HDMI_OUT_VSDB_DATA;
 
 
 struct HDMI_INFO {
-	u_int video_type;
+     u_int video_type;
 };
 typedef struct HDMI_INFO HDMI_INFO;
 
-/*From FW amw_kernel_rpc.h */
-typedef enum {
+//From FW amw_kernel_rpc.h
+typedef enum
+{
 	ENUM_KERNEL_RPC_CREATE_AGENT,
 	ENUM_KERNEL_RPC_INIT_RINGBUF,
 	ENUM_KERNEL_RPC_PRIVATEINFO,
@@ -75,8 +65,8 @@ typedef enum {
 	ENUM_KERNEL_RPC_ASK_DBG_MEM_ADDR,
 	ENUM_KERNEL_RPC_DESTROY,
 	ENUM_KERNEL_RPC_STOP,
-	ENUM_KERNEL_RPC_CHECK_READY, /* check if Audio get memory pool from AP */
-	ENUM_KERNEL_RPC_GET_MUTE_N_VOLUME, /* get mute and volume level */
+	ENUM_KERNEL_RPC_CHECK_READY,   // check if Audio get memory pool from AP
+	ENUM_KERNEL_RPC_GET_MUTE_N_VOLUME,	 // get mute and volume level
 	ENUM_KERNEL_RPC_EOS,
 	ENUM_KERNEL_RPC_ADC0_CONFIG,
 	ENUM_KERNEL_RPC_ADC1_CONFIG,
@@ -85,7 +75,7 @@ typedef enum {
 	ENUM_KERNEL_RPC_BBADC_CONFIG,
 	ENUM_KERNEL_RPC_I2SI_CONFIG,
 	ENUM_KERNEL_RPC_SPDIFI_CONFIG,
-#endif
+#endif // AUDIO_TV_PLATFORM
 	ENUM_KERNEL_RPC_HDMI_OUT_VSDB,
 	ENUM_VIDEO_KERNEL_RPC_CONFIG_TV_SYSTEM,
 	ENUM_VIDEO_KERNEL_RPC_CONFIG_HDMI_INFO_FRAME,
@@ -99,7 +89,7 @@ typedef enum {
 } ENUM_AUDIO_KERNEL_RPC_CMD;
 
 
-/* Video */
+// Video
 enum VO_HDMI_MODE {
 	VO_DVI_ON = 0,
 	VO_HDMI_ON = 1,
@@ -116,64 +106,49 @@ enum VO_HDMI_OFF_MODE {
 typedef enum VO_HDMI_OFF_MODE VO_HDMI_OFF_MODE;
 
 enum VO_HDMI_AUDIO_SAMPLE_FREQ {
-	VO_HDMI_AUDIO_NULL = 0,
-	VO_HDMI_AUDIO_32K = 1,
-	VO_HDMI_AUDIO_44_1K = 2,
-	VO_HDMI_AUDIO_48K = 3,
-	VO_HDMI_AUDIO_88_2K = 4,
-	VO_HDMI_AUDIO_96K = 5,
-	VO_HDMI_AUDIO_176_4K = 6,
-	VO_HDMI_AUDIO_192K = 7,
+     VO_HDMI_AUDIO_NULL = 0,
+     VO_HDMI_AUDIO_32K = 1,
+     VO_HDMI_AUDIO_44_1K = 2,
+     VO_HDMI_AUDIO_48K = 3,
+     VO_HDMI_AUDIO_88_2K = 4,
+     VO_HDMI_AUDIO_96K = 5,
+     VO_HDMI_AUDIO_176_4K = 6,
+     VO_HDMI_AUDIO_192K = 7,
 };
 typedef enum VO_HDMI_AUDIO_SAMPLE_FREQ VO_HDMI_AUDIO_SAMPLE_FREQ;
 
-enum VO_HDR_CTRL_MODE {
-	VO_HDR_CTRL_AUTO = 0,/* Control by AudioFW */
-	VO_HDR_CTRL_DV_ON = 1,
-	VO_HDR_CTRL_SDR = 2,/* HDR OFF*/
-	VO_HDR_CTRL_HDR_GAMMA = 3,
-	VO_HDR_CTRL_PQHDR = 4,
-	VO_HDR_CTRL_FUTURE = 5,
-	VO_HDR_CTRL_INPUT = 6,
-	VO_HDR_CTRL_DV_LOW_LATENCY_12b_YUV422 = 7,
-	VO_HDR_CTRL_DV_LOW_LATENCY_10b_YUV444 = 8,
-	VO_HDR_CTRL_DV_LOW_LATENCY_10b_RGB444 = 9,
-	VO_HDR_CTRL_DV_LOW_LATENCY_12b_YUV444 = 10,
-	VO_HDR_CTRL_DV_LOW_LATENCY_12b_RGB444 = 11,
-	VO_HDR_CTRL_DV_ON_INPUT = 12,
-};
 
 struct VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME {
-	enum VO_HDMI_MODE hdmiMode;
-	enum VO_HDMI_AUDIO_SAMPLE_FREQ audioSampleFreq;
-	u_char audioChannelCount;
-	u_char dataByte1;
-	u_char dataByte2;
-	u_char dataByte3;
-	u_char dataByte4;
-	u_char dataByte5;
-	u_int dataInt0;
-	u_int hdmi2p0_feature;/* [Bit0]HDMI 2.0 [Bit1]Scramble */
-	enum VO_HDMI_OFF_MODE hdmi_off_mode;
-	enum VO_HDR_CTRL_MODE hdr_ctrl_mode;
-	u_int reserved4;
+     enum VO_HDMI_MODE hdmiMode;
+     enum VO_HDMI_AUDIO_SAMPLE_FREQ audioSampleFreq;
+     u_char audioChannelCount;
+     u_char dataByte1;
+     u_char dataByte2;
+     u_char dataByte3;
+     u_char dataByte4;
+     u_char dataByte5;
+     u_int dataInt0;
+     u_int hdmi2p0_feature;//[Bit0]HDMI 2.0 [Bit1]Scramble
+     enum VO_HDMI_OFF_MODE hdmi_off_mode;
+     u_int reserved3;
+     u_int reserved4;
 };
 typedef struct VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME;
 
 
 enum VO_INTERFACE_TYPE {
-	VO_ANALOG_AND_DIGITAL = 0,
-	VO_ANALOG_ONLY = 1,
-	VO_DIGITAL_ONLY = 2,
-};
+     VO_ANALOG_AND_DIGITAL = 0,
+     VO_ANALOG_ONLY = 1,
+     VO_DIGITAL_ONLY = 2,
+ };
 typedef enum VO_INTERFACE_TYPE VO_INTERFACE_TYPE;
 
 
 enum VO_PEDESTAL_TYPE {
-	VO_PEDESTAL_TYPE_300_700_ON = 0,
-	VO_PEDESTAL_TYPE_300_700_OFF = 1,
-	VO_PEDESTAL_TYPE_286_714_ON = 2,
-	VO_PEDESTAL_TYPE_286_714_OFF = 3,
+     VO_PEDESTAL_TYPE_300_700_ON = 0,
+     VO_PEDESTAL_TYPE_300_700_OFF = 1,
+     VO_PEDESTAL_TYPE_286_714_ON = 2,
+     VO_PEDESTAL_TYPE_286_714_OFF = 3,
 };
 typedef enum VO_PEDESTAL_TYPE VO_PEDESTAL_TYPE;
 
@@ -244,7 +219,7 @@ enum VO_STANDARD {
 	VO_STANDARD_HDTV_2160P_24_3D = 62,
 	VO_STANDARD_HDTV_2160P_23_3D = 63,
 	VO_STANDARD_HDTV_2160P_59 = 64,
-	VO_STANDARD_HDTV_2160P_59_420 = 65,
+	VO_STANDARD_HDTV_2160P_59_420 =65,
 	VO_STANDARD_HDTV_2160P_25_3D = 66,
 	VO_STANDARD_HDTV_2160P_30_3D = 67,
 	VO_STANDARD_HDTV_2160P_50_3D = 68,
@@ -254,33 +229,27 @@ enum VO_STANDARD {
 	VO_STANDARD_HDTV_4096_2160P_30_3D = 72,
 	VO_STANDARD_HDTV_4096_2160P_50_3D = 73,
 	VO_STANDARD_HDTV_4096_2160P_60_3D = 74,
-	VO_STANDARD_DP_FORMAT_1280_720P_60 = 75,
-	VO_STANDARD_DP_FORMAT_3840_2160P_60 = 76,
-	VO_STANDARD_DP_FORMAT_1024_768P_60 = 77,
-	VO_STANDARD_HDTV_2160P_50_422_12bit = 78,
-	VO_STANDARD_HDTV_2160P_60_422_12bit = 79,
-	VO_STANDARD_ERROR = 80,
 };
 typedef enum VO_STANDARD VO_STANDARD;
 
 
 struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD {
-	enum VO_STANDARD standard;
-	u_char enProg;
-	u_char enDIF;
-	u_char enCompRGB;
-	enum VO_PEDESTAL_TYPE pedType;
-	u_int dataInt0;
-	u_int dataInt1;
+     enum VO_STANDARD standard;
+     u_char enProg;
+     u_char enDIF;
+     u_char enCompRGB;
+     enum VO_PEDESTAL_TYPE pedType;
+     u_int dataInt0;
+     u_int dataInt1;
 };
 typedef struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD;
 
 
 struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM {
-	enum VO_INTERFACE_TYPE interfaceType;
-	struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD videoInfo;
-	struct VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME hdmiInfo;
-};
+    enum VO_INTERFACE_TYPE interfaceType;
+    struct VIDEO_RPC_VOUT_CONFIG_VIDEO_STANDARD videoInfo;
+    struct VIDEO_RPC_VOUT_CONFIG_HDMI_INFO_FRAME hdmiInfo;
+ };
 typedef struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM;
 
 
@@ -312,82 +281,82 @@ typedef enum VO_VIDEO_PLANE VO_VIDEO_PLANE;
 
 
 enum VO_OSD_COLOR_FORMAT {
-	VO_OSD_COLOR_FORMAT_2BIT = 0,
-	VO_OSD_COLOR_FORMAT_4BIT = 1,
-	VO_OSD_COLOR_FORMAT_8BIT = 2,
-	VO_OSD_COLOR_FORMAT_RGB332 = 3,
-	VO_OSD_COLOR_FORMAT_RGB565 = 4,
-	VO_OSD_COLOR_FORMAT_ARGB1555 = 5,
-	VO_OSD_COLOR_FORMAT_ARGB4444 = 6,
-	VO_OSD_COLOR_FORMAT_ARGB8888 = 7,
-	VO_OSD_COLOR_FORMAT_Reserved0 = 8,
-	VO_OSD_COLOR_FORMAT_Reserved1 = 9,
-	VO_OSD_COLOR_FORMAT_Reserved2 = 10,
-	VO_OSD_COLOR_FORMAT_YCBCRA4444 = 11,
-	VO_OSD_COLOR_FORMAT_YCBCRA8888 = 12,
-	VO_OSD_COLOR_FORMAT_RGBA5551 = 13,
-	VO_OSD_COLOR_FORMAT_RGBA4444 = 14,
-	VO_OSD_COLOR_FORMAT_RGBA8888 = 15,
-	VO_OSD_COLOR_FORMAT_420 = 16,
-	VO_OSD_COLOR_FORMAT_422 = 17,
-	VO_OSD_COLOR_FORMAT_RGB323 = 18,
-	VO_OSD_COLOR_FORMAT_RGB233 = 19,
-	VO_OSD_COLOR_FORMAT_RGB556 = 20,
-	VO_OSD_COLOR_FORMAT_RGB655 = 21,
-	VO_OSD_COLOR_FORMAT_RGB888 = 22,
-	VO_OSD_COLOR_FORMAT_RGB565_LITTLE = 36,
-	VO_OSD_COLOR_FORMAT_ARGB1555_LITTLE = 37,
-	VO_OSD_COLOR_FORMAT_ARGB4444_LITTLE = 38,
-	VO_OSD_COLOR_FORMAT_ARGB8888_LITTLE = 39,
-	VO_OSD_COLOR_FORMAT_YCBCRA4444_LITTLE = 43,
-	VO_OSD_COLOR_FORMAT_YCBCRA8888_LITTLE = 44,
-	VO_OSD_COLOR_FORMAT_RGBA5551_LITTLE = 45,
-	VO_OSD_COLOR_FORMAT_RGBA4444_LITTLE = 46,
-	VO_OSD_COLOR_FORMAT_RGBA8888_LITTLE = 47,
-	VO_OSD_COLOR_FORMAT_RGB556_LITTLE = 52,
-	VO_OSD_COLOR_FORMAT_RGB655_LITTLE = 53,
-	VO_OSD_COLOR_FORMAT_RGB888_LITTLE = 54,
+    VO_OSD_COLOR_FORMAT_2BIT = 0,
+    VO_OSD_COLOR_FORMAT_4BIT = 1,
+    VO_OSD_COLOR_FORMAT_8BIT = 2,
+    VO_OSD_COLOR_FORMAT_RGB332 = 3,
+    VO_OSD_COLOR_FORMAT_RGB565 = 4,
+    VO_OSD_COLOR_FORMAT_ARGB1555 = 5,
+    VO_OSD_COLOR_FORMAT_ARGB4444 = 6,
+    VO_OSD_COLOR_FORMAT_ARGB8888 = 7,
+    VO_OSD_COLOR_FORMAT_Reserved0 = 8,
+    VO_OSD_COLOR_FORMAT_Reserved1 = 9,
+    VO_OSD_COLOR_FORMAT_Reserved2 = 10,
+    VO_OSD_COLOR_FORMAT_YCBCRA4444 = 11,
+    VO_OSD_COLOR_FORMAT_YCBCRA8888 = 12,
+    VO_OSD_COLOR_FORMAT_RGBA5551 = 13,
+    VO_OSD_COLOR_FORMAT_RGBA4444 = 14,
+    VO_OSD_COLOR_FORMAT_RGBA8888 = 15,
+    VO_OSD_COLOR_FORMAT_420 = 16,
+    VO_OSD_COLOR_FORMAT_422 = 17,
+    VO_OSD_COLOR_FORMAT_RGB323 = 18,
+    VO_OSD_COLOR_FORMAT_RGB233 = 19,
+    VO_OSD_COLOR_FORMAT_RGB556 = 20,
+    VO_OSD_COLOR_FORMAT_RGB655 = 21,
+    VO_OSD_COLOR_FORMAT_RGB888 = 22,
+    VO_OSD_COLOR_FORMAT_RGB565_LITTLE = 36,
+    VO_OSD_COLOR_FORMAT_ARGB1555_LITTLE = 37,
+    VO_OSD_COLOR_FORMAT_ARGB4444_LITTLE = 38,
+    VO_OSD_COLOR_FORMAT_ARGB8888_LITTLE = 39,
+    VO_OSD_COLOR_FORMAT_YCBCRA4444_LITTLE = 43,
+    VO_OSD_COLOR_FORMAT_YCBCRA8888_LITTLE = 44,
+    VO_OSD_COLOR_FORMAT_RGBA5551_LITTLE = 45,
+    VO_OSD_COLOR_FORMAT_RGBA4444_LITTLE = 46,
+    VO_OSD_COLOR_FORMAT_RGBA8888_LITTLE = 47,
+    VO_OSD_COLOR_FORMAT_RGB556_LITTLE = 52,
+    VO_OSD_COLOR_FORMAT_RGB655_LITTLE = 53,
+    VO_OSD_COLOR_FORMAT_RGB888_LITTLE = 54,
 };
 typedef enum VO_OSD_COLOR_FORMAT VO_OSD_COLOR_FORMAT;
 
-
+ 
 enum VO_OSD_RGB_ORDER {
-	VO_OSD_COLOR_RGB = 0,
-	VO_OSD_COLOR_BGR = 1,
-	VO_OSD_COLOR_GRB = 2,
-	VO_OSD_COLOR_GBR = 3,
-	VO_OSD_COLOR_RBG = 4,
-	VO_OSD_COLOR_BRG = 5,
-};
+     VO_OSD_COLOR_RGB = 0,
+     VO_OSD_COLOR_BGR = 1,
+     VO_OSD_COLOR_GRB = 2,
+     VO_OSD_COLOR_GBR = 3,
+     VO_OSD_COLOR_RBG = 4,
+     VO_OSD_COLOR_BRG = 5,
+ };
 typedef enum VO_OSD_RGB_ORDER VO_OSD_RGB_ORDER;
 
 
 enum VO_3D_MODE_TYPE {
-	VO_2D_MODE = 0,
-	VO_3D_SIDE_BY_SIDE_HALF = 1,
-	VO_3D_TOP_AND_BOTTOM = 2,
-	VO_3D_FRAME_PACKING = 3,
+    VO_2D_MODE = 0,
+    VO_3D_SIDE_BY_SIDE_HALF = 1,
+    VO_3D_TOP_AND_BOTTOM = 2,
+    VO_3D_FRAME_PACKING = 3,
 };
 typedef enum VO_3D_MODE_TYPE VO_3D_MODE_TYPE;
 
 
 struct VIDEO_RPC_VOUT_QUERY_DISP_WIN_IN {
-	enum VO_VIDEO_PLANE plane;
+ enum VO_VIDEO_PLANE plane;
 };
 
 
 struct VO_RECTANGLE {
-	short x;
-	short y;
-	u_short width;
-	u_short height;
+    short x;
+    short y;
+    u_short width;
+    u_short height;
 };
 typedef struct VO_RECTANGLE VO_RECTANGLE;
 
 
 struct VO_SIZE {
-	u_short w;
-	u_short h;
+    u_short w;
+    u_short h;
 };
 typedef struct VO_SIZE VO_SIZE;
 
@@ -433,17 +402,12 @@ struct VIDEO_RPC_VOUT_EDID_DATA {
 	/* Colorimetry Data */
 	u_char color_space;
 	/* Video Capability Data Block */
-	u_char vcdb;/* Bit7:QY,Bit6:QS */
-	/* HDR metadata length */
-	u_char metadata_len;
-	/* Dolby Vision data length */
-	u_char dolby_len;
-	/* Dolby Vision VSVDB additional payload */
-	u_char dolby_data[22];
-	u_char reserved[7];
-};
+	u_char vcdb;//Bit7:QY,Bit6:QS
+	/* Reserved */
+	u_char reserved[31];
+ };
 typedef struct VIDEO_RPC_VOUT_EDID_DATA VIDEO_RPC_VOUT_EDID_DATA;
 
 
-#endif/* _HDMITX_RPC_H_ */
+#endif//_HDMITX_RPC_H_
 

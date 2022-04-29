@@ -31,16 +31,9 @@
 #include <sound/hwdep.h>
 #include <sound/info.h>
 
-
 MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>");
 MODULE_DESCRIPTION("Hardware dependent layer");
 MODULE_LICENSE("GPL");
-
-#ifdef RTK_TRACE_ALSA_EN
-#define RTK_TRACE_ALSA(format, ...) printk(KERN_ALERT format, ##__VA_ARGS__);
-#else
-#define RTK_TRACE_ALSA(format, ...)
-#endif
 
 static LIST_HEAD(snd_hwdep_devices);
 static DEFINE_MUTEX(register_mutex);
@@ -491,7 +484,7 @@ static int snd_hwdep_dev_disconnect(struct snd_device *device)
 	return 0;
 }
 
-#ifdef CONFIG_PROC_FS
+#ifdef CONFIG_SND_PROC_FS
 /*
  *  Info interface
  */
@@ -528,10 +521,10 @@ static void __exit snd_hwdep_proc_done(void)
 {
 	snd_info_free_entry(snd_hwdep_proc_entry);
 }
-#else /* !CONFIG_PROC_FS */
+#else /* !CONFIG_SND_PROC_FS */
 #define snd_hwdep_proc_init()
 #define snd_hwdep_proc_done()
-#endif /* CONFIG_PROC_FS */
+#endif /* CONFIG_SND_PROC_FS */
 
 
 /*
@@ -540,21 +533,17 @@ static void __exit snd_hwdep_proc_done(void)
 
 static int __init alsa_hwdep_init(void)
 {
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	snd_hwdep_proc_init();
 	snd_ctl_register_ioctl(snd_hwdep_control_ioctl);
 	snd_ctl_register_ioctl_compat(snd_hwdep_control_ioctl);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 	return 0;
 }
 
 static void __exit alsa_hwdep_exit(void)
 {
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	snd_ctl_unregister_ioctl(snd_hwdep_control_ioctl);
 	snd_ctl_unregister_ioctl_compat(snd_hwdep_control_ioctl);
 	snd_hwdep_proc_done();
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 }
 
 module_init(alsa_hwdep_init)

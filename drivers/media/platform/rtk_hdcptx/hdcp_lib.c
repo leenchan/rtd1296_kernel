@@ -1,12 +1,6 @@
-/*
- * hdcp_lib.c - RTK hdcp tx driver
+/* Copyright (C) 2007-2014 Realtek Semiconductor Corporation.
+ * hdcp_lib.c
  *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/delay.h>
@@ -26,7 +20,6 @@
 extern void HdmiRx_save_tx_ksv(struct hdcp_ksvlist_info *tx_ksv);
 extern void HdmiRx_set_bstatus(unsigned char byte1,unsigned char byte0);
 #endif
-extern int hdmitx_switch_get_state(void);
 
 static void hdcp_lib_read_an(uint8_t *an);
 static int hdcp_lib_read_aksv(uint8_t *ksv_data);
@@ -531,9 +524,7 @@ int hdcp_lib_r0_check(void)
 		/* DDC: Read Ri' from RX */
 		if (ddc_read(DDC_Ri_LEN, DDC_Ri_ADDR , ro_rx))
 			return -DDC_ERROR;
-#if(USED_TA_CMD) //modify for kylin B walkaround
-		return ta_hdcp_check_r0(ro_rx);
-#else
+		
 		ro_tx[0] = (RD_REG_32( hdcp.hdcp_base_addr , HDMI_HDCP_LIR )>>8)&0xff;
 		ro_tx[1] = (RD_REG_32( hdcp.hdcp_base_addr , HDMI_HDCP_LIR )>>16)&0xff;	
 				
@@ -547,8 +538,8 @@ int hdcp_lib_r0_check(void)
 		{		
 			HDCP_ERROR("ROTX: %x%x RORX:%x%x\n", ro_tx[0], ro_tx[1], ro_rx[0], ro_rx[1]);	
             return -HDCP_AUTH_FAILURE;
-		}						
-#endif
+		}		
+				
 }
 
 
@@ -708,36 +699,27 @@ void hdcp_lib_auto_ri_check(bool state)
  */
 int hdcp_lib_polling_bcaps_rdy_check(void) 
 {
-	int i;
-	int ret_value;
-	int hotplug_state;
 	uint8_t ready_bit;
-
-	ret_value = -HDCP_AUTH_FAILURE;
-	/*
-	* State A8: Wait for Ready
-	* sets up 5 secs timer and polls the Receiver's READY bit
-	*/
-	for (i = 0; i < 50; i++) {
-		ready_bit = 0;
-		if(ddc_read(DDC_BCAPS_LEN, DDC_BCAPS_ADDR, &ready_bit))
-			HDCP_ERROR("I2C error, read Bcaps failed\n");
-
-		if (FLD_GET(ready_bit, DDC_BIT_READY, DDC_BIT_READY)) {
-			HDCP_DEBUG("Bcaps ready bit asserted\n");
-			ret_value = HDCP_OK;
-			goto ret_check;
-		} else {
-			hotplug_state = hdmitx_switch_get_state();
-			if (hotplug_state == 1)
-				usleep_range(100000, 110000);
-			else
-				goto ret_check;
-		}
-	}
-
-ret_check:
-	return ret_value;
+	int i;
+	
+	//State A8:Wait for Ready.
+	//sets up 5 secs timer and polls the Receiver's READY bit.
+	for(i=0;i<50;i++)
+	{	
+		ready_bit=0;		
+		if(ddc_read(DDC_BCAPS_LEN, DDC_BCAPS_ADDR, &ready_bit))		
+			HDCP_ERROR("I2c error, read Bcaps failed\n");	
+			
+		if(FLD_GET(ready_bit, DDC_BIT_READY, DDC_BIT_READY))		
+	    {
+	    	HDCP_DEBUG("Bcaps ready bit asserted\n");
+			return HDCP_OK;
+	    }
+		else
+			usleep_range(100000, 110000);
+	}	
+					
+	return -HDCP_AUTH_FAILURE;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1180,33 +1162,30 @@ static void hdcp_lib_set_wider_window(void)
 
 int hdcp_lib_query_sink_hdcp_capable(void)
 {
-	int i;
-	int retry;
-	int ret_value;
-	int hotplug_state;
-	uint8_t bcaps_data[DDC_BCAPS_LEN];
-
-	retry = 6;
-	ret_value = -HDCP_AKSV_ERROR;
+	uint8_t an_bksv_data[5];		
+	int i,retry=6;
 
 	/* HDCP CTS 1A-04: Continue to read the HDCP port for 9 seconds */
-	for (i = 0; i < retry; i++) {
-		if (ddc_read(DDC_BCAPS_LEN, DDC_BCAPS_ADDR, bcaps_data)) {
-			HDCP_ERROR("Read BCAPS error %d time(s)\n",i);
-		} else {
-			ret_value = HDCP_OK;
-			goto ret_cap;
+	for(i=0; i<retry;i++)
+	{	
+		if (ddc_read(DDC_BKSV_LEN, DDC_BKSV_ADDR,an_bksv_data))
+		{				
+			HDCP_ERROR("Read BKSV error %d time(s)\n",i);				
 		}
-
-		hotplug_state = hdmitx_switch_get_state();
-		if (hotplug_state == 1)
-			msleep(1500);
 		else
-			goto ret_cap;
+		{	
+            if (hdcp_lib_check_ksv(an_bksv_data)) 
+			{				
+				HDCP_ERROR("Check BKSV error(%d)\n",i);
+			}
+			else	
+				return 0;
+		}
+		msleep(1500);
 	}
-
-ret_cap:
-	return ret_value;
+       
+	return -HDCP_AKSV_ERROR;
+				
 }				
 	
 void hdcp_lib_dump_22_cipher_setting(void)
@@ -1250,78 +1229,55 @@ void hdcp_lib_set_1x_state_machine_for_22_cipher(void)
 
 void hdcp_lib_set_22_cipher(HDCP_22_CIPHER_INFO *arg)
 {
-	if (arg->hdcp_22_en == 1)
-		hdcp_lib_set_1x_state_machine_for_22_cipher();
 
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_CTRL,
-		HDMI_HDCP_2_2_CTRL_write_en4(1)|HDMI_HDCP_2_2_CTRL_hdcp_2_2_en(arg->hdcp_22_en));
+	hdcp_lib_set_1x_state_machine_for_22_cipher();
+	
+	WR_REG_32(hdcp.hdcp_base_addr,HDMI_HDCP_2_2_CTRL,HDMI_HDCP_2_2_CTRL_write_en4(1)|HDMI_HDCP_2_2_CTRL_hdcp_2_2_en(arg->hdcp_22_en));
+	//riv           : hw_riv_1_(1-2)
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_RIV_1,arg->riv[0]|(arg->riv[1]<<8)|(arg->riv[2]<<16)|(arg->riv[3]<<24)); 
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_RIV_2,arg->riv[4]|(arg->riv[5]<<8)|(arg->riv[6]<<16)|(arg->riv[7]<<24));	
 
-	/* riv           : hw_riv_1_(1-2) */
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_RIV_1,
-		arg->riv[0]|(arg->riv[1]<<8)|(arg->riv[2]<<16)|(arg->riv[3]<<24));
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_RIV_2,
-		arg->riv[4]|(arg->riv[5]<<8)|(arg->riv[6]<<16)|(arg->riv[7]<<24));
+	
+	//ks_xor_lc128  : sw_key_1_(1-4)
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_SW_KEY_1_1,arg->ks_xor_lc128[0]|(arg->ks_xor_lc128[1]<<8)|(arg->ks_xor_lc128[2]<<16)|(arg->ks_xor_lc128[3]<<24));
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_SW_KEY_1_2,arg->ks_xor_lc128[4]|(arg->ks_xor_lc128[5]<<8)|(arg->ks_xor_lc128[6]<<16)|(arg->ks_xor_lc128[7]<<24));
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_SW_KEY_1_3,arg->ks_xor_lc128[8]|(arg->ks_xor_lc128[9]<<8)|(arg->ks_xor_lc128[10]<<16)|(arg->ks_xor_lc128[11]<<24));
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_SW_KEY_1_4,arg->ks_xor_lc128[12]|(arg->ks_xor_lc128[13]<<8)|(arg->ks_xor_lc128[14]<<16)|(arg->ks_xor_lc128[15]<<24));
+	
+	//frame_num     : frame_num_(1-2)
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_FRAME_NUM_1,(u32)arg->frame_num);
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_FRAME_NUM_2,(u32)(arg->frame_num>>32));
 
-	/* ks_xor_lc128  : sw_key_1_(1-4) */
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_SW_KEY_1_1,
-		(arg->ks_xor_lc128[0])|
-		(arg->ks_xor_lc128[1]<<8)|
-		(arg->ks_xor_lc128[2]<<16)|
-		(arg->ks_xor_lc128[3]<<24));
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_SW_KEY_1_2,
-		(arg->ks_xor_lc128[4])|
-		(arg->ks_xor_lc128[5]<<8)|
-		(arg->ks_xor_lc128[6]<<16)|
-		(arg->ks_xor_lc128[7]<<24));
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_SW_KEY_1_3,
-		(arg->ks_xor_lc128[8])|
-		(arg->ks_xor_lc128[9]<<8)|
-		(arg->ks_xor_lc128[10]<<16)|
-		(arg->ks_xor_lc128[11]<<24));
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_SW_KEY_1_4,
-		(arg->ks_xor_lc128[12])|
-		(arg->ks_xor_lc128[13]<<8)|
-		(arg->ks_xor_lc128[14]<<16)|
-		(arg->ks_xor_lc128[15]<<24));
+	//frame_num_add : frame_num_add_(1-2)	
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_FRAME_NUM_ADD_1,(u32)arg->frame_num_add);
+	
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_FRAME_NUM_ADD_2,(u32)(arg->frame_num_add>>32));
 
-	/* frame_num     : frame_num_(1-2) */
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_FRAME_NUM_1, (u32)arg->frame_num);
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_FRAME_NUM_2, (u32)(arg->frame_num>>32));
-
-	/* frame_num_add : frame_num_add_(1-2)	*/
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_FRAME_NUM_ADD_1, (u32)arg->frame_num_add);
-
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_FRAME_NUM_ADD_2, (u32)(arg->frame_num_add>>32));
-
-	/* data_num      : data_num */
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_DATA_NUM, arg->data_num);
-
-	/* data_num_add  : data_num_add */
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_DATA_NUM_ADD, arg->data_num_add);
-
-	/* aes_sw_en     : hdcp_22_ctrl:aes_sw_en */
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_CTRL,
-		HDMI_HDCP_2_2_CTRL_write_en3(1)|HDMI_HDCP_2_2_CTRL_aes_sw_en(1));/* always set to SW mode first */
-
-	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_CTRL,
-		HDMI_HDCP_2_2_CTRL_write_en3(1)|HDMI_HDCP_2_2_CTRL_aes_sw_en(arg->aes_sw_en));
-
-	/* hdcp_lib_dump_22_cipher_setting(); */
-
+	//data_num      : data_num
+	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_DATA_NUM,arg->data_num);
+	
+	//data_num_add  : data_num_add
+   	WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_2_2_HW_DATA_NUM_ADD,arg->data_num_add);
+	
+	
+	//aes_sw_en     : hdcp_22_ctrl:aes_sw_en
+	WR_REG_32(hdcp.hdcp_base_addr,HDMI_HDCP_2_2_CTRL,HDMI_HDCP_2_2_CTRL_write_en3(1)|HDMI_HDCP_2_2_CTRL_aes_sw_en(1));	// always set to SW mode first
+	WR_REG_32(hdcp.hdcp_base_addr,HDMI_HDCP_2_2_CTRL,HDMI_HDCP_2_2_CTRL_write_en3(1)|HDMI_HDCP_2_2_CTRL_aes_sw_en(arg->aes_sw_en));	
+	
+	
+	//hdcp_lib_dump_22_cipher_setting();
+	
+	// enable HDCP cipher, config cipher mode
+    WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_CR, HDMI_HDCP_CR_write_en1(1)|HDMI_HDCP_CR_hdcp_encryptenable(1)|
+											HDMI_HDCP_CR_write_en4(1)|HDMI_HDCP_CR_en1_1_feature(1));
+	
 }
 
 void hdcp_lib_control_22_cipher(int control_flag)
-{
-	if (control_flag == HDCP_22_CIPHER_RESUME) {
-		/* Enable HDCP22 encrypt */
-		WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_CR,
-			HDMI_HDCP_CR_write_en4(1)|HDMI_HDCP_CR_en1_1_feature(1)|
-			HDMI_HDCP_CR_write_en1(1)|HDMI_HDCP_CR_hdcp_encryptenable(1));
-		HDCP_INFO("Enable 22 enc");
-	} else {
-		WR_REG_32(hdcp.hdcp_base_addr, HDMI_HDCP_CR,
-			HDMI_HDCP_CR_write_en1(1)|HDMI_HDCP_CR_hdcp_encryptenable(0));
-		HDCP_INFO("Disable 22 enc");
-	}
-
+{	
+	if(control_flag == HDCP_22_CIPHER_RESUME)
+		WR_REG_32(hdcp.hdcp_base_addr,HDMI_HDCP_CR,HDMI_HDCP_CR_write_en1(1)|HDMI_HDCP_CR_hdcp_encryptenable(1));
+	else 
+		WR_REG_32(hdcp.hdcp_base_addr,HDMI_HDCP_CR,HDMI_HDCP_CR_write_en1(1)|HDMI_HDCP_CR_hdcp_encryptenable(0));
+	
 }

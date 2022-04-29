@@ -73,7 +73,8 @@ struct core_desc
 #define HANTRODEC_BONDINGIOSIZE      _IOR(HANTRODEC_IOC_MAGIC,  22, unsigned int)
 #define HANTRODEC_SET_CLK_RATE      _IOR(HANTRODEC_IOC_MAGIC,  30, unsigned int)
 #define HANTRODEC_GET_CLK_RATE      _IOR(HANTRODEC_IOC_MAGIC,  31, unsigned int)
-
+#if 1  //__LINUX_MEDIA_NAS__
+#define HANTRODEC_GET_INSTANCE     _IO(HANTRODEC_IOC_MAGIC, 32)
+#endif
 #define HANTRODEC_IOC_MAXNR 35
-
 #endif /* !_HANTRODEC_H_ */

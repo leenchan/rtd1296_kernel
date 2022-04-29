@@ -1,14 +1,3 @@
-/*
- * hdmirx_wrapper.c - RTK hdmi rx driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include <linux/printk.h>
 #include <linux/ratelimit.h>
 #include <linux/workqueue.h>
@@ -24,11 +13,9 @@
 extern HDMI_INFO_T hdmi;
 extern HDMIRX_IOCTL_STRUCT_T hdmi_ioctl_struct;
 extern MIPI_TOP_INFO mipi_top;
-#if HDMI2p0
-extern u_int8_t bHDMI_6G_flag;
-#endif
 
 extern HDMI_DVI_MODE_T IsHDMI(void);
+extern unsigned char drvif_Hdmi_AVI_VIC(void);
 #if HDMI_REPEATER_SUPPORT
 extern void Set_Hdmitx_PLL(void);
 #endif
@@ -43,37 +30,24 @@ static void rxdetect_work_fun(struct work_struct *work)
 		set_hdmirx_wrapper_interrupt_en(0,0,1);
 }
  
-const unsigned int resolution_format[29][2]=
+const unsigned int resolution_format[16][2]=
 {
 	{ 640, 480},
-	{ 720, 288},
-	{ 720, 240},
-	{ 720, 400},
 	{ 720, 480},
-	{ 720, 576},
-	{ 800, 600},
-	{1024, 768},
-	{1152, 864},
-	{1280, 600},
 	{1280, 720},
-	{1280, 768},
-	{1280, 800},
+	{1920,1080},
+	{ 720, 240},
+	{1440, 480},
+	{ 720, 576},
+	{ 720, 288},
+	{1440, 576}, 
+	{ 720, 400},
+	{ 800, 600},
+	{1024, 768},	
 	{1280, 960},
 	{1280,1024},
-	{1360, 768},
-	{1366, 768},
-	{1400, 900},
-	{1400,1050},
-	{1440, 480},
-	{1440, 576},
-	{1600, 900},
-	{1600,1200},
-	{1680,1050},
-	{1920, 540},
-	{1920,1072},
-	{1920,1080},
-	{3840,2160},
-	{4096,2160},
+	{3840,2160},// For HDMI 1.x 4Kp24/25/30, PacketByte4 VIC=0
+	{4096,2160},// For HDMI 1.x
 };
 const unsigned int format_number = sizeof(resolution_format)/sizeof(resolution_format[0]);
 
@@ -306,19 +280,21 @@ static inline unsigned int check_hdmirx_resolution_match(void)
 	unsigned char color_fmt;
 
 	vic = 0;
-	if (IsHDMI())
+	if(IsHDMI())
+	{
 		vic = drvif_Hdmi_AVI_VIC();
+	}
 
 	active_pixel =	hdmirx_wrapper_get_active_pixel();
 	active_line = hdmirx_wrapper_get_active_line();
 	color_fmt = hdmirx_wrapper_convert_color_fmt(GET_HDMI_COLOR_SPACE());
 
-	if (hdmi.tx_timing.progressive)
-		height = active_line;
-	else
+	if(hdmi_vic_table[vic].interlace)
 		height = active_line*2;
+	else
+		height = active_line;
 
-	if (active_pixel==hdmi_vic_table[vic].width && height==hdmi_vic_table[vic].height && vic)
+	if(active_pixel==hdmi_vic_table[vic].width && height==hdmi_vic_table[vic].height && vic)
 	{
 		mipi_top.h_input_len = active_pixel;
 		mipi_top.v_input_len = active_line;
@@ -326,20 +302,16 @@ static inline unsigned int check_hdmirx_resolution_match(void)
 		HDMIRX_INFO("Check resolution match => Width(%u) Height(%u) VIC(%u)",active_pixel,height,vic);
 		return 1;
 	}
-	else
+	else if(vic == 0)//Support standard timings and DVI mode
 	{
-		/* Support standard timings and DVI mode */
-		for (i=0;i<format_number;i++)
+		for(i=0;i<format_number;i++)
 		{
-			if (active_pixel==resolution_format[i][0] && active_line==resolution_format[i][1])
+			if(active_pixel==resolution_format[i][0] && active_line==resolution_format[i][1])
 			{
 				mipi_top.h_input_len = active_pixel;
 				mipi_top.v_input_len = active_line;
 				mipi_top.input_color = color_fmt;
-				if (vic == 0)
-					HDMIRX_INFO("Check resolution match => Width(%u) Height(%u) DIV",active_pixel,height);
-				else
-					HDMIRX_ERROR("Check resolution => Width(%u) Height(%u), wrong VIC(%u)",active_pixel,height,vic);
+				HDMIRX_INFO("Check resolution match => Width(%u) Height(%u) DIV",active_pixel,height);
 				return 1;
 			}
 		}
@@ -359,9 +331,6 @@ void restartHdmiRxWrapperDetection(void)
 	SET_HDMI_AUDIO_FSM(AUDIO_FSM_AUDIO_START);
 	set_hdmirx_wrapper_control_0(-1, 0,-1,-1,-1,-1);//Stop DMA
 	set_hdmirx_wrapper_hor_threshold(HDMI_MIN_SUPPORT_H_PIXEL);
-#if HDMI2p0
-	bHDMI_6G_flag=0;
-#endif
 
 	hdcp_state = hdmi_ioctl_struct.hdcp_state;
 	memset(&hdmi_ioctl_struct, 0, sizeof(hdmi_ioctl_struct));
@@ -419,24 +388,44 @@ void hdmirx_wrapper_isr(void)
 	{
 		set_hdmirx_wrapper_interrupt_en(0,0,0);
 
-		restartHdmiRxWrapperDetection();
-
 		active_pixel =	hdmirx_wrapper_get_active_pixel();
+#if 0
+		if(mipi_top.h_input_len-active_pixel<=5)
+		{
+			set_hdmirx_wrapper_interrupt_en(1,1,0);
+			return;
+		}
+		else if((mipi_top.h_input_len==1920)&&(active_pixel==1921))
+		{
+			set_hdmirx_wrapper_interrupt_en(1,1,0);
+			return;
+		}
+#endif
 		HDMIRX_INFO("ISR status:%x reenable polarity detection... pixel(%u)\n", status, active_pixel);
 		miss_count = 0;
-
+		restartHdmiRxWrapperDetection();
 		return;
 	}
 	else if(HDMIRX_WRAPPER_INTERRUPT_STATUS_get_ver_err_sts(status))//VER_ERR
 	{
 		set_hdmirx_wrapper_interrupt_en(0,0,0);
 
-		restartHdmiRxWrapperDetection();
-
 		active_line = hdmirx_wrapper_get_active_line();
+#if 0
+		if(mipi_top.v_input_len-active_line<=5)
+		{
+			set_hdmirx_wrapper_interrupt_en(1,1,0);
+			return;
+		}
+		else if((mipi_top.v_input_len==1080)&&(active_line==1081))
+		{
+			set_hdmirx_wrapper_interrupt_en(1,1,0);
+			return;
+		}
+#endif
 		HDMIRX_INFO("ISR status:%x reenable polarity detection... line(%u)\n", status, active_line);
 		miss_count = 0;
-
+		restartHdmiRxWrapperDetection();
 		return;
 	}
 }

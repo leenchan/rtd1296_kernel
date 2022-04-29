@@ -1,20 +1,8 @@
-/*
- * v4l2_hdmi_dev.c - RTK hdmi rx driver
- *
- * Copyright (C) 2017 Realtek Semiconductor Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/gpio.h>
 #include <linux/switch.h>
 #include <linux/time.h>
-#include <linux/regulator/consumer.h>
 
 #include "v4l2_hdmi_dev.h"
 #include "hdmirx_video_dev.h"
@@ -29,20 +17,12 @@
 #define MAX_WIDTH 4096
 #define MAX_HEIGHT 2160
 
-#ifdef CONFIG_RTK_HDCPRX_2P2_TEE
-extern void CA_hdcp2_load_from_TEE(void);
-extern unsigned char TA_Load_flag;
-#endif
-#ifdef CONFIG_RTK_HDCPRX_1P4_TEE
-extern void HDMI_HDCP1p4_TEE_LOAD_KEY(void);
-extern unsigned char TA_HDCP1p4_Load_flag ;
-#endif
 
-struct platform_device* hdmirx_pdev;
+u8 *hdmi_ddr_ptr[HDMI_SW_BUF_NUM];
+HDMI_SW_BUF_CTL hdmi_sw_buf_ctl;
 
 static struct task_struct *hdmi_hw_tsk;
 static void __iomem *clk90k_vaddr[2];
-static struct regulator *top_supply;
 /*=================== extern Variable/Function ===================*/
 extern void __iomem *hdmi_rx_base[HDMI_RX_REG_BLOCK_NUM];
 extern MIPI_TOP_INFO mipi_top;
@@ -51,7 +31,6 @@ extern HDMIRX_IOCTL_STRUCT_T hdmi_ioctl_struct;
 extern HDMIRX_DTS_EDID_TBL_T hdmirx_edid;
 extern int hdmi_stream_on;
 extern int hdmi_timestamp_mode;// 0:system time, 1:90KHz timer
-extern struct physical_addr_map phy_buffer;
 
 extern int Cbus_GetRx5v(void);
 extern void Hdmi_SetHPD(char high);
@@ -61,8 +40,6 @@ extern void drvif_Hdmi_Release(void);
 extern HDMI_bool drvif_Hdmi_DetectMode(void);
 extern HDMI_bool drvif_Hdmi_CheckMode(void);
 extern void rtd_hdmiPhy_ISR(void);
-
-extern unsigned int rtk_suspend_wakeup_flags_get(void);
 /*======================================================*/
 static inline void update_hdmirx_switch_state(struct v4l2_hdmi_dev *dev);
 
@@ -71,7 +48,7 @@ int hdmirx_queue_init(struct v4l2_hdmi_dev *dev, struct vb2_queue *q, enum v4l2_
 	if(q->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) //already initialized, release first
 		vb2_queue_release(q);
 	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	q->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF; //| VB2_READ;
+	q->io_modes = VB2_MMAP | VB2_USERPTR; //| VB2_DMABUF | VB2_READ;
 	q->drv_priv = dev;
 	q->buf_struct_size = sizeof(struct hdmi_buffer);
 	q->ops = &hdmi_qops;
@@ -79,8 +56,6 @@ int hdmirx_queue_init(struct v4l2_hdmi_dev *dev, struct vb2_queue *q, enum v4l2_
 
 	if(memory == V4L2_MEMORY_USERPTR){
 		q->mem_ops = &vb2_vmalloc_memops;
-	}else if(memory == V4L2_MEMORY_DMABUF){
-		q->mem_ops = &vb2_dma_contig_memops;
 	}else if(memory == V4L2_MEMORY_MMAP){
 		q->mem_ops = &vb2_dma_contig_memops;
 	}else{
@@ -123,8 +98,7 @@ int hdmi_queue_setup(struct vb2_queue *vq, const struct v4l2_format *fmt,
 	 * videobuf2-vmalloc allocator is context-less so no need to set
 	 * alloc_ctxs array.
 	 */
-	if ((vq->memory == V4L2_MEMORY_DMABUF) ||
-		(vq->memory == V4L2_MEMORY_MMAP)){
+	if(vq->memory == V4L2_MEMORY_MMAP){
 		void *ret = vb2_dma_contig_init_ctx(&dev->vdev.dev);
 		if (IS_ERR(ret))
 			return PTR_ERR(ret);
@@ -137,59 +111,45 @@ int hdmi_queue_setup(struct vb2_queue *vq, const struct v4l2_format *fmt,
 
 int hdmi_buffer_prepare(struct vb2_buffer *vb)
 {
+	struct v4l2_buffer *v4l2buf = &vb->v4l2_buf;
 	struct vb2_queue *vq = vb->vb2_queue;
 	struct v4l2_hdmi_dev *dev = vb2_get_drv_priv(vq);
 	struct hdmi_buffer *buf = container_of(vb, struct hdmi_buffer, vb);
 	unsigned long size;
-	int ret_val = -EINVAL;
 
 	if (dev->width	< 48 || dev->width	> MAX_WIDTH ||
 		dev->height < 32 || dev->height > MAX_HEIGHT)
-		goto exit;
+		return -EINVAL;
 
-	if (dev->outfmt >= OUT_ARGB)
+	if(dev->outfmt >= OUT_ARGB)
 		size = dev->width * dev->height * dev->bpp / 8;
 	else
 		size = roundup16(dev->width) * roundup16(dev->height) * dev->bpp / 8;
 
 	if (vb2_plane_size(vb, 0) < size) {
-		HDMIRX_ERROR("[%s] data will not fit into plane (%lu < %lu)",
-			__func__, vb2_plane_size(vb, 0), size);
-		goto exit;
+		HDMIRX_ERROR("[%s] data will not fit into plane (%lu < %lu)",__FUNCTION__,vb2_plane_size(vb, 0), size);
+		return -EINVAL;
 	}
 
 	vb2_set_plane_payload(&buf->vb, 0, size);
 
-	if (unlikely(phy_buffer.enable == 1)) {
-		buf->phys = phy_buffer.phys[vb->v4l2_buf.index];
-		ret_val = 0;
-		goto exit;
-	} else if (likely(buf->phys != 0)) {
-		ret_val = 0;
-		goto exit;
-	}
+	if(buf->phys == 0){
+		if(vq->memory == V4L2_MEMORY_USERPTR){
+			struct mipi_vb2_vmalloc_buf *vb2_buf =	vb->planes[0].mem_priv;
+			unsigned long pfn;
 
-	if (vq->memory == V4L2_MEMORY_USERPTR) {
-		struct mipi_vb2_vmalloc_buf *vb2_buf =	vb->planes[0].mem_priv;
-		unsigned long pfn;
-
-		ret_val = follow_pfn(vb2_buf->vma, vb->v4l2_planes[0].m.userptr, &pfn);
-		buf->phys = __pfn_to_phys(pfn);
-		if (ret_val != 0) {
-			HDMIRX_ERROR("Fail!!!!! pfn_to_phys = 0x%08x", buf->phys);
-			ret_val = -EINVAL;
-			goto exit;
+			follow_pfn(vb2_buf->vma, vb->v4l2_planes[0].m.userptr, &pfn);
+			buf->phys = __pfn_to_phys(pfn);
+			v4l2buf->reserved = buf->phys;
+		}else if(vq->memory == V4L2_MEMORY_MMAP){
+			dma_addr_t *addr = vb2_plane_cookie(vb, 0);
+			buf->phys = *addr;
+			v4l2buf->reserved = buf->phys;
 		}
-	} else if (vq->memory == V4L2_MEMORY_DMABUF) {
-		buf->phys = vb2_dma_contig_plane_dma_addr(vb, 0);
-	} else if (vq->memory == V4L2_MEMORY_MMAP) {
-		dma_addr_t *addr = vb2_plane_cookie(vb, 0);
-		buf->phys = *addr;
 	}
+	hdmi_ddr_ptr[atomic_read(&hdmi_sw_buf_ctl.fill_index)] = (u8 *)buf->phys;
 
-	ret_val = 0;
-exit:
-	return ret_val;
+	return 0;
 }
 
 void hdmi_buffer_finish(struct vb2_buffer *vb)
@@ -221,23 +181,47 @@ void hdmi_buffer_queue(struct vb2_buffer *vb)
 	atomic_inc(&hdmidq->qcnt);
 	spin_unlock_irqrestore(&dev->slock, flags);
 
+	if(hdmi_ioctl_struct.measure_ready==0)
+	{
+		HDMIRX_INFO("measure not ready, return buffer queue");
+		return;
+	}
+
+	//Initiate mipi hw buffer addr
+	if((hdmi_sw_buf_ctl.use_v4l2_buffer == 0) && (atomic_read(&hdmidq->qcnt) >= 2))
+	{
+		static int ever_in = 0;
+		hdmi_sw_buf_ctl.use_v4l2_buffer = 1;
+		set_video_DDR_start_addr(dev);
+		if(ever_in == 0)
+		{
+			atomic_add(2, &hdmi_sw_buf_ctl.write_index);
+		}
+		ever_in = 1;
+	}
 }
+
+int hdmi_start_generating(struct v4l2_hdmi_dev *dev)
+{
+	HDMIRX_INFO("[%s]",__FUNCTION__);
+
+	hdmi_sw_buf_ctl.pre_frame_done = -1;
+
+	//Enable mipi
+	setup_mipi();
+
+	hdmi_stream_on = 1;
+	HDMIRX_INFO("[%s] Start",__FUNCTION__);
+	return 0;
+
+}
+
 
 int hdmi_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct v4l2_hdmi_dev *dev = vb2_get_drv_priv(vq);
-
 	HDMIRX_INFO("[%s]",__FUNCTION__);
-
-	register_mipi_ion(dev);
-
-	set_video_DDR_start_addr(dev);
-
-	/* Enable mipi */
-	setup_mipi();
-	hdmi_stream_on = 1;
-
-	return 0;
+	return hdmi_start_generating(dev);
 }
 
 void hdmi_stop_generating(struct v4l2_hdmi_dev *dev)
@@ -283,8 +267,6 @@ void hdmi_stop_streaming(struct vb2_queue *vq)
 		stop_mipi_process();
 
 	hdmi_stop_generating(dev);
-
-	deregister_mipi_ion(dev);
 }
 
 void hdmi_unlock(struct vb2_queue *vq)
@@ -306,13 +288,11 @@ void hdmirx_clock_control(HDMI_CLK_TYPE clk_type, HDMI_CLK_CTL enable)
 	struct reset_control *reset_cbus_iso,*reset_cbustx_iso,*reset_cbusrx_iso;
 	struct clk *clk_mipi,*clk_hdmirx,*clk_cbustx;
 	struct clk *clk_cbus_osc_iso,*clk_cbus_iso,*clk_cbustx_iso,*clk_cbusrx_iso;
-	struct power_control *pctrl_hdmirx,*pctrl_mipi;
 
 	if(clk_type&CLK_HDMIRX)
 	{
 		reset_hdmirx = rstc_get("rstn_hdmirx");
 		clk_hdmirx = clk_get(NULL, "clk_en_hdmirx");
-		pctrl_hdmirx = power_control_get("pctrl_disp_hdmi_rx");//HDMI RX SRAM
 
 		if((!reset_hdmirx)||(!clk_hdmirx))
 			HDMIRX_ERROR("[%s] CLK_HDMIRX fail",__FUNCTION__);
@@ -328,12 +308,9 @@ void hdmirx_clock_control(HDMI_CLK_TYPE clk_type, HDMI_CLK_CTL enable)
 				clk_prepare_enable(clk_hdmirx);
 				init_flag |= CLK_HDMIRX;
 			}
-
-			power_control_power_on(pctrl_hdmirx);
 		}
 		else//disable
 		{
-			power_control_power_off(pctrl_hdmirx);
 			clk_disable(clk_hdmirx);
 			reset_control_assert(reset_hdmirx);
 		}
@@ -357,7 +334,6 @@ void hdmirx_clock_control(HDMI_CLK_TYPE clk_type, HDMI_CLK_CTL enable)
 	{
 		reset_mipi = rstc_get("rstn_mipi");
 		clk_mipi = clk_get(NULL, "clk_en_mipi");
-		pctrl_mipi = power_control_get("pctrl_disp_mipi");//MIPI SRAM
 
 		if((!reset_mipi)||(!clk_mipi))
 			HDMIRX_ERROR("[%s] CLK_MIPI fail",__FUNCTION__);
@@ -373,12 +349,9 @@ void hdmirx_clock_control(HDMI_CLK_TYPE clk_type, HDMI_CLK_CTL enable)
 				clk_prepare_enable(clk_mipi);
 				init_flag |= CLK_MIPI;
 			}
-
-			power_control_power_on(pctrl_mipi);
 		}
 		else//disable
 		{
-			power_control_power_off(pctrl_mipi);
 			clk_disable(clk_mipi);
 			reset_control_assert(reset_mipi);
 		}
@@ -439,30 +412,6 @@ void hdmirx_clock_control(HDMI_CLK_TYPE clk_type, HDMI_CLK_CTL enable)
 
 }
 
-void set_top_voltage(int level)
-{
-	static int pre_level = -1;
-	int ret;
-
-	if (IS_ERR(top_supply))
-		goto exit;
-
-	if (level == pre_level)
-		goto exit;
-	else
-		pre_level = level;
-
-	if (level == 1)
-		ret = regulator_set_voltage(top_supply , 1025000, 1025000);
-	else
-		ret = regulator_set_voltage(top_supply , 1000000, 1000000);
-
-	if (ret)
-		HDMIRX_ERROR("Set top voltage fail");
-exit:
-	return;
-}
-
 void  rx5v_do_task(struct v4l2_hdmi_dev *dev)
 {
 	int state;
@@ -503,23 +452,6 @@ void  rx5v_do_task(struct v4l2_hdmi_dev *dev)
 		set_hdmirx_wrapper_control_0(-1, -1,-1,-1,-1,1);//Enable hdmirx
 		hdmi.rx_5v_state = 1;
 	}
-#if 0
-	//TEE LOAD HDCP KEY
-	#if defined  (CONFIG_RTK_HDCPRX_2P2_TEE)||(CONFIG_RTK_HDCPRX_1P4_TEE)
-	if (state) // reload TEE HDCP KEY if initial fail 
-	{
-	#ifdef CONFIG_RTK_HDCPRX_1P4_TEE
-	      if (TA_HDCP1p4_Load_flag ==0)   HDMI_HDCP1p4_TEE_LOAD_KEY();
-	#endif	
-	#if defined  (CONFIG_RTK_HDCPRX_2P2_TEE)&&(CONFIG_RTK_HDCPRX_1P4_TEE)
- 	     if ((TA_Load_flag ==0)&&(TA_HDCP1p4_Load_flag ==1))   	CA_hdcp2_load_from_TEE();	
-	#else if defined  (CONFIG_RTK_HDCPRX_2P2_TEE)
-	    if (TA_Load_flag ==0)   	CA_hdcp2_load_from_test();	
-	#endif
-	
-	}
-	#endif
-#endif
 }
 
 void hdmi_rx_process(void)
@@ -551,9 +483,9 @@ void hdmi_rx_process(void)
             ret = drvif_Hdmi_CheckMode();
             if((ret==FALSE) && hdmi_ioctl_struct.detect_done)
             {
-				restartHdmiRxWrapperDetection();
-				state = 0;
 				HDMIRX_INFO("Check mode is false, restart HDMI Rx wrapper detection ret(%d)\n",ret);
+				state = 0;
+				restartHdmiRxWrapperDetection();
             }
 			else if(hdmi_ioctl_struct.detect_done == 0)
 			{
@@ -570,31 +502,17 @@ void hdmi_rx_process(void)
 static inline void update_hdmirx_switch_state(struct v4l2_hdmi_dev *dev)
 {
 	unsigned char hdcp_state=0;
-	static unsigned char audio_count=0;
 
-	if(hdmi_ioctl_struct.measure_ready != switch_get_state(&dev->sdev)) {
+	if(hdmi_ioctl_struct.measure_ready != switch_get_state(&dev->sdev))
+	{
 		switch_set_state(&dev->sdev, hdmi_ioctl_struct.measure_ready);
-		pr_err("\033[0;31m[HDMI RX] switch hdmi rx state to %d\033[m\n",
-			hdmi_ioctl_struct.measure_ready);
-
-		if (hdmi_ioctl_struct.measure_ready == 0)
-			set_top_voltage(0);
+		pr_err("\033[0;31m[HDMI RX] switch hdmi rx state to %d\033[m\n", hdmi_ioctl_struct.measure_ready);
 	}
-
-
-	if(!hdmi_ioctl_struct.audio_detect_done)
-		audio_count=0;
 
 	if(hdmi_ioctl_struct.audio_detect_done != switch_get_state(&dev->asdev))
 	{
-		if(hdmi_ioctl_struct.audio_detect_done)
-			audio_count++;
-
-		if((!hdmi_ioctl_struct.audio_detect_done)||(audio_count>=10))
-		{
-			switch_set_state(&dev->asdev, hdmi_ioctl_struct.audio_detect_done);
-			HDMIRX_INFO("switch audio detect state to %d",hdmi_ioctl_struct.audio_detect_done);
-		}
+		switch_set_state(&dev->asdev, hdmi_ioctl_struct.audio_detect_done);
+		HDMIRX_INFO("switch audio detect state to %d",hdmi_ioctl_struct.audio_detect_done);
 	}
 
 	if((hdmi_ioctl_struct.hdcp_state==HDCPRX_STATE_1PX_ON) || (hdmi_ioctl_struct.hdcp_state==HDCPRX_STATE_2P2_ON))
@@ -632,7 +550,12 @@ static int mipi_top_thread(void *arg)
 			}
 			else
 			{
-				msleep(250);
+				if(switch_get_state(&dev->sdev))
+				{
+					pr_err("\033[0;31m[HDMI RX] switch hdmi rx state to %d\033[m\n", hdmi_ioctl_struct.detect_done);
+					switch_set_state(&dev->sdev, 0);
+				}
+				HDMI_DELAYMS(250);
 			}
 		}
 
@@ -651,10 +574,12 @@ int hdmirx_rtk_drv_probe(struct platform_device *pdev)
 	const u32 *edid_table_pro;
 	int edid_cell_size;
 	HDMIRX_DTS_EDID_TBL_T dts_edid_table;
+	struct power_control *pctrl_cbus;
 
 	//Release reset, enable clock
+	pctrl_cbus = power_control_get("pctrl_cbus");
 	hdmirx_clock_control(CLK_ALL, CTL_ENABLE);
-
+	power_control_power_on(pctrl_cbus);//cbus power on must after clock enable
 	//Disable RX clock for saving power
 	hdmirx_clock_control(CLK_HDMIRX|CLK_RXWRAP|CLK_MIPI, CTL_DISABLE);
 
@@ -663,9 +588,6 @@ int hdmirx_rtk_drv_probe(struct platform_device *pdev)
 		HDMIRX_ERROR("[%s] No device node",__FUNCTION__);
 		return -ENODEV;
 	}
-
-	//Save platform_device pointer
-	hdmirx_pdev = pdev;
 
 	//Initialize global variables
 	memset(&mipi_top, 0, sizeof(mipi_top));
@@ -728,28 +650,6 @@ int hdmirx_rtk_drv_probe(struct platform_device *pdev)
 	}
 	Hdmi_SetHPD(0);
 
-	// TS3DV642 SEL2 GPIO
-	hdmi.gpio_sel = of_get_named_gpio(pdev->dev.of_node, "gpio-rx-sel", 0);
-	if(hdmi.gpio_sel < 0)
-	{
-		HDMIRX_ERROR("Get gpio-rx-sel fail");
-                /*return -ENODEV;*/
-	}
-	else
-	{
-		HDMIRX_INFO("hdmirx sel2 gpio(%d)",hdmi.gpio_sel);
-        if (gpio_is_valid(hdmi.gpio_sel)) {
-			if(gpio_request(hdmi.gpio_sel, "hdmirx_sel")) {
-				HDMIRX_ERROR("Request gpio %d fail", hdmi.gpio_sel);
-				hdmi.gpio_sel = -1;
-			}
-        }
-		else {
-			HDMIRX_ERROR("gpio %d is not valid", hdmi.gpio_sel);
-			hdmi.gpio_sel = -1;
-		}
-	}
-
 	// 5V detect GPIO
 	hdmi.gpio_5v_det = of_get_named_gpio(pdev->dev.of_node, "gpio-5v-detect", 0);
 	if(hdmi.gpio_5v_det < 0)
@@ -766,11 +666,6 @@ int hdmirx_rtk_drv_probe(struct platform_device *pdev)
 
 		gpio_direction_input(hdmi.gpio_5v_det);
 	}
-
-	/* Get regulator */
-	top_supply = regulator_get_optional(&pdev->dev, "power");
-	if (IS_ERR(top_supply))
-		HDMIRX_ERROR("[%s] Get top_supply fail %ld", __func__, PTR_ERR(top_supply));
 
 	/* Register v4l2 device */
 	hdmi_dev = kzalloc(sizeof(*hdmi_dev), GFP_KERNEL);
@@ -795,6 +690,11 @@ int hdmirx_rtk_drv_probe(struct platform_device *pdev)
 	hdmi_dev->width = 1920;
 	hdmi_dev->height = 1080;
 	hdmi_dev->bpp = 12; //OUT_YUV420
+
+	atomic_set(&hdmi_sw_buf_ctl.read_index, 0);
+	atomic_set(&hdmi_sw_buf_ctl.write_index, 0);
+	atomic_set(&hdmi_sw_buf_ctl.fill_index, 0);
+	hdmi_sw_buf_ctl.use_v4l2_buffer= 0;
 
 	mipi_top.src_sel = 1;
 
@@ -890,17 +790,15 @@ int hdmirx_rtk_drv_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int hdmirx_rtk_drv_suspend(struct device *dev)
+int hdmirx_rtk_drv_suspend(struct platform_device *pdev, pm_message_t state)
 {
-	struct platform_device *pdev;
 	struct v4l2_hdmi_dev *hdmi_dev;
+	struct power_control *pctrl_cbus;
 	HDMIRX_INFO(" Enter %s",__FUNCTION__);
 
 	kthread_stop(hdmi_hw_tsk);
 
-	/* Switch rx state to 0 */
-	pdev = to_platform_device(dev);
+	// Switch rx state to 0
 	hdmi_dev = pdev->dev.platform_data;
 	if(switch_get_state(&hdmi_dev->sdev))
 	{
@@ -926,57 +824,36 @@ static int hdmirx_rtk_drv_suspend(struct device *dev)
 
 	Hdmi_SetHPD(0);
 
-	if(rtk_suspend_wakeup_flags_get()&(0x1U << 5))
-		HDMIRX_INFO("CEC wakeup is enabled, skip turn off cbus clock");
-	else
-		hdmirx_clock_control(CLK_CBUS, CTL_DISABLE);//Disable  Cbus clock
+	pctrl_cbus = power_control_get("pctrl_cbus");
+	power_control_power_off(pctrl_cbus);
+
+	hdmirx_clock_control(CLK_CBUS, CTL_DISABLE);//Disable  Cbus clock
 
 	HDMIRX_INFO(" Exit %s",__FUNCTION__);
 	return 0;
 }
 
-static int hdmirx_rtk_drv_resume(struct device *dev)
+int hdmirx_rtk_drv_resume(struct platform_device *pdev)
 {
-	struct platform_device *pdev;
 	struct v4l2_hdmi_dev *hdmi_dev;
+	struct power_control *pctrl_cbus;
 	HDMIRX_INFO("Enter %s",__FUNCTION__);
 
-	pdev = to_platform_device(dev);
 	hdmi_dev = pdev->dev.platform_data;
 
 	//Release reset, enable clock
-	if(rtk_suspend_wakeup_flags_get()&(0x1U << 5))
-	{
-		hdmirx_clock_control(CLK_HDMIRX|CLK_RXWRAP|CLK_MIPI, CTL_ENABLE);
-		HDMIRX_INFO("CEC wakeup is enabled, only turn on hdmirx clock");
-	}
-	else
-		hdmirx_clock_control(CLK_ALL, CTL_ENABLE);
-
+	pctrl_cbus = power_control_get("pctrl_cbus");
+	hdmirx_clock_control(CLK_ALL, CTL_ENABLE);
+	power_control_power_on(pctrl_cbus);
 	//Disable RX clock for saving power
 	hdmirx_clock_control(CLK_HDMIRX|CLK_RXWRAP|CLK_MIPI, CTL_DISABLE);
 
-	/* bpi, sel_gpio input/low in sleep mode, change back to high level */
-	if(hdmi.gpio_sel > 0)
-		gpio_direction_output(hdmi.gpio_sel, 1);
-	
 	Hdmi_SetHPD(0);
 	hdmi_hw_tsk = kthread_run(mipi_top_thread, hdmi_dev, "mipi_hw_thread");
 
 	HDMIRX_INFO("Exit %s",__FUNCTION__);
 	return 0;
 }
-
-static void hdmirx_rtk_drv_shutdown(struct platform_device *pdev)
-{
-	hdmirx_rtk_drv_suspend(&pdev->dev);
-}
-
-static const struct dev_pm_ops rtk_hdmirx_pm_ops = {
-	.suspend    = hdmirx_rtk_drv_suspend,
-	.resume     = hdmirx_rtk_drv_resume,
-};
-#endif /* CONFIG_PM */
 
 static const struct of_device_id hdmirx_rtk_dt_ids[] = {
 	{ .compatible = "Realtek,rtk-mipi-top", },
@@ -986,16 +863,12 @@ static const struct of_device_id hdmirx_rtk_dt_ids[] = {
 struct platform_driver hdmirx_rtk_driver = {
 	.probe		= hdmirx_rtk_drv_probe,
 	.remove 	= hdmirx_rtk_drv_remove,
-#ifdef CONFIG_PM
-	.shutdown	= hdmirx_rtk_drv_shutdown,
-#endif
+	.suspend	= hdmirx_rtk_drv_suspend,
+	.resume 	= hdmirx_rtk_drv_resume,
 	.driver 	= {
 		.name	= "rtk-mipi-top",
 		.owner	= THIS_MODULE,
 		.of_match_table = of_match_ptr(hdmirx_rtk_dt_ids),
-#ifdef CONFIG_PM
-		.pm = &rtk_hdmirx_pm_ops,
-#endif /* CONFIG_PM */
 	},
 };
 

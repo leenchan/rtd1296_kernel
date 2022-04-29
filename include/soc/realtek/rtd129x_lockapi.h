@@ -40,7 +40,6 @@
 #endif
 
 #define LOCKAPI_MAGICNUM (0xdeadbeef)
-#define LOCKAPI_BY_PASS (0xbeefdead)
 #define MAX_LOG_MSG_LEN  (64)
 
 #define LOCK_NOP_DELAY_CNT (30)

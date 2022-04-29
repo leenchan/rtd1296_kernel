@@ -1500,9 +1500,14 @@ int32 _New_swNic_send(void *skb, void *output, uint32 len,
 			nicTx->flags |= PKTHDR_HWLOOKUP;
 		}
 #else
+#if defined(CONFIG_RTL_MULTI_LAN_DEV_SUPPORT_LINUX_BONDING)
+		txd->tx_type = get_protocol_type_new_desc(skb, txd);
+		txd->tx_ipv4 = 1;
+		txd->tx_ipv4_1st = 1;
+#else
 		nicTx->flags |= PKTHDR_HWLOOKUP;
 #endif
-
+#endif
 		txd->tx_l4cs = 1;
 		txd->tx_l3cs = 1;
 	}
@@ -1540,9 +1545,7 @@ int32 _New_swNic_send(void *skb, void *output, uint32 len,
 #endif
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 #endif
-#if defined(CONFIG_RTD_1295_HWNAT)
 	wmb();
-#endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 	txd->tx_own = 1;	/* set     own     bit     after all done. */
 
@@ -1695,8 +1698,12 @@ int32 _New_swNic_send_tso_sg(struct sk_buff *skb, void *output, uint32 len,
 			txd->opts3 |= (TD_L3CS_MASK | TD_L4CS_MASK);
 		}
 
+#if defined(CONFIG_RTL_MULTI_LAN_DEV_SUPPORT_LINUX_BONDING)
+		((struct tx_desc *)txd)->tx_type = get_protocol_type_new_desc(skb, ((struct tx_desc *)txd));
+#else
 		txd->opts1 |= (TD_BRIDGE_MASK | TD_HWLKUP_MASK);
 		txd->opts5 |= (PKTHDR_EXTPORT_LIST_CPU << TD_EXTSPA_OFFSET);
+#endif
 
 #if defined(CONFIG_RTL_HW_QOS_SUPPORT) || defined(CONFIG_RTK_VOIP_QOS) || defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) || defined(CONFIG_RTL_VLAN_8021Q) ||	defined(CONFIG_RTL_HW_VLAN_SUPPORT) || defined(CONFIG_SWCONFIG)
 		fill_txd_misc((struct tx_desc *)txd, nicTx,
@@ -1828,8 +1835,12 @@ int32 _New_swNic_send_tso_sg(struct sk_buff *skb, void *output, uint32 len,
 			txd->opts3 |= (TD_L3CS_MASK | TD_L4CS_MASK);
 		}
 
+#if defined(CONFIG_RTL_MULTI_LAN_DEV_SUPPORT_LINUX_BONDING)
+		((struct tx_desc *)txd)->tx_type = get_protocol_type_new_desc(skb, ((struct tx_desc *)txd));
+#else
 		txd->opts1 |= (TD_BRIDGE_MASK | TD_HWLKUP_MASK);
 		txd->opts5 |= (PKTHDR_EXTPORT_LIST_CPU << TD_EXTSPA_OFFSET);
+#endif
 
 #if defined(CONFIG_RTL_HW_QOS_SUPPORT) || defined(CONFIG_RTK_VOIP_QOS) || defined(CONFIG_RTK_VLAN_WAN_TAG_SUPPORT) || defined(CONFIG_RTL_VLAN_8021Q) ||	defined(CONFIG_RTL_HW_VLAN_SUPPORT) || defined(CONFIG_SWCONFIG)
 		fill_txd_misc((struct tx_desc *)txd, nicTx,
@@ -1849,9 +1860,7 @@ int32 _New_swNic_send_tso_sg(struct sk_buff *skb, void *output, uint32 len,
 #endif
 #endif /* !defined(CONFIG_RTD_1295_HWNAT) */
 #endif
-#if defined(CONFIG_RTD_1295_HWNAT)
 		wmb();
-#endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 		txd->opts1 |= DESC_SWCORE_OWNED;	/* set own bit after all done. */
 
@@ -1870,9 +1879,7 @@ int32 _New_swNic_send_tso_sg(struct sk_buff *skb, void *output, uint32 len,
 	tx_skb[nicTx->txIdx][tx_idx].skb = (uint32)skb;
 #endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
-#if defined(CONFIG_RTD_1295_HWNAT)
 	wmb();
-#endif /* defined(CONFIG_RTD_1295_HWNAT) */
 
 	/* set own bit of first tx_pkthdr after all done. */
 	first_txd->opts1 |= DESC_SWCORE_OWNED;

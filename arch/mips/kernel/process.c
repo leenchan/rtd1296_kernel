@@ -92,6 +92,7 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 	 * gets a chance to save the parent's live hardware registers to the
 	 * child context.
 	 */
+#if defined(CONFIG_CPU_HAS_MSA) || defined(CONFIG_CPU_HAS_FPU) || defined(CONFIG_CPU_HAS_DSP)
 	preempt_disable();
 
 	if (is_msa_enabled())
@@ -99,9 +100,11 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 	else if (is_fpu_owner())
 		_save_fp(current);
 
-	save_dsp(current);
+	if (cpu_has_dsp)
+		save_dsp(current);
 
 	preempt_enable();
+#endif
 
 	*dst = *src;
 	return 0;
@@ -134,7 +137,7 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 		p->thread.reg17 = kthread_arg;
 		p->thread.reg29 = childksp;
 		p->thread.reg31 = (unsigned long) ret_from_kernel_thread;
-#if defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX)
+#if defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX) || defined(CONFIG_CPU_RLX)
 		status = (status & ~(ST0_KUP | ST0_IEP | ST0_IEC)) |
 			 ((status & (ST0_KUC | ST0_IEC)) << 2);
 #else
@@ -593,14 +596,14 @@ int mips_set_process_fp_mode(struct task_struct *task, unsigned int value)
 		return -EOPNOTSUPP;
 
 	/* Avoid inadvertently triggering emulation */
-	if ((value & PR_FP_MODE_FR) && raw_cpu_has_fpu &&
-	    !(raw_current_cpu_data.fpu_id & MIPS_FPIR_F64))
+	if ((value & PR_FP_MODE_FR) && cpu_has_fpu &&
+	    !(current_cpu_data.fpu_id & MIPS_FPIR_F64))
 		return -EOPNOTSUPP;
-	if ((value & PR_FP_MODE_FRE) && raw_cpu_has_fpu && !cpu_has_fre)
+	if ((value & PR_FP_MODE_FRE) && cpu_has_fpu && !cpu_has_fre)
 		return -EOPNOTSUPP;
 
 	/* FR = 0 not supported in MIPS R6 */
-	if (!(value & PR_FP_MODE_FR) && raw_cpu_has_fpu && cpu_has_mips_r6)
+	if (!(value & PR_FP_MODE_FR) && cpu_has_fpu && cpu_has_mips_r6)
 		return -EOPNOTSUPP;
 
 	/* Proceed with the mode switch */

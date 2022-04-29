@@ -81,6 +81,12 @@ typedef struct
     //int format;
 } DCRT_PARAM_SURFACE;
 
+typedef struct
+{
+    unsigned int pLockAddr;
+    unsigned int shareFD;
+} DCRT_PARAM_PLOCK;
+
 typedef enum
 {
     DC_RT_FRAME_DISP_SYNC= 0,	//show last pic only
@@ -267,7 +273,8 @@ struct dc_buffer {
 
     u32                     flags;
     u32                     alpha; /* need to enable eBuffer_USE_GLOBAL_ALPHA, 0 : Pixel Alpha */
-    u32                     reserve[31];
+    u32                     colorkey; 
+    u32                     reserve[30];
 
     union _fence_data       acquire;
 };
@@ -330,7 +337,7 @@ struct dc_simple_post_config {
 #define DC2VO_SET_GLOBAL_ALPHA           _IO    (DC2VO_IOC_MAGIC, 20)
 #define DC2VO_SET_VSYNC_FORCE_LOCK       _IO    (DC2VO_IOC_MAGIC, 21)
 #define DC2VO_SIMPLE_POST_CONFIG         _IO    (DC2VO_IOC_MAGIC, 22)
-
+#define DC2VO_WAIT_FOR_PLOCK             _IO    (DC2VO_IOC_MAGIC, 30)
 
 /*
  * legacy : DCRT_IRQ, DC_NOHW_MAX_BACKBUFFERS

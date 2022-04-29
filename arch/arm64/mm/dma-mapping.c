@@ -19,6 +19,7 @@
 
 #include <linux/gfp.h>
 #include <linux/acpi.h>
+#include <linux/bootmem.h>
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/genalloc.h>
@@ -28,6 +29,8 @@
 #include <linux/swiotlb.h>
 
 #include <asm/cacheflush.h>
+
+static int swiotlb __read_mostly;
 
 static pgprot_t __get_dma_pgprot(struct dma_attrs *attrs, pgprot_t prot,
 				 bool coherent)
@@ -39,7 +42,12 @@ static pgprot_t __get_dma_pgprot(struct dma_attrs *attrs, pgprot_t prot,
 
 static struct gen_pool *atomic_pool;
 
-#define DEFAULT_DMA_COHERENT_POOL_SIZE  SZ_256K
+#ifdef CONFIG_ARCH_RTD129X
+#define DEFAULT_DMA_COHERENT_POOL_SIZE	SZ_1M
+#else
+#define DEFAULT_DMA_COHERENT_POOL_SIZE	SZ_256K
+#endif
+
 static size_t atomic_pool_size __initdata = DEFAULT_DMA_COHERENT_POOL_SIZE;
 
 static int __init early_coherent_pool(char *p)
@@ -95,14 +103,10 @@ static void *__dma_alloc_coherent(struct device *dev, size_t size,
 		return NULL;
 	}
 
-#ifdef CONFIG_RTK_DOMU_DMA
-	if (IS_ENABLED(CONFIG_ZONE_DMA) && !xen_initial_domain())
-		flags |= GFP_DMA;
-#endif
 	if (IS_ENABLED(CONFIG_ZONE_DMA) &&
 	    dev->coherent_dma_mask <= DMA_BIT_MASK(32))
 		flags |= GFP_DMA;
-	if (IS_ENABLED(CONFIG_DMA_CMA) && (flags & __GFP_WAIT)) {
+	if (dev_get_cma_area(dev) && gfpflags_allow_blocking(flags)) {
 		struct page *page;
 		void *addr;
 
@@ -146,10 +150,11 @@ static void *__dma_alloc(struct device *dev, size_t size,
 	struct page *page;
 	void *ptr, *coherent_ptr;
 	bool coherent = is_device_dma_coherent(dev);
+	pgprot_t prot = __get_dma_pgprot(attrs, PAGE_KERNEL, false);
 
 	size = PAGE_ALIGN(size);
 
-	if (!coherent && !(flags & __GFP_WAIT)) {
+	if (!coherent && !gfpflags_allow_blocking(flags)) {
 		struct page *page = NULL;
 		void *addr = __alloc_from_pool(size, &page, flags);
 
@@ -173,9 +178,7 @@ static void *__dma_alloc(struct device *dev, size_t size,
 	/* create a coherent mapping */
 	page = virt_to_page(ptr);
 	coherent_ptr = dma_common_contiguous_remap(page, size, VM_USERMAP,
-				__get_dma_pgprot(attrs,
-					__pgprot(PROT_NORMAL_NC), false),
-					__builtin_return_address(0));
+						   prot, __builtin_return_address(0));
 	if (!coherent_ptr)
 		goto no_map;
 
@@ -305,9 +308,10 @@ static void __swiotlb_sync_sg_for_device(struct device *dev,
 				       sg->length, dir);
 }
 
-/* vma->vm_page_prot must be set appropriately before calling this function */
-static int __dma_common_mmap(struct device *dev, struct vm_area_struct *vma,
-			     void *cpu_addr, dma_addr_t dma_addr, size_t size)
+static int __swiotlb_mmap(struct device *dev,
+			  struct vm_area_struct *vma,
+			  void *cpu_addr, dma_addr_t dma_addr, size_t size,
+			  struct dma_attrs *attrs)
 {
 	int ret = -ENXIO;
 	unsigned long nr_vma_pages = (vma->vm_end - vma->vm_start) >>
@@ -315,6 +319,9 @@ static int __dma_common_mmap(struct device *dev, struct vm_area_struct *vma,
 	unsigned long nr_pages = PAGE_ALIGN(size) >> PAGE_SHIFT;
 	unsigned long pfn = dma_to_phys(dev, dma_addr) >> PAGE_SHIFT;
 	unsigned long off = vma->vm_pgoff;
+
+	vma->vm_page_prot = __get_dma_pgprot(attrs, vma->vm_page_prot,
+					     is_device_dma_coherent(dev));
 
 	if (dma_mmap_from_coherent(dev, vma, cpu_addr, size, &ret))
 		return ret;
@@ -329,20 +336,31 @@ static int __dma_common_mmap(struct device *dev, struct vm_area_struct *vma,
 	return ret;
 }
 
-static int __swiotlb_mmap(struct device *dev,
-			  struct vm_area_struct *vma,
-			  void *cpu_addr, dma_addr_t dma_addr, size_t size,
-			  struct dma_attrs *attrs)
+static int __swiotlb_get_sgtable(struct device *dev, struct sg_table *sgt,
+				 void *cpu_addr, dma_addr_t handle, size_t size,
+				 struct dma_attrs *attrs)
 {
-	vma->vm_page_prot = __get_dma_pgprot(attrs, vma->vm_page_prot,
-					     is_device_dma_coherent(dev));
-	return __dma_common_mmap(dev, vma, cpu_addr, dma_addr, size);
+	int ret = sg_alloc_table(sgt, 1, GFP_KERNEL);
+
+	if (!ret)
+		sg_set_page(sgt->sgl, phys_to_page(dma_to_phys(dev, handle)),
+			    PAGE_ALIGN(size), 0);
+
+	return ret;
 }
 
-static struct dma_map_ops swiotlb_dma_ops = {
+static int __swiotlb_dma_supported(struct device *hwdev, u64 mask)
+{
+	if (swiotlb)
+		return swiotlb_dma_supported(hwdev, mask);
+	return 1;
+}
+
+struct dma_map_ops swiotlb_dma_ops = {
 	.alloc = __dma_alloc,
 	.free = __dma_free,
 	.mmap = __swiotlb_mmap,
+	.get_sgtable = __swiotlb_get_sgtable,
 	.map_page = __swiotlb_map_page,
 	.unmap_page = __swiotlb_unmap_page,
 	.map_sg = __swiotlb_map_sg_attrs,
@@ -351,9 +369,10 @@ static struct dma_map_ops swiotlb_dma_ops = {
 	.sync_single_for_device = __swiotlb_sync_single_for_device,
 	.sync_sg_for_cpu = __swiotlb_sync_sg_for_cpu,
 	.sync_sg_for_device = __swiotlb_sync_sg_for_device,
-	.dma_supported = swiotlb_dma_supported,
+	.dma_supported = __swiotlb_dma_supported,
 	.mapping_error = swiotlb_dma_mapping_error,
 };
+EXPORT_SYMBOL(swiotlb_dma_ops);
 
 static int __init atomic_pool_init(void)
 {
@@ -491,23 +510,6 @@ static int __dummy_dma_supported(struct device *hwdev, u64 mask)
 	return 0;
 }
 
-#ifdef CONFIG_ARCH_RTD129x
-struct dma_map_ops dummy_dma_ops = {
-	.alloc = __dma_alloc,
-	.free = __dma_free,
-	.mmap = __swiotlb_mmap,
-	.map_page = __swiotlb_map_page,
-	.unmap_page = __swiotlb_unmap_page,
-	.map_sg = __swiotlb_map_sg_attrs,
-	.unmap_sg = __swiotlb_unmap_sg_attrs,
-	.sync_single_for_cpu = __swiotlb_sync_single_for_cpu,
-	.sync_single_for_device = __swiotlb_sync_single_for_device,
-	.sync_sg_for_cpu = __swiotlb_sync_sg_for_cpu,
-	.sync_sg_for_device = __swiotlb_sync_sg_for_device,
-	.dma_supported = swiotlb_dma_supported,
-	.mapping_error = swiotlb_dma_mapping_error,
-};
-#else
 struct dma_map_ops dummy_dma_ops = {
 	.alloc                  = __dummy_alloc,
 	.free                   = __dummy_free,
@@ -523,12 +525,13 @@ struct dma_map_ops dummy_dma_ops = {
 	.mapping_error          = __dummy_mapping_error,
 	.dma_supported          = __dummy_dma_supported,
 };
-#endif
-
 EXPORT_SYMBOL(dummy_dma_ops);
 
 static int __init arm64_dma_init(void)
 {
+	if (swiotlb_force || max_pfn > (arm64_dma_phys_limit >> PAGE_SHIFT))
+		swiotlb = 1;
+
 	return atomic_pool_init();
 }
 arch_initcall(arm64_dma_init);
@@ -560,21 +563,25 @@ static void *__iommu_alloc_attrs(struct device *dev, size_t size,
 {
 	bool coherent = is_device_dma_coherent(dev);
 	int ioprot = dma_direction_to_prot(DMA_BIDIRECTIONAL, coherent);
+	size_t iosize = size;
 	void *addr;
 
 	if (WARN(!dev, "cannot create IOMMU mapping for unknown device\n"))
 		return NULL;
+
+	size = PAGE_ALIGN(size);
+
 	/*
 	 * Some drivers rely on this, and we probably don't want the
 	 * possibility of stale kernel data being read by devices anyway.
 	 */
 	gfp |= __GFP_ZERO;
 
-	if (gfp & __GFP_WAIT) {
+	if (gfpflags_allow_blocking(gfp)) {
 		struct page **pages;
 		pgprot_t prot = __get_dma_pgprot(attrs, PAGE_KERNEL, coherent);
 
-		pages = iommu_dma_alloc(dev, size, gfp, ioprot,	handle,
+		pages = iommu_dma_alloc(dev, iosize, gfp, ioprot, handle,
 					flush_page);
 		if (!pages)
 			return NULL;
@@ -582,7 +589,7 @@ static void *__iommu_alloc_attrs(struct device *dev, size_t size,
 		addr = dma_common_pages_remap(pages, size, VM_USERMAP, prot,
 					      __builtin_return_address(0));
 		if (!addr)
-			iommu_dma_free(dev, pages, size, handle);
+			iommu_dma_free(dev, pages, iosize, handle);
 	} else {
 		struct page *page;
 		/*
@@ -599,7 +606,7 @@ static void *__iommu_alloc_attrs(struct device *dev, size_t size,
 		if (!addr)
 			return NULL;
 
-		*handle = iommu_dma_map_page(dev, page, 0, size, ioprot);
+		*handle = iommu_dma_map_page(dev, page, 0, iosize, ioprot);
 		if (iommu_dma_mapping_error(dev, *handle)) {
 			if (coherent)
 				__free_pages(page, get_order(size));
@@ -614,6 +621,9 @@ static void *__iommu_alloc_attrs(struct device *dev, size_t size,
 static void __iommu_free_attrs(struct device *dev, size_t size, void *cpu_addr,
 			       dma_addr_t handle, struct dma_attrs *attrs)
 {
+	size_t iosize = size;
+
+	size = PAGE_ALIGN(size);
 	/*
 	 * @cpu_addr will be one of 3 things depending on how it was allocated:
 	 * - A remapped array of pages from iommu_dma_alloc(), for all
@@ -625,17 +635,17 @@ static void __iommu_free_attrs(struct device *dev, size_t size, void *cpu_addr,
 	 * Hence how dodgy the below logic looks...
 	 */
 	if (__in_atomic_pool(cpu_addr, size)) {
-		iommu_dma_unmap_page(dev, handle, size, 0, NULL);
+		iommu_dma_unmap_page(dev, handle, iosize, 0, NULL);
 		__free_from_pool(cpu_addr, size);
 	} else if (is_vmalloc_addr(cpu_addr)){
 		struct vm_struct *area = find_vm_area(cpu_addr);
 
 		if (WARN_ON(!area || !area->pages))
 			return;
-		iommu_dma_free(dev, area->pages, size, &handle);
+		iommu_dma_free(dev, area->pages, iosize, &handle);
 		dma_common_free_remap(cpu_addr, size, VM_USERMAP);
 	} else {
-		iommu_dma_unmap_page(dev, handle, size, 0, NULL);
+		iommu_dma_unmap_page(dev, handle, iosize, 0, NULL);
 		__free_pages(virt_to_page(cpu_addr), get_order(size));
 	}
 }
@@ -905,7 +915,7 @@ static int __iommu_attach_notifier(struct notifier_block *nb,
 	return 0;
 }
 
-static int register_iommu_dma_ops_notifier(struct bus_type *bus)
+static int __init register_iommu_dma_ops_notifier(struct bus_type *bus)
 {
 	struct notifier_block *nb = kzalloc(sizeof(*nb), GFP_KERNEL);
 	int ret;

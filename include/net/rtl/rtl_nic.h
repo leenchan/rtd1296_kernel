@@ -1,12 +1,3 @@
-/*
- * Copyright (C) 2017 Realtek Semiconductor Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
-
 #ifndef	RTL_NIC_H
 #define	RTL_NIC_H
 
@@ -45,7 +36,9 @@
 #define CONFIG_RTL_ETH_NAPI_SUPPORT 1
 
 #if defined(CONFIG_RTL_ETH_NAPI_SUPPORT)
+#if !defined(CONFIG_RTL_IPTABLES_FAST_PATH)
 #define CONFIG_RTL_ETH_NAPI_GRO_SUPPORT 1
+#endif
 #endif
 
 #if defined(CONFIG_POCKET_AP_SUPPORT)

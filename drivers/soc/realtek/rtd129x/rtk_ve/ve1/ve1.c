@@ -299,6 +299,36 @@ static u32	s_vpu_reg_store[MAX_NUM_VPU_CORE][64];
 #define	WriteVpuRegister(addr, val, core)	*(volatile unsigned int *)(s_vpu_register.virt_addr + (0x4000 * core)/*s_bit_firmware_info[core].reg_base_offset*/ + addr) = (unsigned int)val
 #define	WriteVpu(addr, val)			*(volatile unsigned int *)(addr) = (unsigned int)val;
 
+static void ve1_pll_setting(unsigned long offset, unsigned int value, unsigned int bOverwrite, unsigned int bEnable)
+{
+    if (s_vpll_register.phys_addr == 0 || s_vpll_register.virt_addr == 0 || s_vpll_register.size == 0)
+    {
+        printk(KERN_WARNING "In[%s][%d] didn't get pll register\n", __FUNCTION__, __LINE__);
+        return;
+    }
+    else if (offset > s_vpll_register.size)
+    {
+        printk(KERN_WARNING "In[%s][%d] offset over than register size\n", __FUNCTION__, __LINE__);
+        return;
+    }
+
+    if (bOverwrite == 1)
+    {
+        __raw_writel(value, (volatile u8 *)(s_vpll_register.virt_addr+offset));
+    }
+    else
+    {
+        if (bEnable)
+        {
+            __raw_writel(__raw_readl((volatile u8 *)(s_vpll_register.virt_addr+offset)) | value, (volatile u8 *)(s_vpll_register.virt_addr+offset));
+        }
+        else
+        {
+            __raw_writel(__raw_readl((volatile u8 *)(s_vpll_register.virt_addr+offset)) & value, (volatile u8 *)(s_vpll_register.virt_addr+offset));
+        }
+    }
+}
+
 static void ve1_wrapper_setup(unsigned int coreIdx)
 {
     unsigned int ctrl_1;
@@ -1028,8 +1058,9 @@ static long vpu_ioctl(struct file *filp, u_int cmd, u_long arg)
 				pr_warn("[VPUDRV] %s %d, wrong value:0x%x\n", __func__, __LINE__, clockInfo.value);
 				break;
 		}
-		if (s_pclk != NULL)
-			clk_set_parent(s_vpu_clk, s_pclk);
+		
+		if (s_pclk != NULL){
+			clk_set_parent(s_vpu_clk, s_pclk);}
 
 		DPRINTK("[VPUDRV][-]VDI_IOCTL_SET_RTK_CLK_SELECT clockInfo.core_idx:%d, clockInfo.value:0x%x\n", clockInfo.core_idx, clockInfo.value);
 	}
@@ -1345,6 +1376,10 @@ static int vpu_probe(struct platform_device *pdev)
 #if 0 //Fuchun disable 20160204, set clock gating by vdi.c
     unsigned int val = 0;
 #endif
+#if 1//__LINUX_MEDIA_NAS__
+	if (!of_device_is_available(pdev->dev.of_node))
+		return -ENODEV;
+#endif
     DPRINTK("[VPUDRV] vpu_probe\n");
 
     of_address_to_resource(node, 0, &res);
@@ -1387,20 +1422,39 @@ static int vpu_probe(struct platform_device *pdev)
 
     printk(KERN_INFO "res.start:0x%x, bonding_value:0x%x\n", res.start, bonding_value);
 
-    s_vpu_clk_ve1 = vpu_clk_get(&pdev->dev, 0);
-    s_vpu_clk_ve2 = vpu_clk_get(&pdev->dev, 1);
+
+    if (pdev)
+        s_vpu_clk_ve1 = vpu_clk_get(&pdev->dev, 0);
+    else
+        s_vpu_clk_ve1 = vpu_clk_get(NULL, 0);
+
+    if (!s_vpu_clk_ve1)
+        printk(KERN_ERR "[VPUDRV] : fail to get clock controller, but, do not treat as error, coreIdx=0\n");
+    else
+        printk(KERN_INFO "[VPUDRV] : get clock controller s_vpu_clk_ve1=0x%lx\n", (unsigned long)s_vpu_clk_ve1);
+
+    if (pdev)
+        s_vpu_clk_ve2 = vpu_clk_get(&pdev->dev, 1);
+    else
+        s_vpu_clk_ve2 = vpu_clk_get(NULL, 1);
+
+    if (!s_vpu_clk_ve2)
+        printk(KERN_ERR "[VPUDRV] : fail to get clock controller, but, do not treat as error, coreIdx=1\n");
+    else
+        printk(KERN_INFO "[VPUDRV] : get clock controller s_vpu_clk_ve2=0x%lx\n", (unsigned long)s_vpu_clk_ve2);
 
 	s_vpu_clk_sysh = clk_get(&pdev->dev, "clk_sysh");
 	s_vpu_pll_ve1 = clk_get(&pdev->dev, "pll_ve1");
 	s_vpu_pll_ve2 = clk_get(&pdev->dev, "pll_ve2");
+
 
 #ifdef CONFIG_POWER_CONTROL
     s_pctrl_ve1 = vpu_pctrl_get(0);
     s_pctrl_ve2 = vpu_pctrl_get(1);
 #endif
 
-    rstc_ve1 = reset_control_get(&pdev->dev, "ve1");
-    rstc_ve2 = reset_control_get(&pdev->dev, "ve2");
+    rstc_ve1 = rstc_get("rstn_ve1");
+    rstc_ve2 = rstc_get("rstn_ve2");
 
 
 #ifdef VPU_SUPPORT_CLOCK_CONTROL
@@ -1467,6 +1521,19 @@ static int vpu_probe(struct platform_device *pdev)
     DPRINTK("[VPUDRV] success to probe vpu device with reserved video memory phys_addr=0x%x, base = 0x%x\n", (int) s_video_memory.phys_addr, (int)s_video_memory.base);
 #else
     DPRINTK("[VPUDRV] success to probe vpu device with non reserved video memory\n");
+#endif
+
+
+    /* RTK clock setting */
+    ve1_pll_setting(0x1d0, PLL_CLK_715, 1, 0); // VE2 PLL 715MHz
+    ve1_pll_setting(0x1d4, (0x7), 1, 0); // VE2 PLL disable
+    __delay(100);
+    ve1_pll_setting(0x1d4, (0x3), 1, 0); // VE2 PLL enable
+
+#if 1//ndef LINUX_MEDIA_NAS
+    clk_set_parent(s_vpu_clk_ve1, s_vpu_pll_ve1);
+    __delay(100);
+    clk_set_rate(s_vpu_pll_ve1, 540000000);
 #endif
 
     reset_control_deassert(rstc_ve1); // RESET disable
@@ -1723,6 +1790,11 @@ static int vpu_resume(struct device *dev)
     ve1_wrapper_setup((1 << 1) | 1);
 
 #ifdef DISABLE_ORIGIN_SUSPEND
+    /* RTK clock setting */
+    ve1_pll_setting(0x1d0, PLL_CLK_715, 1, 0); // VE2 PLL 715MHz
+    ve1_pll_setting(0x1d4, (0x7), 1, 0); // VE2 PLL disable
+    __delay(100);
+    ve1_pll_setting(0x1d4, (0x3), 1, 0); // VE2 PLL enable
 #else /* else of DISABLE_ORIGIN_SUSPEND */
     int i;
     int core;
@@ -1949,7 +2021,6 @@ module_exit(vpu_exit);
 int vpu_hw_reset(u32 coreIdx)
 {
 #if 1 /* RTK, workaround for demo */
-    unsigned int val = 0;
 
     DPRINTK("[VPUDRV] request vpu reset from application. \n");
 

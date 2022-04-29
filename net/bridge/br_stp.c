@@ -17,12 +17,6 @@
 #include "br_private.h"
 #include "br_private_stp.h"
 
-#if defined (CONFIG_RTL_STP) || defined(CONFIG_RTL_HW_STP)
-#include <net/rtl/rtl_nic.h>
-#include <net/rtl/rtk_stp.h>
-#include <net/rtl/rtk_vlan.h>
-#endif
-
 /* since time values in bpdu are in jiffies and then scaled (1/256)
  * before sending, make sure that is at least one STP tick.
  */
@@ -45,10 +39,15 @@ void br_log_state(const struct net_bridge_port *p)
 
 void br_set_state(struct net_bridge_port *p, unsigned int state)
 {
+	struct switchdev_attr attr = {
+		.id = SWITCHDEV_ATTR_ID_PORT_STP_STATE,
+		.flags = SWITCHDEV_F_DEFER,
+		.u.stp_state = state,
+	};
 	int err;
 
 	p->state = state;
-	err = netdev_switch_port_stp_update(p->dev, state);
+	err = switchdev_port_attr_set(p->dev, &attr);
 	if (err && err != -EOPNOTSUPP)
 		br_warn(p->br, "error setting offload STP state on port %u(%s)\n",
 				(unsigned int) p->port_no, p->dev->name);
@@ -211,8 +210,9 @@ void br_transmit_config(struct net_bridge_port *p)
 		br_send_config_bpdu(p, &bpdu);
 		p->topology_change_ack = 0;
 		p->config_pending = 0;
-		mod_timer(&p->hold_timer,
-			  round_jiffies(jiffies + BR_HOLD_TIME));
+		if (p->br->stp_enabled == BR_KERNEL_STP)
+			mod_timer(&p->hold_timer,
+				  round_jiffies(jiffies + BR_HOLD_TIME));
 	}
 }
 
@@ -406,19 +406,6 @@ static void br_make_blocking(struct net_bridge_port *p)
 			br_topology_change_detection(p->br);
 
 		br_set_state(p, BR_STATE_BLOCKING);
-		#if defined (CONFIG_RTL_STP)
-		rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_BLOCKING);
-		#endif
-
-		#if defined(CONFIG_RTL_HW_STP)
-		rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_BLOCKING);
-		#endif
-
-		#ifdef CONFIG_RTK_MESH
-		if (strstr(p->dev->name, "msh"))
-			br_signal_pathsel(p->br);
-		#endif
-
 		br_log_state(p);
 		br_ifinfo_notify(RTM_NEWLINK, p);
 
@@ -439,29 +426,10 @@ static void br_make_forwarding(struct net_bridge_port *p)
 		br_topology_change_detection(br);
 		del_timer(&p->forward_delay_timer);
 	} else if (br->stp_enabled == BR_KERNEL_STP)
-	{
 		br_set_state(p, BR_STATE_LISTENING);
-		#if defined (CONFIG_RTL_STP)
-		rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_LISTENING);
-		#endif
-
-		#if defined(CONFIG_RTL_HW_STP)
-		rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_LISTENING);
-		#endif
-	}
 	else
-	{
 		br_set_state(p, BR_STATE_LEARNING);
-		#if defined (CONFIG_RTL_STP)
-		rtl_setSpanningTreePortState(p, RTL8651_PORTSTA_LEARNING);
-		#endif
 
-		#if defined(CONFIG_RTL_HW_STP)
-		rtl_sethwSpanningTreePortState(p, RTL8651_PORTSTA_LEARNING);
-		#endif
-	}
-
-	br_multicast_enable_port(p);
 	br_log_state(p);
 	br_ifinfo_notify(RTM_NEWLINK, p);
 
@@ -495,6 +463,12 @@ void br_port_state_selection(struct net_bridge *br)
 			}
 		}
 
+		if (p->state != BR_STATE_BLOCKING)
+			br_multicast_enable_port(p);
+		/* Multicast is not disabled for the port when it goes in
+		 * blocking state because the timers will expire and stop by
+		 * themselves without sending more queries.
+		 */
 		if (p->state == BR_STATE_FORWARDING)
 			++liveports;
 	}
@@ -593,6 +567,34 @@ int br_set_max_age(struct net_bridge *br, unsigned long val)
 
 }
 
+/* Set time interval that dynamic forwarding entries live
+ * For pure software bridge, allow values outside the 802.1
+ * standard specification for special cases:
+ *  0 - entry never ages (all permanant)
+ *  1 - entry disappears (no persistance)
+ *
+ * Offloaded switch entries maybe more restrictive
+ */
+int br_set_ageing_time(struct net_bridge *br, u32 ageing_time)
+{
+	struct switchdev_attr attr = {
+		.id = SWITCHDEV_ATTR_ID_BRIDGE_AGEING_TIME,
+		.flags = SWITCHDEV_F_SKIP_EOPNOTSUPP,
+		.u.ageing_time = ageing_time,
+	};
+	unsigned long t = clock_t_to_jiffies(ageing_time);
+	int err;
+
+	err = switchdev_port_attr_set(br->dev, &attr);
+	if (err && err != -EOPNOTSUPP)
+		return err;
+
+	br->ageing_time = t;
+	mod_timer(&br->gc_timer, jiffies);
+
+	return 0;
+}
+
 void __br_set_forward_delay(struct net_bridge *br, unsigned long t)
 {
 	br->bridge_forward_delay = t;
@@ -617,73 +619,3 @@ unlock:
 	spin_unlock_bh(&br->lock);
 	return err;
 }
-
-#if defined (CONFIG_RTL_STP)
-int rtl_setSpanningTreePortState(struct net_bridge_port *p, unsigned int state)
-{
-	int retval = SUCCESS, Port = -1, phyport = -1;
-	char name[IFNAMSIZ] = {0};
-
-	if (!p || !p->dev)
-		return FAILED;
-
-	strcpy(name, p->dev->name);
-	Port = name[strlen(name)-1]-'0';
-	//if is ethernet interface, need to set hardware register.
-	if(memcmp(p->dev->name,"eth", 3)==0)
-	{
-		if (Port == 1) //eth1<-->port4
-			phyport = 4;
-		else if (Port == 0) //eth0<-->port0
-			phyport = 0;
-		else //eth2/eth3/eth4 <-->port1/port2/port3
-			phyport = Port - 1;
-		//printk("%s %d phyport=%d name=%s state=%d\n", __FUNCTION__, __LINE__, phyport, p->dev->name,state);
-		if (phyport >= 0)
-		{
-			retval = rtl865x_setMulticastSpanningTreePortState(phyport , state);
-
-			retval = rtl865x_setSpanningTreePortState(phyport, state);
-		}
-	}
-
-	return retval;
-
-}
-#endif
-#if defined(CONFIG_RTL_HW_STP)
-int rtl_sethwSpanningTreePortState(struct net_bridge_port *p, unsigned int state)
-{
-	int retval = SUCCESS, i = 0;
-	uint32 vid = 0, portMask = 0;
-
-	if (!p || !p->dev)
-		return FAILED;
-
-	//if(strcmp(p->dev->name,"eth0")==0)
-	if(memcmp(p->dev->name,"eth", 3)==0)
-		retval=rtl865x_getNetifVid("br0", &vid);
-	else
-		retval=rtl865x_getNetifVid(p->dev->name, &vid);
-
-	if(retval==FAILED){
-//		printk("%s(%d): rtl865x_getNetifVid failed.\n",__FUNCTION__,__LINE__);
-	}
-	else{
-		portMask=rtl865x_getVlanPortMask(vid);
-		for ( i = 0 ; i < MAX_RTL_STP_PORT_WH; i ++ ){
-			if((1<<i)&portMask){
-				retval = rtl865x_setMulticastSpanningTreePortState(i , state);
-				if(retval==FAILED)
-					printk("%s(%d): rtl865x_setMulticastSpanningTreePortState port(%d) failed.\n",__FUNCTION__,__LINE__,i);
-
-				retval = rtl865x_setSpanningTreePortState(i, state);
-				if(retval==FAILED)
-					printk("%s(%d): rtl865x_setSpanningTreePortState port(%d) failed.\n",__FUNCTION__,__LINE__,i);
-			}
-		}
-	}
-
-	return retval;
-}
-#endif

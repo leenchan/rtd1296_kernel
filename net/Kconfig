@@ -45,6 +45,9 @@ config COMPAT_NETLINK_MESSAGES
 	  Newly written code should NEVER need this option but do
 	  compat-independent messages instead!
 
+config NET_INGRESS
+	bool
+
 menu "Networking options"
 
 source "net/packet/Kconfig"
@@ -88,14 +91,6 @@ config ANDROID_PARANOID_NETWORK
 	default y
 	help
 		none
-
-config NET_ACTIVITY_STATS
-	bool "Network activity statistics tracking"
-	default y
-	help
-	 Network activity statistics are useful for tracking wireless
-	 modem activity on 2G, 3G, 4G wireless networks. Counts number of
-	 transmissions and groups them in specified time buckets.
 
 config NETWORK_SECMARK
 	bool "Security Marking"
@@ -243,6 +238,7 @@ source "net/netlink/Kconfig"
 source "net/mpls/Kconfig"
 source "net/hsr/Kconfig"
 source "net/switchdev/Kconfig"
+source "net/l3mdev/Kconfig"
 
 config RPS
 	bool
@@ -385,6 +381,13 @@ source "net/caif/Kconfig"
 source "net/ceph/Kconfig"
 source "net/nfc/Kconfig"
 
+config LWTUNNEL
+	bool "Network light weight tunnels"
+	---help---
+	  This feature provides an infrastructure to support light weight
+	  tunnels like mpls. There is no netdevice associated with a light
+	  weight tunnel endpoint. Tunnel encapsulation parameters are stored
+	  with light weight tunnel state associated with fib routes.
 
 endif   # if NET
 

@@ -59,6 +59,9 @@ enum kobject_action {
 	KOBJ_OFFLINE,
 	KOBJ_LINKUP,
 	KOBJ_LINKDOWN,
+	KOBJ_ISOLATE,
+	KOBJ_ATTACH_USB,
+	KOBJ_DEATTACH_USB,
 	KOBJ_MAX
 };
 
@@ -68,7 +71,7 @@ struct kobject {
 	struct kobject		*parent;
 	struct kset		*kset;
 	struct kobj_type	*ktype;
-	struct kernfs_node	*sd;
+	struct kernfs_node	*sd; /* sysfs directory entry */
 	struct kref		kref;
 #ifdef CONFIG_DEBUG_KOBJECT_RELEASE
 	struct delayed_work	release;
@@ -82,8 +85,9 @@ struct kobject {
 
 extern __printf(2, 3)
 int kobject_set_name(struct kobject *kobj, const char *name, ...);
-extern int kobject_set_name_vargs(struct kobject *kobj, const char *fmt,
-				  va_list vargs);
+extern __printf(2, 0)
+int kobject_set_name_vargs(struct kobject *kobj, const char *fmt,
+			   va_list vargs);
 
 static inline const char *kobject_name(const struct kobject *kobj)
 {

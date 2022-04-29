@@ -25,22 +25,6 @@
 #include <linux/errno.h>
 #include <sound/core.h>
 
-#ifdef RTK_TRACE_ALSA_EN
-#define RTK_TRACE_ALSA(format, ...) printk(KERN_ALERT format, ##__VA_ARGS__);
-#define RTK_TRACE_ALSA_SEC(sec, format, ...)    \
-{\
-    static long count = 0;\
-    if((jiffies - count) > HZ * sec)\
-    {\
-        count = jiffies;\
-        printk(KERN_ALERT format, ##__VA_ARGS__);\
-    }\
-}
-#else
-#define RTK_TRACE_ALSA(format, ...)
-#define RTK_TRACE_ALSA_SEC(sec, format, ...)
-#endif
-
 /**
  * snd_device_new - create an ALSA device component
  * @card: the card instance
@@ -63,7 +47,6 @@ int snd_device_new(struct snd_card *card, enum snd_device_type type,
 	struct snd_device *dev;
 	struct list_head *p;
 
-    RTK_TRACE_ALSA("[+] @ %s\n", __func__);
 	if (snd_BUG_ON(!card || !device_data || !ops))
 		return -ENXIO;
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
@@ -84,7 +67,6 @@ int snd_device_new(struct snd_card *card, enum snd_device_type type,
 	}
 
 	list_add(&dev->list, p);
-    RTK_TRACE_ALSA("[-] @ %s\n", __func__);
 	return 0;
 }
 EXPORT_SYMBOL(snd_device_new);

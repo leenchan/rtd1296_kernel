@@ -1,12 +1,21 @@
-/*
- * Realtek I2C driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
+/* ------------------------------------------------------------------------- */
+/* i2c-venus-priv.c  venus i2c hw driver for Realtek Venus DVR I2C           */
+/* ------------------------------------------------------------------------- */
+/*   Copyright (C) 2008 Kevin Wang <kevin_wang@realtek.com.tw>
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 -------------------------------------------------------------------------
 Update List :
 -------------------------------------------------------------------------
@@ -70,15 +79,12 @@ Update List :
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/delay.h>
-//#include <../../../arch/arm/mach-rtk119x/include/venus.h>
-//#include <../../../arch/arm/mach-rtk119x/include/mars.h>
-//#include <../../../arch/arm/mach-rtk119x/include/jupiter.h>
-//#include <../../../arch/arm/mach-rtk119x/include/saturn.h>
-//#include <../../../arch/arm/mach-rtk119x/include/darwin.h>
-//#include <../../../arch/arm/mach-rtk119x/include/macarthur.h>
-//#include <platform.h>
-//#include <../../../arch/arm/mach-rtk119x/include/venus_gpio.h>
+#ifdef CONFIG_ARCH_RTD119X
+#include "mars.h"
+#include "saturn.h"
+#include "platform.h"
 #include <soc/realtek/venus_gpio.h>
+#endif
 
 #include "i2c-rtk-priv.h"
 ////////////////////////////////////////////////////////////////////
@@ -141,20 +147,32 @@ static int phoenix_i2c_gpio_set_dir (VENUS_GPIO_ID gid,  unsigned char out)
 {
 	u32 bit_n = gid % 32;
 
-	/* Fix me */
+#ifdef CONFIG_ARCH_RTD119X
+    if (out)
+        writel(readl(IOMEM(0xfe01b104))|BIT(bit_n), IOMEM(0xfe01b104));
+    else
+        writel(readl(IOMEM(0xfe01b104))&~BIT(bit_n), IOMEM(0xfe01b104));
+#endif
 
 	return 0;
 }
 static int phoenix_i2c_gpio_input (VENUS_GPIO_ID gid)
 {
-	/* Fix me */
+#ifdef CONFIG_ARCH_RTD119X
+    return  ((readl(IOMEM(0xfe01b124))>>(gid%32)) & 0x1);
+#endif
 
 }
 static int phoenix_i2c_gpio_output (VENUS_GPIO_ID gid, unsigned char    val)
 {
 	u32 bit_n = gid % 32;
 
-	/* Fix me */
+#ifdef CONFIG_ARCH_RTD119X
+    if (val)
+        writel(readl(IOMEM(0xfe01b114))|BIT(bit_n), IOMEM(0xfe01b114));
+    else
+        writel(readl(IOMEM(0xfe01b114))&~BIT(bit_n), IOMEM(0xfe01b114));
+#endif
 
 	return 0;
 }
@@ -162,8 +180,12 @@ static int phoenix_i2c_gpio_set_irq_enable (VENUS_GPIO_ID gid,  unsigned char   
 {
 
 	u32 bit_n = gid % 32;
-
-	/* Fix me */
+#ifdef CONFIG_ARCH_RTD119X
+	if (on)
+        writel(readl(IOMEM(0xfe01b134))|BIT(bit_n), IOMEM(0xfe01b134));
+    else
+        writel(readl(IOMEM(0xfe01b134))&~BIT(bit_n), IOMEM(0xfe01b134));
+#endif
 
 	return 0;
 }
@@ -716,11 +738,15 @@ venus_i2c_set_sar(
 int venus_i2c_set_spd(venus_i2c* p_this, int KHz)
 {
     unsigned int scl_time;
-    unsigned int div_h;
-    unsigned int div_l;
+//    unsigned int div_h = 0x89;
+    unsigned int div_h = 127;
+//    unsigned int div_l = 0xA1;
+    unsigned int div_l = 134;
     unsigned long sda_del;
+    unsigned long sda_del_sel;
 
     RTK_DEBUG("[%s] %s  %d \n", __FILE__,__FUNCTION__,__LINE__);
+
 
     if (KHz < 10 || KHz > 800)
     {
@@ -728,7 +754,7 @@ int venus_i2c_set_spd(venus_i2c* p_this, int KHz)
         return -1;
     }
 
-	scl_time = (1000000/KHz)/2; /* the time ns need for SCL high/low */
+	scl_time = (1000000/KHz)/2;		//the time ns need for SCL high/low 
 
 	if(scl_time%37)	
 	{
@@ -738,23 +764,20 @@ int venus_i2c_set_spd(venus_i2c* p_this, int KHz)
 			scl_time -= (scl_time%37);
 	}
 
-	/*
-	 * 27MHz crystal generate one clock 37ns,
-	 * for synopsys design ware ip v1.14a, SCL_LCNT need -1, SCL_HCNT need -8
-	 * 400KHz SCL Low required min 1.3 us
-	 */
-	if(KHz<400)
-	{
-		div_h = (scl_time/37)-8;
-		div_l = (scl_time/37)-1;
-	}
-	else
-	{
-		div_h = 24;
-		div_l = 34;
-	}
-
-	RTK_DEBUG("[I2C%d] KHz = %d, div_h = %d, div_l = %d\n", p_this->id, KHz, div_h, div_l);
+	//27MHz crystal generate one clock 37ns, 
+	//for synopsys design ware ip v1.14a, SCL_LCNT need -1, SCL_HCNT need -8, 
+	div_h = (scl_time/37)-8;
+	div_l = (scl_time/37)-1;
+/*
+    if ((is_darwin_cpu() || is_macarthur_cpu()) && p_this->id > 0)
+    {
+        // the speed of darwin i2c1/2 clock is four times of others (27MHz).
+        // so, the divider should be multiply by 4.
+        div_h <<= 2;
+        div_l <<= 2;
+    }
+*/
+	//printk("[I2C%d] KHz = %d, div_h = %d, div_l = %d\n", p_this->id, KHz, div_h, div_l);
 
     if (div_h >= 0xFFFF || div_h==0 ||
         div_l >= 0xFFFF || div_l==0)
@@ -764,25 +787,29 @@ int venus_i2c_set_spd(venus_i2c* p_this, int KHz)
     }
 
     SET_IC_ENABLE(p_this, 0);
-
-	if(KHz<=100){
-		SET_IC_CON(p_this, (GET_IC_CON(p_this) & (~IC_SPEED)) | SPEED_SS);
-		SET_IC_SS_SCL_HCNT(p_this, div_h);
-		SET_IC_SS_SCL_LCNT(p_this, div_l);
-	}else{
-		SET_IC_CON(p_this, (GET_IC_CON(p_this) & (~IC_SPEED)) | SPEED_FS);
-		SET_IC_FS_SCL_HCNT(p_this, div_h);
-		SET_IC_FS_SCL_LCNT(p_this, div_l);
-
-	}
-
+    SET_IC_CON(p_this, (GET_IC_CON(p_this) & (~IC_SPEED)) | SPEED_SS);
+    SET_IC_SS_SCL_HCNT(p_this, div_h);
+    SET_IC_SS_SCL_LCNT(p_this, div_l);
     p_this->spd  = KHz;
     p_this->tick = 1000 / KHz;
 
-	/* Set SDA delay time */
-	sda_del = GET_IC_SDA_DEL(p_this) & ~I2C_SDA_DEL_MASK;
-	sda_del |= I2C_SDA_DEL_EN(1) | I2C_SDA_DEL_SEL(SDA_DEL_518NS);
-	SET_IC_SDA_DEL(p_this, sda_del);
+    if(1)//TODO : victor add 20140302 (is_saturn_cpu() || is_nike_cpu())                // add sda phase dealy
+    {
+        sda_del = GET_IC_SDA_DEL(p_this) & ~I2C_SDA_DEL_MASK;
+		sda_del_sel = 1;//p_this->tick / 2;	//fix delay 512 ns for improving pmu/hdmi compatibility test by victor 20140911
+
+        if (sda_del_sel)
+            sda_del |= I2C_SDA_DEL_EN(1) | I2C_SDA_DEL_SEL(sda_del_sel);      // fix to delay 1ms
+
+        SET_IC_SDA_DEL(p_this, sda_del);
+    }
+    else if (is_darwin_cpu() || is_macarthur_cpu())
+    {
+//        if (p_this->id > 0)
+//            SET_IC_SDA_DEL(p_this, 0x00008004);
+//        else
+ //           SET_IC_SDA_DEL(p_this, 0x00008001);
+    }
 
     return 0;
 }
@@ -936,7 +963,9 @@ int venus_i2c_probe(venus_i2c* p_this)
     p_this->reg_map    = *(i2c_phy[p_this->id].p_reg_map);
     p_this->n_port     = i2c_phy[p_this->id].n_port;
     p_this->p_port     = (venus_i2c_port *)i2c_phy[p_this->id].p_port;
-//    p_this->current_port = venus_i2c_find_current_port(p_this);
+#ifdef CONFIG_ARCH_RTD119X
+    p_this->current_port = venus_i2c_find_current_port(p_this);
+#endif
 
     //if (p_this->current_port==NULL)
     //{
@@ -995,10 +1024,12 @@ int venus_i2c_phy_init(venus_i2c* p_this)
         JAM_DEBUG("I2C%d Bus Status Check.... OK\n",p_this->id);
 #endif
 */
-//	for (i = 0 ; i < 3 ; i++){
-//        venus_i2c_bus_jam_recover(p_this);
-//        phoenix_i2c_mdelay(10);
-//	}
+#ifdef CONFIG_ARCH_RTD119X
+	for (i = 0 ; i < 3 ; i++){
+        venus_i2c_bus_jam_recover(p_this);
+        phoenix_i2c_mdelay(10);
+	}
+#endif
 
 #ifdef DEV_DEBUG
     venus_i2c_dump(p_this);
@@ -1585,11 +1616,13 @@ int venus_i2c_start_xfer(venus_i2c* p_this)
     udelay(p_this->guard_interval);
 #endif
 
-/*    if (ret==-ECMDSPLIT)
+#ifdef CONFIG_ARCH_RTD119X
+    if (ret==-ECMDSPLIT)
     {
         if (venus_i2c_probe(p_this)<0)
             printk("WARNING, I2C %d no longer exists\n", p_this->id);
-    }*/ //Fix me
+    }
+#endif
 
     LOG_EVENT(EVENT_STOP_XFER);
 
@@ -2552,7 +2585,9 @@ create_venus_i2c_handle(
 
     if (((venus_i2c_flags>>id) & 0x01))
     {
-//        atomic_inc(&venus_i2c_phy_handle[id]->ref_cnt);  // reference count++
+#ifdef CONFIG_ARCH_RTD119X
+        atomic_inc(&venus_i2c_phy_handle[id]->ref_cnt);  // reference count++
+#endif
         return venus_i2c_phy_handle[id];
     }
 

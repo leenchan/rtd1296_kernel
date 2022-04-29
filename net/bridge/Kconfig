@@ -33,24 +33,6 @@ config BRIDGE
 
 	  If unsure, say N.
 
-config RTL_STP
-        bool "Enable RealTek STP"
-        default n
-        depends on BRIDGE
-        depends on RTL_MULTI_LAN_DEV
-
-config RTL_HW_STP
-        bool "Enable RealTek Hardware STP"
-        default n
-        depends on BRIDGE
-        depends on RTL_MULTI_LAN_DEV
-
-config RTK_GUEST_ZONE
-        bool "Enable RealTek Guest Zone"
-        default n
-        depends on BRIDGE
-
-
 config BRIDGE_IGMP_SNOOPING
 	bool "IGMP/MLD snooping"
 	depends on BRIDGE

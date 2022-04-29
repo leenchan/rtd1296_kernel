@@ -1,23 +1,17 @@
-/*
- * Realtek I2C driver
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- */
-
 #ifndef __I2C_VENUS_PRIV_H__
 #define __I2C_VENUS_PRIV_H__
 
 #include <linux/i2c.h>
 #include <linux/spinlock.h>
 #include <linux/wait.h>
-//#include <../../../arch/arm/mach-rtk119x/include/venus_gpio.h>
+#include <asm/atomic.h>
+#ifdef CONFIG_ARCH_RTD129X
 #include <soc/realtek/venus_gpio.h>
 #include <asm/atomic.h>
+#include "platform.h"
+#else
+#include <soc/realtek/venus_gpio.h>
+#endif
 
 //#define DEV_DEBUG
 #define DEV_JAM_DEBUG
@@ -35,7 +29,9 @@
 #define JAM_DEBUG(fmt, ...)
 #endif
 
+#ifdef CONFIG_ARCH_RTD129X
 #define EDID_4BLOCK_SUPPORT//For HDMI TX CTS 7-1
+#endif
 
 ////////////////////////////////////////////////////////////////////
 #define wr_reg(x,y)                     writel(y,(volatile unsigned int*)x)
@@ -68,8 +64,6 @@
 #define GET_IC_DATA_CMD(adp)            rd_reg(adp->reg_map.IC_DATA_CMD)
 #define SET_IC_SS_SCL_HCNT(adp,x)       wr_reg(adp->reg_map.IC_SS_SCL_HCNT, x)
 #define SET_IC_SS_SCL_LCNT(adp,x)       wr_reg(adp->reg_map.IC_SS_SCL_LCNT, x)
-#define SET_IC_FS_SCL_HCNT(adp,x)       wr_reg(adp->reg_map.IC_FS_SCL_HCNT, x)
-#define SET_IC_FS_SCL_LCNT(adp,x)       wr_reg(adp->reg_map.IC_FS_SCL_LCNT, x)
 #define GET_IC_STATUS(adp)              rd_reg(adp->reg_map.IC_STATUS)
 #define SET_IC_INTR_MASK(adp,x)         wr_reg(adp->reg_map.IC_INTR_MASK, x)
 #define GET_IC_INTR_MASK(adp)           rd_reg(adp->reg_map.IC_INTR_MASK)

@@ -119,6 +119,8 @@ struct dma_buf_ops {
  * @attachments: list of dma_buf_attachment that denotes all devices attached.
  * @ops: dma_buf_ops associated with this buffer object.
  * @exp_name: name of the exporter; useful for debugging.
+ * @owner: pointer to exporter module; used for refcounting when exporter is a
+ *         kernel module.
  * @list_node: node for dma_buf accounting and debugging.
  * @priv: exporter specific private data for this buffer object.
  * @resv: reservation object linked to this dma-buf
@@ -133,10 +135,10 @@ struct dma_buf {
 	unsigned vmapping_counter;
 	void *vmap_ptr;
 	const char *exp_name;
+	struct module *owner;
 	struct list_head list_node;
 	void *priv;
 	struct reservation_object *resv;
-
 #ifdef CONFIG_KDS
     /* kds ext*/
     struct kds_resource kds;
@@ -144,7 +146,6 @@ struct dma_buf {
     wait_queue_head_t wq_shared;
     struct kds_callback kds_cb;
 #endif
-
 	/* poll support */
 	wait_queue_head_t poll;
 
@@ -155,7 +156,6 @@ struct dma_buf {
 		unsigned long active;
 	} cb_excl, cb_shared;
 };
-
 #ifdef CONFIG_KDS
 /**
  * get_dma_buf_kds_resource - get a KDS resource for this dma-buf
@@ -172,7 +172,6 @@ get_dma_buf_kds_resource(struct dma_buf *dmabuf)
     return &dmabuf->kds;
 }
 #endif
-
 /**
  * struct dma_buf_attachment - holds device-buffer attachment data
  * @dmabuf: buffer for this attachment.
@@ -193,7 +192,8 @@ struct dma_buf_attachment {
 
 /**
  * struct dma_buf_export_info - holds information needed to export a dma_buf
- * @exp_name:	name of the exporting module - useful for debugging.
+ * @exp_name:	name of the exporter - useful for debugging.
+ * @owner:	pointer to exporter module - used for refcounting kernel module
  * @ops:	Attach allocator-defined dma buf ops to the new buffer
  * @size:	Size of the buffer
  * @flags:	mode flags for the file
@@ -205,6 +205,7 @@ struct dma_buf_attachment {
  */
 struct dma_buf_export_info {
 	const char *exp_name;
+	struct module *owner;
 	const struct dma_buf_ops *ops;
 	size_t size;
 	int flags;
@@ -216,7 +217,8 @@ struct dma_buf_export_info {
  * helper macro for exporters; zeros and fills in most common values
  */
 #define DEFINE_DMA_BUF_EXPORT_INFO(a)	\
-	struct dma_buf_export_info a = { .exp_name = KBUILD_MODNAME }
+	struct dma_buf_export_info a = { .exp_name = KBUILD_MODNAME, \
+					 .owner = THIS_MODULE }
 
 /**
  * get_dma_buf - convenience wrapper for get_file.

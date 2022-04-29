@@ -1,13 +1,3 @@
-/*
- * rtd129x_barrier.c - bus barrier
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- */
-
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/of_address.h>
@@ -32,6 +22,6 @@ void rtk_bus_sync(void)
 	if(rtk_rbus_barrier_flag == 1){
 		writel_relaxed(0x00001234, rbus_addr + RBUS_SYNC);
 	}
-	dmb(ishst);
+	dsb(st);
 }
 EXPORT_SYMBOL(rtk_bus_sync);

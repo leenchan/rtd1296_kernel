@@ -1,13 +1,3 @@
-/*
- * rtd129x_lockapi.c - Realtek lock API
- *
- * Copyright (c) 2017 Realtek Semiconductor Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- */
-
 #define pr_fmt(fmt) "lockapi: " fmt
 
 #include <linux/kernel.h>
@@ -34,14 +24,11 @@
 #include <soc/realtek/rtd129x_lockapi.h>
 #include <soc/realtek/rtd129x_cpu.h>
 
-static long locakapi_lcounter;
+static long locakapi_lcounter; 
 static int locakapi_counter;
 static int iemmc_flag;
-static int ichip_id;
 static int ichip_revision;
 static int imagic_num;
-static unsigned int debug_nop_count;
-
 struct semaphore lockapi_sema;
 spinlock_t lockapi_slock;
 //static int lockapi_flags;
@@ -61,10 +48,6 @@ static char caller_name3emmc[MAX_LOG_MSG_LEN];
 static char caller_name1dwc3[MAX_LOG_MSG_LEN];
 static char caller_name2dwc3[MAX_LOG_MSG_LEN];
 static char caller_name3dwc3[MAX_LOG_MSG_LEN];
-
-static char caller_name1debug[MAX_LOG_MSG_LEN];
-static char caller_name2debug[MAX_LOG_MSG_LEN];
-static char caller_name3debug[MAX_LOG_MSG_LEN];
 
 /*
  *
@@ -159,9 +142,6 @@ int _rtk_lockapi_trylock( unsigned long * pflags, char * log_msg )
 	int ilen;
 	unsigned int nop_loop;
 
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
-
 	if( imagic_num != LOCKAPI_MAGICNUM )
 		return -LOCKAPI_ERR_DRV_NOT_READY;
 
@@ -192,7 +172,8 @@ int _rtk_lockapi_trylock( unsigned long * pflags, char * log_msg )
 	return LOCKAPI_NO_ERR;
 #endif
 }
-EXPORT_SYMBOL_GPL(_rtk_lockapi_trylock);
+//EXPORT_SYMBOL_GPL(_rtk_lockapi_trylock);
+EXPORT_SYMBOL(_rtk_lockapi_trylock);
 
 /*
  * Input 1: please use __FUNCTION__ or others readable log mesage
@@ -207,9 +188,6 @@ int _rtk_lockapi_lock( unsigned long * pflags, char * log_msg )
 	int iret;
 	int ilen;
 	unsigned int nop_loop;
-
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
 
 	if( imagic_num != LOCKAPI_MAGICNUM )
 		return -LOCKAPI_ERR_DRV_NOT_READY;
@@ -237,7 +215,8 @@ int _rtk_lockapi_lock( unsigned long * pflags, char * log_msg )
 	return LOCKAPI_NO_ERR;
 #endif
 }
-EXPORT_SYMBOL_GPL(_rtk_lockapi_lock);
+//EXPORT_SYMBOL_GPL(_rtk_lockapi_lock);
+EXPORT_SYMBOL(_rtk_lockapi_lock);
 
 /*
  * Input 1: please use __FUNCTION__ or others readable log mesage
@@ -251,12 +230,9 @@ int _rtk_lockapi_unlock( unsigned long flags, char * log_msg )
 	int ilen;
 	unsigned int nop_loop;
 
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
-
 	if( imagic_num != LOCKAPI_MAGICNUM )
 		return -LOCKAPI_ERR_DRV_NOT_READY;
-
+	
 	if( log_msg ) {
 		ilen = strlen(log_msg);
 		memset( caller_name3, 0, MAX_LOG_MSG_LEN );
@@ -288,7 +264,8 @@ int _rtk_lockapi_unlock( unsigned long flags, char * log_msg )
 	return LOCKAPI_NO_ERR;
 #endif
 }
-EXPORT_SYMBOL_GPL(_rtk_lockapi_unlock);
+//EXPORT_SYMBOL_GPL(_rtk_lockapi_unlock);
+EXPORT_SYMBOL(_rtk_lockapi_unlock);
 
 /*
  *
@@ -301,9 +278,6 @@ int _rtk_lockapi_trylock2( unsigned long * pflags, char * log_msg )
 	int iret;
 	int ilen;
 	unsigned int nop_loop;
-
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
 
 	if( imagic_num != LOCKAPI_MAGICNUM )
 		return -LOCKAPI_ERR_DRV_NOT_READY;
@@ -335,7 +309,8 @@ int _rtk_lockapi_trylock2( unsigned long * pflags, char * log_msg )
 	return LOCKAPI_NO_ERR;
 #endif
 }
-EXPORT_SYMBOL_GPL(_rtk_lockapi_trylock2);
+//EXPORT_SYMBOL_GPL(_rtk_lockapi_trylock2);
+EXPORT_SYMBOL(_rtk_lockapi_trylock2);
 
 /*
  * Input 1: please use __FUNCTION__ or others readable log mesage
@@ -350,9 +325,6 @@ int _rtk_lockapi_lock2( unsigned long * pflags, char * log_msg )
 	int iret;
 	int ilen;
 	unsigned int nop_loop;
-
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
 
 	if( imagic_num != LOCKAPI_MAGICNUM )
 		return -LOCKAPI_ERR_DRV_NOT_READY;
@@ -381,7 +353,8 @@ int _rtk_lockapi_lock2( unsigned long * pflags, char * log_msg )
 	return LOCKAPI_NO_ERR;
 #endif
 }
-EXPORT_SYMBOL_GPL(_rtk_lockapi_lock2);
+//EXPORT_SYMBOL_GPL(_rtk_lockapi_lock2);
+EXPORT_SYMBOL(_rtk_lockapi_lock2);
 
 /*
  * Input 1: please use __FUNCTION__ or others readable log mesage
@@ -395,12 +368,9 @@ int _rtk_lockapi_unlock2( unsigned long flags, char * log_msg )
 	int ilen;
 	unsigned int nop_loop;
 
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
-
 	if( imagic_num != LOCKAPI_MAGICNUM )
 		return -LOCKAPI_ERR_DRV_NOT_READY;
-
+	
 	if( log_msg ) {
 		ilen = strlen(log_msg);
 		memset( caller_name3emmc, 0, MAX_LOG_MSG_LEN );
@@ -433,7 +403,8 @@ int _rtk_lockapi_unlock2( unsigned long flags, char * log_msg )
 	return LOCKAPI_NO_ERR;
 #endif
 }
-EXPORT_SYMBOL_GPL(_rtk_lockapi_unlock2);
+//EXPORT_SYMBOL_GPL(_rtk_lockapi_unlock2);
+EXPORT_SYMBOL(_rtk_lockapi_unlock2);
 
 /*
  *
@@ -446,9 +417,6 @@ int _rtk_lockapi_trylock3( unsigned long * pflags, char * log_msg, int log_line 
 	int iret;
 	int ilen;
 	unsigned int nop_loop;
-
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
 
 	if( imagic_num != LOCKAPI_MAGICNUM )
 		return -LOCKAPI_ERR_DRV_NOT_READY;
@@ -480,7 +448,8 @@ int _rtk_lockapi_trylock3( unsigned long * pflags, char * log_msg, int log_line 
 	return LOCKAPI_NO_ERR;
 #endif
 }
-EXPORT_SYMBOL_GPL(_rtk_lockapi_trylock3);
+//EXPORT_SYMBOL_GPL(_rtk_lockapi_trylock3);
+EXPORT_SYMBOL(_rtk_lockapi_trylock3);
 
 /*
  * Input 1: please use __FUNCTION__ or others readable log mesage
@@ -495,9 +464,6 @@ int _rtk_lockapi_lock3( unsigned long * pflags, char * log_msg, int log_line )
 	int iret;
 	int ilen;
 	unsigned int nop_loop;
-
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
 
 	if( imagic_num != LOCKAPI_MAGICNUM )
 		return -LOCKAPI_ERR_DRV_NOT_READY;
@@ -525,7 +491,8 @@ int _rtk_lockapi_lock3( unsigned long * pflags, char * log_msg, int log_line )
 	return LOCKAPI_NO_ERR;
 #endif
 }
-EXPORT_SYMBOL_GPL(_rtk_lockapi_lock3);
+//EXPORT_SYMBOL_GPL(_rtk_lockapi_lock3);
+EXPORT_SYMBOL(_rtk_lockapi_lock3);
 
 /*
  * Input 1: please use __FUNCTION__ or others readable log mesage
@@ -539,12 +506,9 @@ int _rtk_lockapi_unlock3( unsigned long flags, char * log_msg, int log_line )
 	int ilen;
 	unsigned int nop_loop;
 
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
-
 	if( imagic_num != LOCKAPI_MAGICNUM )
 		return -LOCKAPI_ERR_DRV_NOT_READY;
-
+	
 	if( log_msg ) {
 		ilen = strlen(log_msg);
 		memset( caller_name3dwc3, 0, MAX_LOG_MSG_LEN );
@@ -576,7 +540,8 @@ int _rtk_lockapi_unlock3( unsigned long flags, char * log_msg, int log_line )
 	return LOCKAPI_NO_ERR;
 #endif
 }
-EXPORT_SYMBOL_GPL(_rtk_lockapi_unlock3);
+//EXPORT_SYMBOL_GPL(_rtk_lockapi_unlock3);
+EXPORT_SYMBOL(_rtk_lockapi_unlock3);
 
 /*
  *
@@ -585,7 +550,6 @@ EXPORT_SYMBOL_GPL(_rtk_lockapi_unlock3);
  */
 static int rtk_lockapi_init(void)
 {
-	ichip_id = 0;//get_rtd129x_cpu_id();
 	ichip_revision = get_rtd129x_cpu_revision();
 	locakapi_counter = 0;
 	locakapi_lcounter = 0;
@@ -599,9 +563,6 @@ static int rtk_lockapi_init(void)
 	memset( caller_name1dwc3, 0, MAX_LOG_MSG_LEN );
 	memset( caller_name2dwc3, 0, MAX_LOG_MSG_LEN );
 	memset( caller_name3dwc3, 0, MAX_LOG_MSG_LEN );
-	memset( caller_name1debug, 0, MAX_LOG_MSG_LEN );
-	memset( caller_name2debug, 0, MAX_LOG_MSG_LEN );
-	memset( caller_name3debug, 0, MAX_LOG_MSG_LEN );
 	strcpy( caller_name1, "clear" );
 	strcpy( caller_name2, "clear" );
 	strcpy( caller_name3, "clear" );
@@ -611,21 +572,9 @@ static int rtk_lockapi_init(void)
 	strcpy( caller_name1dwc3, "clear" );
 	strcpy( caller_name2dwc3, "clear" );
 	strcpy( caller_name3dwc3, "clear" );
-	strcpy( caller_name1debug, "clear" );
-	strcpy( caller_name2debug, "clear" );
-	strcpy( caller_name3debug, "clear" );
 	imagic_num = LOCKAPI_MAGICNUM;
 
-	printk(KERN_ERR "****** %s %d, chip: id=0x%08x, revision=0x%08x\n", __FUNCTION__, __LINE__, ichip_id, ichip_revision);
-
-	// ID: 0x9801a200
-	// Rev.: 0x9801a204
-	if( ichip_revision >= (int)RTD129x_CHIP_REVISION_B00 )
-	{
-		imagic_num = LOCKAPI_BY_PASS;
-		printk(KERN_ERR "****** %s %d, bypass mode\n", __FUNCTION__, __LINE__);
-	}
-
+	printk(KERN_ERR "****** %s %d, chip_revision = 0x%08x\n", __FUNCTION__, __LINE__, ichip_revision);
 
 	sema_init( &lockapi_sema, 1 );
 	spin_lock_init( &lockapi_slock );
@@ -634,149 +583,6 @@ static int rtk_lockapi_init(void)
 }
 arch_initcall(rtk_lockapi_init);
 
-int debug_lockapi_lock( unsigned long * pflags, char * log_msg )
-{
-#ifdef LOCKAPI_EN
-	int iret;
-	int ilen;
-	unsigned int looptest;
-
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
-
-	if( imagic_num != LOCKAPI_MAGICNUM )
-		return -LOCKAPI_ERR_DRV_NOT_READY;
-
-	iret = LOCKAPI_NO_ERR;//lockapi_lock(pflags);
-
-	locakapi_counter++;
-	locakapi_lcounter++;
-
-	looptest = debug_nop_count;
-	while(looptest--) {
-		asm volatile("nop" : : : );
-	}
-
-	if( log_msg ) {
-		ilen = strlen(log_msg);
-		memset( caller_name2debug, 0, MAX_LOG_MSG_LEN );
-		if( ilen < MAX_LOG_MSG_LEN )
-			strcpy( caller_name2debug, log_msg );
-		else
-			strcpy( caller_name2debug, "log name over 128" );
-	}
-	else {
-		strcpy( caller_name2debug, "no log msg" );
-	}
-	return iret;
-#else
-	return LOCKAPI_NO_ERR;
-#endif
-}
-
-/*
- * Input 1: please use __FUNCTION__ or others readable log mesage
- *
- *
- */
-int debug_lockapi_unlock( unsigned long flags, char * log_msg )
-{
-#ifdef LOCKAPI_EN
-	int iret;
-	int ilen;
-	unsigned int looptest;
-
-	if( imagic_num == LOCKAPI_BY_PASS )
-		return LOCKAPI_NO_ERR;
-
-	if( imagic_num != LOCKAPI_MAGICNUM )
-		return -LOCKAPI_ERR_DRV_NOT_READY;
-
-	if( log_msg ) {
-		ilen = strlen(log_msg);
-		memset( caller_name3debug, 0, MAX_LOG_MSG_LEN );
-		if( ilen < MAX_LOG_MSG_LEN )
-			strcpy( caller_name3debug, log_msg );
-		else
-			strcpy( caller_name3debug, "log name over 128" );
-	}
-	else {
-		strcpy( caller_name3debug, "no log msg" );
-	}
-
-	if( locakapi_counter ) {
-		locakapi_counter--;
-	}
-	else {
-		printk(KERN_ERR "locakapi:counter %d is zero, unlock twice?\n", locakapi_counter);
-		printk(KERN_ERR "locakapi:log %s, %s, %s\n", caller_name1debug, caller_name2debug, caller_name3debug);
-		printk(KERN_ERR "locakapi:log %s, %s, %s\n", caller_name1emmc, caller_name2emmc, caller_name3emmc);
-		printk(KERN_ERR "locakapi:log %s, %s, %s\n", caller_name1dwc3, caller_name2dwc3, caller_name3dwc3);
-	}
-
-	looptest = debug_nop_count;
-	while(looptest--) {
-		asm volatile("nop" : : : );
-	}
-
-	iret = LOCKAPI_NO_ERR;//lockapi_unlock(flags);
-
-	return iret;
-#else
-	return LOCKAPI_NO_ERR;
-#endif
-}
-
-
-/*
- *
- *
- *
- */
-void debug_lockapi_entry( int mode, unsigned int refloop, unsigned int nop_loop )
-{
-	unsigned long start_jiffies;
-	unsigned long end_jiffies;
-	unsigned long flags;
-	unsigned int looptest;
-
-	debug_nop_count = nop_loop;
-
-	start_jiffies = end_jiffies = 0;
-
-	if( mode == 0 ) {
-		looptest = refloop;
-		printk(KERN_ERR "start\n");
-		start_jiffies = jiffies;
-		while( looptest-- ) {
-			debug_lockapi_lock(&flags,"_");
-		}
-		end_jiffies = jiffies;
-		printk(KERN_ERR "end, %lld, %lld in loop %d, nop loop %lld\n", start_jiffies, end_jiffies, refloop, debug_nop_count);
-	}
-	if( mode == 1 ) {
-		looptest = refloop;
-		locakapi_counter = looptest<<1;
-		printk(KERN_ERR "start\n");
-		start_jiffies = jiffies;
-		while( looptest-- ) {
-			debug_lockapi_unlock(flags,"_");
-		}
-		end_jiffies = jiffies;
-		printk(KERN_ERR "end, %lld, %lld in loop %d, nop loop %lld\n", start_jiffies, end_jiffies, refloop, debug_nop_count);
-	}
-	if( mode == 2 ) {
-		looptest = refloop;
-		printk(KERN_ERR "start\n");
-		start_jiffies = jiffies;
-		while( looptest-- ) {
-			debug_lockapi_lock(&flags,"_");
-			debug_lockapi_unlock(flags,"_");
-		}
-		end_jiffies = jiffies;
-		printk(KERN_ERR "end, %lld, %lld in loop %d, nop loop %lld\n", start_jiffies, end_jiffies, refloop, debug_nop_count);
-	}
-}
 /*
  *
  *
@@ -785,12 +591,10 @@ void debug_lockapi_entry( int mode, unsigned int refloop, unsigned int nop_loop 
 void lockapi_show_status( void )
 {
 	printk(KERN_ERR "\n--------------------------------------------------------------------------\n");
-	printk(KERN_ERR "****** chip id 0x%08x\n", ichip_id);
-	printk(KERN_ERR "****** chip rev. 0x%08x\n", ichip_revision);
-	printk(KERN_ERR "****** magic_num 0x%08x(%s)\n", imagic_num, (imagic_num == LOCKAPI_BY_PASS) ? "bypass" : "--" );
 	printk(KERN_ERR "****** iemmc_flag %d\n", iemmc_flag);
 	printk(KERN_ERR "****** locakapi_counter %d\n", locakapi_counter);
 	printk(KERN_ERR "****** locakapi_lcounter %ld\n", locakapi_lcounter);
+	printk(KERN_ERR "****** nop delay [%d,%d]\n", LOCK_NOP_DELAY_CNT, UNLOCK_NOP_DELAY_CNT);
 	printk(KERN_ERR "****** caller_name %s, %s, %s\n", caller_name1, caller_name2, caller_name3);
 	printk(KERN_ERR "****** caller_name %s, %s, %s\n", caller_name1emmc, caller_name2emmc, caller_name3emmc);
 	printk(KERN_ERR "****** caller_name %s, %s, %s\n", caller_name1dwc3, caller_name2dwc3, caller_name3dwc3);
@@ -810,7 +614,8 @@ void lockapi_show_status( void )
 	printk(KERN_ERR "****** Lock api is not enabled\n");
 #endif
 }
-EXPORT_SYMBOL_GPL(lockapi_show_status);
+//EXPORT_SYMBOL_GPL(lockapi_show_status);
+EXPORT_SYMBOL(lockapi_show_status);
 
 /*
  * any read request will free coherent memory, eg.
@@ -834,16 +639,9 @@ myproc_lockapi_write(struct file *file, const char __user *buf, size_t count, lo
 {
 	char input[128] = {0};
 	char * ptr_input;
-	int str_len;
-	int reminder_str_len;
 	int ret_val;
-	unsigned int input_nop_count;
-	unsigned int test_loop;
-	int test_mode;
 
 	ptr_input = input;
-	str_len = count-1;
-	reminder_str_len = str_len;
 
 	if( ( 1 < count ) && ( count < 128 ) ) {
 		ret_val = copy_from_user(input, buf, (count-1));
@@ -852,60 +650,11 @@ myproc_lockapi_write(struct file *file, const char __user *buf, size_t count, lo
 		printk(KERN_ERR "****** %s %03d, invalid count(%d)\n", __FUNCTION__, __LINE__, (int)count);
 		return count;
 	}
-	printk(KERN_ERR "****** %s %03d, input = %s\n", __FUNCTION__, __LINE__, input);
-	printk(KERN_ERR "****** %s %03d -----------------------------------------\n", __FUNCTION__, __LINE__);
-
-	test_mode = -1;
-	input_nop_count = 0;
-	test_loop = 0;
-
-	if( strncmp( ptr_input, "lock", 4 ) == 0 ) {
-		if( str_len > 5 ) {
-			ptr_input += 5;
-			reminder_str_len -= 5;
-		}
-		test_mode = 0;
-	}
-	else if( strncmp( ptr_input, "unlock", 6 ) == 0 ) {
-		if( str_len > 7 ) {
-			ptr_input += 7;
-			reminder_str_len -= 7;
-		}
-		test_mode = 1;
-	}
-	else if( strncmp( ptr_input, "lockunlock", 10 ) == 0 ) {
-		if( str_len > 11 ) {
-			ptr_input += 11;
-			reminder_str_len -= 11;
-		}
-		test_mode = 2;
+	if( strncmp( ptr_input, "debug1", 6 ) == 0 ) {
 	}
 
-	if( reminder_str_len ) {
-		if( strncmp( ptr_input, "A", 1 ) == 0 ) {
-			test_loop = 10000000;
-			ptr_input++;
-			reminder_str_len--;
-		}
-		else if( strncmp( ptr_input, "B", 1 ) == 0 ) {
-			test_loop = 20000000;
-			ptr_input++;
-			reminder_str_len--;
-		}
-		else if( strncmp( ptr_input, "C", 1 ) == 0 ) {
-			test_loop = 30000000;
-			ptr_input++;
-			reminder_str_len--;
-		}
+	if( strncmp( ptr_input, "debug2", 6 ) == 0 ) {
 	}
-
-	if( reminder_str_len ) {
-		input_nop_count = simple_strtol(ptr_input, ptr_input+reminder_str_len, 10);
-		input_nop_count = input_nop_count * 10;
-	}
-	printk(KERN_ERR "****** %s %03d, mode %d, test_loop=%lld, nop count %d\n", __FUNCTION__, __LINE__, test_mode, test_loop, input_nop_count);
-
-	debug_lockapi_entry(test_mode, test_loop, input_nop_count);
 
 	return count;
 }
@@ -946,6 +695,6 @@ static void __exit proc_lockapi_exit(void)
 module_exit(proc_lockapi_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("jinn <jinn.cheng@reaktek.com>");
+MODULE_AUTHOR("jinn <jinn.cheng@reaktej.com>");
 MODULE_DESCRIPTION("kernel module to help the debug of lockapi");
 MODULE_ALIAS("PROC LOCKAPI");

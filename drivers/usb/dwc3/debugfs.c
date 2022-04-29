@@ -625,12 +625,7 @@ int dwc3_debugfs_init(struct dwc3 *dwc)
 	struct dentry		*file;
 	int			ret;
 
-#if CONFIG_USB_PATCH_ON_RTK
-	/* move debugfs to /sys/kernel/debug/usb/ */
-	root = debugfs_create_dir(dev_name(dwc->dev), usb_debug_root);
-#else
 	root = debugfs_create_dir(dev_name(dwc->dev), NULL);
-#endif
 	if (!root) {
 		ret = -ENOMEM;
 		goto err0;

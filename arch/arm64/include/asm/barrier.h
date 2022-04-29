@@ -20,9 +20,10 @@
 
 #ifndef __ASSEMBLY__
 
-#ifdef	CONFIG_RTK_RBUS_BARRIER	//Realtek RTD1295 R-bus barrier, jamestai20151211
+#ifdef  CONFIG_RTK_RBUS_BARRIER //Realtek RTD1295 R-bus barrier, jamestai20151211
 extern void rtk_bus_sync(void);
 #endif
+
 
 #define sev()		asm volatile("sev" : : : "memory")
 #define wfe()		asm volatile("wfe" : : : "memory")
@@ -34,13 +35,11 @@ extern void rtk_bus_sync(void);
 
 #define mb()		dsb(sy)
 #define rmb()		dsb(ld)
-
-#ifdef	CONFIG_RTK_RBUS_BARRIER	//Realtek RTD1295 R-bus barrier, jamestai20151211
-#define wmb()		do { dmb(ishst); rtk_bus_sync(); } while (0)
+#ifdef  CONFIG_RTK_RBUS_BARRIER //Realtek RTD1295 R-bus barrier, jamestai20151211
+#define wmb()		do { dsb(st); rtk_bus_sync(); } while (0)
 #else
 #define wmb()		dsb(st)
 #endif
-
 
 #define dma_rmb()	dmb(oshld)
 #define dma_wmb()	dmb(oshst)
@@ -74,33 +73,37 @@ do {									\
 
 #define smp_load_acquire(p)						\
 ({									\
-	typeof(*p) ___p1;						\
+	union { typeof(*p) __val; char __c[1]; } __u;			\
 	compiletime_assert_atomic_type(*p);				\
 	switch (sizeof(*p)) {						\
 	case 1:								\
 		asm volatile ("ldarb %w0, %1"				\
-			: "=r" (___p1) : "Q" (*p) : "memory");		\
+			: "=r" (*(__u8 *)__u.__c)			\
+			: "Q" (*p) : "memory");				\
 		break;							\
 	case 2:								\
 		asm volatile ("ldarh %w0, %1"				\
-			: "=r" (___p1) : "Q" (*p) : "memory");		\
+			: "=r" (*(__u16 *)__u.__c)			\
+			: "Q" (*p) : "memory");				\
 		break;							\
 	case 4:								\
 		asm volatile ("ldar %w0, %1"				\
-			: "=r" (___p1) : "Q" (*p) : "memory");		\
+			: "=r" (*(__u32 *)__u.__c)			\
+			: "Q" (*p) : "memory");				\
 		break;							\
 	case 8:								\
 		asm volatile ("ldar %0, %1"				\
-			: "=r" (___p1) : "Q" (*p) : "memory");		\
+			: "=r" (*(__u64 *)__u.__c)			\
+			: "Q" (*p) : "memory");				\
 		break;							\
 	}								\
-	___p1;								\
+	__u.__val;							\
 })
 
 #define read_barrier_depends()		do { } while(0)
 #define smp_read_barrier_depends()	do { } while(0)
 
-#define set_mb(var, value)	do { var = value; smp_mb(); } while (0)
+#define smp_store_mb(var, value)	do { WRITE_ONCE(var, value); smp_mb(); } while (0)
 #define nop()		asm volatile("nop");
 
 #define smp_mb__before_atomic()	smp_mb()

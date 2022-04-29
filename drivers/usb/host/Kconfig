@@ -17,7 +17,6 @@ config USB_C67X00_HCD
 
 config USB_XHCI_HCD
 	tristate "xHCI HCD (USB 3.0) support"
-	depends on USB_ARCH_HAS_XHCI
 	---help---
 	  The eXtensible Host Controller Interface (xHCI) is standard for USB 3.0
 	  "SuperSpeed" host controller hardware.
@@ -33,7 +32,14 @@ config USB_XHCI_PCI
        default y
 
 config USB_XHCI_PLATFORM
-	tristate
+	tristate "Generic xHCI driver for a platform device"
+	---help---
+	  Adds an xHCI host driver for a generic platform device, which
+	  provides a memory space and an irq.
+	  It is also a prerequisite for platform specific drivers that
+	  implement some extra quirks.
+
+	  If unsure, say N.
 
 config USB_XHCI_MVEBU
 	tristate "xHCI support for Marvell Armada 375/38x"
@@ -51,26 +57,10 @@ config USB_XHCI_RCAR
 	  Say 'Y' to enable the support for the xHCI host controller
 	  found in Renesas R-Car ARM SoCs.
 
-config USB_XHCI_HCD_DEBUGGING
-	bool "Debugging for the xHCI host controller"
-	---help---
-	  Say 'Y' to turn on debugging for the xHCI host controller driver.
-	  This will spew debugging output, even in interrupt context.
-	  This should only be used for debugging xHCI driver bugs.
-
-	  If unsure, say N.
-
-config USB_RTK_HCD_TEST_MODE
-       bool "RTK Host CTS test mode"
-       default n
-       help
-         Enable RTK USB Host CTS testing mode.
-
 endif # USB_XHCI_HCD
 
 config USB_EHCI_HCD
 	tristate "EHCI HCD (USB 2.0) support"
-	depends on USB_ARCH_HAS_EHCI
 	---help---
 	  The Enhanced Host Controller Interface (EHCI) is standard for USB 2.0
 	  "high speed" (480 Mbit/sec, 60 Mbyte/sec) host controller hardware.
@@ -154,7 +144,7 @@ config XPS_USB_HCD_XILINX
 		devices only.
 
 config USB_EHCI_FSL
-	bool "Support for Freescale PPC on-chip EHCI USB controller"
+	tristate "Support for Freescale PPC on-chip EHCI USB controller"
 	depends on FSL_SOC
 	select USB_EHCI_ROOT_HUB_TT
 	select USB_FSL_MPH_DR_OF if OF
@@ -163,7 +153,7 @@ config USB_EHCI_FSL
 
 config USB_EHCI_RTK
 	tristate "Support for RTK on-chip EHCI USB controller"
-	depends on USB_EHCI_HCD && (ARCH_RTK119X || ARCH_RTD129x)
+	depends on (ARCH_RTD129X || ARCH_RTD119X)
 	---help---
 	  The Realtek chips are dual-role host/peripheral USB controllers.
 
@@ -321,7 +311,7 @@ config USB_OCTEON_EHCI
 	bool "Octeon on-chip EHCI support (DEPRECATED)"
 	depends on CAVIUM_OCTEON_SOC
 	default n
-	select USB_EHCI_BIG_ENDIAN_MMIO
+	select USB_EHCI_BIG_ENDIAN_MMIO if CPU_BIG_ENDIAN
 	select USB_EHCI_HCD_PLATFORM
 	help
 	  This option is deprecated now and the driver was removed, use
@@ -367,16 +357,6 @@ config USB_ISP1362_HCD
 	  To compile this driver as a module, choose M here: the
 	  module will be called isp1362-hcd.
 
-config USB_FUSBH200_HCD
-	tristate "FUSBH200 HCD support"
-	depends on USB
-	---help---
-	Faraday FUSBH200 is designed to meet USB2.0 EHCI specification
-	with minor modification.
-
-	To compile this driver as a module, choose M here: the
-	module will be called fusbh200-hcd.
-
 config USB_FOTG210_HCD
 	tristate "FOTG210 HCD support"
 	depends on USB
@@ -418,12 +398,13 @@ if USB_OHCI_HCD
 
 config USB_OHCI_RTK
 	bool "Support for RTK on-chip OHCI USB controller"
-	depends on USB_OHCI_HCD && (ARCH_RTK119X || ARCH_RTD129x)
+	depends on USB_OHCI_HCD && (ARCH_RTD119X || ARCH_RTD129X)
 	---help---
 	  The Realtek chips are dual-role host/peripheral USB controllers.
 
 	  Enable this option to support this chip in host controller mode.
 	  If unsure, say N.
+
 
 config USB_OHCI_HCD_OMAP1
 	tristate "OHCI support for OMAP1/2 chips"
@@ -476,10 +457,10 @@ config USB_OHCI_HCD_PXA27X
 	  PXA27x/PXA3xx chips.
 
 config USB_OHCI_HCD_AT91
-        tristate "Support for Atmel on-chip OHCI USB controller"
-        depends on USB_OHCI_HCD && ARCH_AT91
-        default y
-        ---help---
+	tristate "Support for Atmel on-chip OHCI USB controller"
+	depends on USB_OHCI_HCD && ARCH_AT91 && OF
+	default y
+	---help---
           Enables support for the on-chip OHCI controller on
           Atmel chips.
 
@@ -603,7 +584,7 @@ config USB_OCTEON_OHCI
 	bool "Octeon on-chip OHCI support (DEPRECATED)"
 	depends on CAVIUM_OCTEON_SOC
 	default USB_OCTEON_EHCI
-	select USB_OHCI_BIG_ENDIAN_MMIO
+	select USB_OHCI_BIG_ENDIAN_MMIO if CPU_BIG_ENDIAN
 	select USB_OHCI_LITTLE_ENDIAN
 	select USB_OHCI_HCD_PLATFORM
 	help

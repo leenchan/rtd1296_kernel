@@ -558,7 +558,7 @@ out:
 #endif
 
 #if 0
-static void *sdcardfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+static const char *sdcardfs_follow_link(struct dentry *dentry, void **cookie)
 {
 	char *buf;
 	int len = PAGE_SIZE, err;
@@ -568,7 +568,7 @@ static void *sdcardfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 	buf = kmalloc(len, GFP_KERNEL);
 	if (!buf) {
 		buf = ERR_PTR(-ENOMEM);
-		goto out;
+		return buf;
 	}
 
 	/* read the symlink, and then we will follow it */
@@ -582,9 +582,7 @@ static void *sdcardfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 	} else {
 		buf[err] = '\0';
 	}
-out:
-	nd_set_link(nd, buf);
-	return NULL;
+	return *cookie = buf;
 }
 #endif
 
