@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2017 Realtek Semiconductor Corporation.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ */
+
 #include <asm/rtl865x/regdef.h>
 /* CP3 Performance Counter Event list */
 #define INST_FEATCH                (0x01)
@@ -81,7 +90,7 @@ clear_CP3_counter:
 
 /* set counter controls:  0   	 1 	2 	3
 ** counter0 cycles	  (0x08) (0x08) (0x08) (0x08)
-** counter1 ifetches 	  (0x01) (0x01) (0x01)	
+** counter1 ifetches 	  (0x01) (0x01) (0x01)
 ** counter1 dmiss busy			       (0x0b)
 ** counter2 ld+stores 	  (0x06)	       (0x06)
 ** counter2 icache misses	 (0x02) (0x02)
@@ -178,4 +187,4 @@ save_counter:
 	jr ra
 	nop
 	.end save_counter
-	
+

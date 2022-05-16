@@ -139,18 +139,6 @@ extern int ptrace_get_watch_regs(struct task_struct *child,
 	struct pt_watch_regs __user *addr);
 extern int ptrace_set_watch_regs(struct task_struct *child,
 	struct pt_watch_regs __user *addr);
-#ifdef CONFIG_CPU_RLX
-/* Set wmpu */
-#define WMPU_DW 0x1
-#define WMPU_DR 0x2
-#define WMPU_IX 0x4
-#define MODE_MP 0x1
-#define MODE_WP 0x0
-
-extern int ptrace_wmpu_set(unsigned long, unsigned long,
-                           unsigned char, unsigned char);
-extern void ptrace_wmpu_clear(int);
-#endif
 
 /*
  * Does the process account for user or for system time?
@@ -164,7 +152,7 @@ static inline int is_syscall_success(struct pt_regs *regs)
 
 static inline long regs_return_value(struct pt_regs *regs)
 {
-	if (is_syscall_success(regs))
+	if (is_syscall_success(regs) || !user_mode(regs))
 		return regs->regs[2];
 	else
 		return -regs->regs[2];

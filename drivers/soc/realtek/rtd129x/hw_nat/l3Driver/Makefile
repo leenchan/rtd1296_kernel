@@ -17,7 +17,7 @@ ifdef CONFIG_RTL865X_KERNEL_MIPS16_LAYERDRIVER
 	CFLAGS_rtl865x_route.o		= -mips16
 	CFLAGS_rtl865x_multicast.o	= -mips16
 endif
-	
+
 	obj-$(CONFIG_RTL_HARDWARE_MULTICAST) := rtl865x_multicast.o
 
 ifdef CONFIG_RTL_HARDWARE_IPV6_SUPPORT
@@ -25,7 +25,7 @@ ifdef CONFIG_RTL_HARDWARE_IPV6_SUPPORT
 endif
 
 ifdef CONFIG_RTL_LAYERED_DRIVER_L3
-		obj-y += rtl865x_arp.o rtl865x_ip.o rtl865x_ppp.o rtl865x_nexthop.o rtl865x_route.o 
+		obj-y += rtl865x_arp.o rtl865x_ip.o rtl865x_ppp.o rtl865x_nexthop.o rtl865x_route.o
 endif
 ifdef CONFIG_RTL_MULTIPLE_WAN
 		obj-y += rtl865x_multipleWan.o
@@ -55,13 +55,13 @@ EXTRA_CFLAGS += -O1 -DRTL_TBLDRV -D__linux__ -DRTL865X_OVER_KERNEL -DRTL865X_OVE
 EXTRA_CFLAGS += -I$(DIR_RTLASIC)
 
 ifeq ($(CONFIG_RTL865X_MODULE_ROMEDRV),y)
-	EXTRA_CFLAGS += -D__KERNEL__ 
+	EXTRA_CFLAGS += -D__KERNEL__
 	EXTRA_CFLAGS += -G 0
 	EXTRA_CFLAGS += -DMODULE
 	EXTRA_CFLAGS += -mlong-calls
-	EXTRA_CFLAGS += -DEXPORT_SYMTAB 
+	EXTRA_CFLAGS += -DEXPORT_SYMTAB
 	EXTRA_CFLAGS += -DCONFIG_RTL865X_MODULE_INTERNAL
-#	EXTRA_CFLAGS += -DMODVERSIONS 
+#	EXTRA_CFLAGS += -DMODVERSIONS
 #	EXTRA_CFLAGS += -include $(srctree)/include/linux/modversions.h
 endif
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) AND MIT) */
 /*
  *  compress_params.h - codec types and parameters for compressed data
  *  streaming interface
@@ -73,12 +74,9 @@
 #define SND_AUDIOCODEC_IEC61937              ((__u32) 0x0000000B)
 #define SND_AUDIOCODEC_G723_1                ((__u32) 0x0000000C)
 #define SND_AUDIOCODEC_G729                  ((__u32) 0x0000000D)
-#define SND_AUDIOCODEC_EAC3                  ((__u32) 0x0000000E)
-#define SND_AUDIOCODEC_DTS                   ((__u32) 0x0000000F)
-#define SND_AUDIOCODEC_DTS_HD                ((__u32) 0x00000010)
-#define SND_AUDIOCODEC_TRUEHD                ((__u32) 0x00000011)
-#define SND_AUDIOCODEC_AC3                   ((__u32) 0x00000012)
-#define SND_AUDIOCODEC_MAX                   SND_AUDIOCODEC_AC3
+#define SND_AUDIOCODEC_BESPOKE               ((__u32) 0x0000000E)
+#define SND_AUDIOCODEC_MAX                   SND_AUDIOCODEC_BESPOKE
+
 /*
  * Profile and modes are listed with bit masks. This allows for a
  * more compact representation of fields that will not evolve
@@ -316,7 +314,7 @@ struct snd_enc_flac {
 
 struct snd_enc_generic {
 	__u32 bw;	/* encoder bandwidth */
-	__s32 reserved[15];
+	__s32 reserved[15];	/* Can be used for SND_AUDIOCODEC_BESPOKE */
 } __attribute__((packed, aligned(4)));
 
 union snd_codec_options {

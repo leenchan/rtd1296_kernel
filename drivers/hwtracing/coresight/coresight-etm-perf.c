@@ -1,18 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright(C) 2015 Linaro Limited. All rights reserved.
  * Author: Mathieu Poirier <mathieu.poirier@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/coresight.h>
@@ -22,12 +11,13 @@
 #include <linux/list.h>
 #include <linux/mm.h>
 #include <linux/init.h>
-#include <linux/parser.h>
 #include <linux/perf_event.h>
+#include <linux/percpu-defs.h>
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
+#include "coresight-etm-perf.h"
 #include "coresight-priv.h"
 
 static struct pmu etm_pmu;
@@ -44,18 +34,7 @@ struct etm_event_data {
 	struct work_struct work;
 	cpumask_t mask;
 	void *snk_config;
-	struct list_head **path;
-};
-
-/**
- * struct perf_pmu_drv_config - Driver specific configuration needed
- *				before a session can start.
- * @sink:		The name of the sink this session should use.
- * @entry:		Hook to the event->drv_configs list.
- */
-struct perf_pmu_drv_config {
-	char *sink;
-	struct list_head entry;
+	struct list_head * __percpu *path;
 };
 
 static DEFINE_PER_CPU(struct perf_output_handle, ctx_handle);
@@ -64,14 +43,16 @@ static DEFINE_PER_CPU(struct coresight_device *, csdev_src);
 /* ETMv3.5/PTM's ETMCR is 'config' */
 PMU_FORMAT_ATTR(cycacc,		"config:" __stringify(ETM_OPT_CYCACC));
 PMU_FORMAT_ATTR(timestamp,	"config:" __stringify(ETM_OPT_TS));
+PMU_FORMAT_ATTR(retstack,	"config:" __stringify(ETM_OPT_RETSTK));
 
 static struct attribute *etm_config_formats_attr[] = {
 	&format_attr_cycacc.attr,
 	&format_attr_timestamp.attr,
+	&format_attr_retstack.attr,
 	NULL,
 };
 
-static struct attribute_group etm_pmu_format_group = {
+static const struct attribute_group etm_pmu_format_group = {
 	.name   = "format",
 	.attrs  = etm_config_formats_attr,
 };
@@ -81,14 +62,60 @@ static const struct attribute_group *etm_pmu_attr_groups[] = {
 	NULL,
 };
 
+static inline struct list_head **
+etm_event_cpu_path_ptr(struct etm_event_data *data, int cpu)
+{
+	return per_cpu_ptr(data->path, cpu);
+}
+
+static inline struct list_head *
+etm_event_cpu_path(struct etm_event_data *data, int cpu)
+{
+	return *etm_event_cpu_path_ptr(data, cpu);
+}
+
 static void etm_event_read(struct perf_event *event) {}
+
+static int etm_addr_filters_alloc(struct perf_event *event)
+{
+	struct etm_filters *filters;
+	int node = event->cpu == -1 ? -1 : cpu_to_node(event->cpu);
+
+	filters = kzalloc_node(sizeof(struct etm_filters), GFP_KERNEL, node);
+	if (!filters)
+		return -ENOMEM;
+
+	if (event->parent)
+		memcpy(filters, event->parent->hw.addr_filters,
+		       sizeof(*filters));
+
+	event->hw.addr_filters = filters;
+
+	return 0;
+}
+
+static void etm_event_destroy(struct perf_event *event)
+{
+	kfree(event->hw.addr_filters);
+	event->hw.addr_filters = NULL;
+}
 
 static int etm_event_init(struct perf_event *event)
 {
-	if (event->attr.type != etm_pmu.type)
-		return -ENOENT;
+	int ret = 0;
 
-	return 0;
+	if (event->attr.type != etm_pmu.type) {
+		ret = -ENOENT;
+		goto out;
+	}
+
+	ret = etm_addr_filters_alloc(event);
+	if (ret)
+		goto out;
+
+	event->destroy = etm_event_destroy;
+out:
+	return ret;
 }
 
 static void free_event_data(struct work_struct *work)
@@ -106,23 +133,26 @@ static void free_event_data(struct work_struct *work)
 	 */
 	if (event_data->snk_config) {
 		cpu = cpumask_first(mask);
-		sink = coresight_get_sink(event_data->path[cpu]);
+		sink = coresight_get_sink(etm_event_cpu_path(event_data, cpu));
 		if (sink_ops(sink)->free_buffer)
 			sink_ops(sink)->free_buffer(event_data->snk_config);
 	}
 
 	for_each_cpu(cpu, mask) {
-		if (event_data->path[cpu])
-			coresight_release_path(event_data->path[cpu]);
+		struct list_head **ppath;
+
+		ppath = etm_event_cpu_path_ptr(event_data, cpu);
+		if (!(IS_ERR_OR_NULL(*ppath)))
+			coresight_release_path(*ppath);
+		*ppath = NULL;
 	}
 
-	kfree(event_data->path);
+	free_percpu(event_data->path);
 	kfree(event_data);
 }
 
 static void *alloc_event_data(int cpu)
 {
-	int size;
 	cpumask_t *mask;
 	struct etm_event_data *event_data;
 
@@ -133,7 +163,6 @@ static void *alloc_event_data(int cpu)
 
 	/* Make sure nothing disappears under us */
 	get_online_cpus();
-	size = num_online_cpus();
 
 	mask = &event_data->mask;
 	if (cpu != -1)
@@ -150,8 +179,8 @@ static void *alloc_event_data(int cpu)
 	 * unused memory when dealing with single CPU trace scenarios is small
 	 * compared to the cost of searching through an optimized array.
 	 */
-	event_data->path = kcalloc(size,
-				   sizeof(struct list_head *), GFP_KERNEL);
+	event_data->path = alloc_percpu(struct list_head *);
+
 	if (!event_data->path) {
 		kfree(event_data);
 		return NULL;
@@ -170,34 +199,36 @@ static void etm_free_aux(void *data)
 static void *etm_setup_aux(struct perf_event *event, void **pages,
 			   int nr_pages, bool overwrite)
 {
-	int cpu;
-	char *sink_def = NULL;
+	int cpu = event->cpu;
 	cpumask_t *mask;
 	struct coresight_device *sink;
 	struct etm_event_data *event_data = NULL;
-	struct perf_pmu_drv_config *drv_config;
 
-	/*
-	 * Search the driver configurables looking for a sink.  If more than
-	 * one sink was specified the last one is taken.
-	 */
-	list_for_each_entry(drv_config, &event->drv_configs, entry) {
-		if (drv_config && drv_config->sink) {
-			sink_def = drv_config->sink;
-			break;
-		}
-	}
-
-	event_data = alloc_event_data(event->cpu);
+	event_data = alloc_event_data(cpu);
 	if (!event_data)
 		return NULL;
-
 	INIT_WORK(&event_data->work, free_event_data);
+
+	/*
+	 * In theory nothing prevent tracers in a trace session from being
+	 * associated with different sinks, nor having a sink per tracer.  But
+	 * until we have HW with this kind of topology we need to assume tracers
+	 * in a trace session are using the same sink.  Therefore go through
+	 * the coresight bus and pick the first enabled sink.
+	 *
+	 * When operated from sysFS users are responsible to enable the sink
+	 * while from perf, the perf tools will do it based on the choice made
+	 * on the cmd line.  As such the "enable_sink" flag in sysFS is reset.
+	 */
+	sink = coresight_get_enabled_sink(true);
+	if (!sink)
+		goto err;
 
 	mask = &event_data->mask;
 
 	/* Setup the path for each CPU in a trace session */
 	for_each_cpu(cpu, mask) {
+		struct list_head *path;
 		struct coresight_device *csdev;
 
 		csdev = per_cpu(csdev_src, cpu);
@@ -209,28 +240,17 @@ static void *etm_setup_aux(struct perf_event *event, void **pages,
 		 * list of devices from source to sink that can be
 		 * referenced later when the path is actually needed.
 		 */
-		event_data->path[cpu] = coresight_build_path(csdev, sink_def);
-		if (!event_data->path[cpu])
+		path = coresight_build_path(csdev, sink);
+		if (IS_ERR(path))
 			goto err;
-	}
 
-	/*
-	 * In theory nothing prevent tracers in a trace session from being
-	 * associated with different sinks, nor having a sink per tracer.  But
-	 * until we have HW with this kind of topology and a way to convey
-	 * sink assignement from the perf cmd line we need to assume tracers
-	 * in a trace session are using the same sink.  Therefore pick the sink
-	 * found at the end of the first available path.
-	 */
-	cpu = cpumask_first(mask);
-	/* Grab the sink at the end of the path */
-	sink = coresight_get_sink(event_data->path[cpu]);
-	if (!sink)
-		goto err;
+		*etm_event_cpu_path_ptr(event_data, cpu) = path;
+	}
 
 	if (!sink_ops(sink)->alloc_buffer)
 		goto err;
 
+	cpu = cpumask_first(mask);
 	/* Get the AUX specific data from the sink buffer */
 	event_data->snk_config =
 			sink_ops(sink)->alloc_buffer(sink, cpu, pages,
@@ -253,6 +273,7 @@ static void etm_event_start(struct perf_event *event, int flags)
 	struct etm_event_data *event_data;
 	struct perf_output_handle *handle = this_cpu_ptr(&ctx_handle);
 	struct coresight_device *sink, *csdev = per_cpu(csdev_src, cpu);
+	struct list_head *path;
 
 	if (!csdev)
 		goto fail;
@@ -265,8 +286,9 @@ static void etm_event_start(struct perf_event *event, int flags)
 	if (!event_data)
 		goto fail;
 
+	path = etm_event_cpu_path(event_data, cpu);
 	/* We need a sink, no need to continue without one */
-	sink = coresight_get_sink(event_data->path[cpu]);
+	sink = coresight_get_sink(path);
 	if (WARN_ON_ONCE(!sink || !sink_ops(sink)->set_buffer))
 		goto fail_end_stop;
 
@@ -276,21 +298,24 @@ static void etm_event_start(struct perf_event *event, int flags)
 		goto fail_end_stop;
 
 	/* Nothing will happen without a path */
-	if (coresight_enable_path(event_data->path[cpu], CS_MODE_PERF))
+	if (coresight_enable_path(path, CS_MODE_PERF))
 		goto fail_end_stop;
 
 	/* Tell the perf core the event is alive */
 	event->hw.state = 0;
 
 	/* Finally enable the tracer */
-	if (source_ops(csdev)->enable(csdev, &event->attr, CS_MODE_PERF))
-		goto fail_end_stop;
+	if (source_ops(csdev)->enable(csdev, event, CS_MODE_PERF))
+		goto fail_disable_path;
 
 out:
 	return;
 
+fail_disable_path:
+	coresight_disable_path(path);
 fail_end_stop:
-	perf_aux_output_end(handle, 0, true);
+	perf_aux_output_flag(handle, PERF_AUX_FLAG_TRUNCATED);
+	perf_aux_output_end(handle, 0);
 fail:
 	event->hw.state = PERF_HES_STOPPED;
 	goto out;
@@ -298,12 +323,12 @@ fail:
 
 static void etm_event_stop(struct perf_event *event, int mode)
 {
-	bool lost;
 	int cpu = smp_processor_id();
 	unsigned long size;
 	struct coresight_device *sink, *csdev = per_cpu(csdev_src, cpu);
 	struct perf_output_handle *handle = this_cpu_ptr(&ctx_handle);
 	struct etm_event_data *event_data = perf_get_aux(handle);
+	struct list_head *path;
 
 	if (event->hw.state == PERF_HES_STOPPED)
 		return;
@@ -311,12 +336,16 @@ static void etm_event_stop(struct perf_event *event, int mode)
 	if (!csdev)
 		return;
 
-	sink = coresight_get_sink(event_data->path[cpu]);
+	path = etm_event_cpu_path(event_data, cpu);
+	if (!path)
+		return;
+
+	sink = coresight_get_sink(path);
 	if (!sink)
 		return;
 
 	/* stop tracer */
-	source_ops(csdev)->disable(csdev);
+	source_ops(csdev)->disable(csdev, event);
 
 	/* tell the core */
 	event->hw.state = PERF_HES_STOPPED;
@@ -336,14 +365,13 @@ static void etm_event_stop(struct perf_event *event, int mode)
 			return;
 
 		size = sink_ops(sink)->reset_buffer(sink, handle,
-						    event_data->snk_config,
-						    &lost);
+						    event_data->snk_config);
 
-		perf_aux_output_end(handle, size, lost);
+		perf_aux_output_end(handle, size);
 	}
 
 	/* Disabling the path make its elements available to other sessions */
-	coresight_disable_path(event_data->path[cpu]);
+	coresight_disable_path(path);
 }
 
 static int etm_event_add(struct perf_event *event, int mode)
@@ -367,93 +395,79 @@ static void etm_event_del(struct perf_event *event, int mode)
 	etm_event_stop(event, PERF_EF_UPDATE);
 }
 
-enum {
-	ETM_TOKEN_SINK_CPU,
-	ETM_TOKEN_SINK,
-	ETM_TOKEN_ERR,
-};
-
-static const match_table_t drv_cfg_tokens = {
-	{ETM_TOKEN_SINK_CPU, "sink=cpu%d:%s"},
-	{ETM_TOKEN_SINK, "sink=%s"},
-	{ETM_TOKEN_ERR,	NULL},
-};
-
-static int etm_get_drv_configs(struct perf_event *event, void __user *arg)
+static int etm_addr_filters_validate(struct list_head *filters)
 {
-	char *config, *sink = NULL;
-	int cpu = -1, token, ret = 0;
-	substring_t args[MAX_OPT_ARGS];
-	struct perf_pmu_drv_config *drv_config = NULL;
+	bool range = false, address = false;
+	int index = 0;
+	struct perf_addr_filter *filter;
 
-	/* Make user supplied input usable */
-	config = strndup_user(arg, PAGE_SIZE);
-	if (IS_ERR(config))
-		return PTR_ERR(config);
+	list_for_each_entry(filter, filters, entry) {
+		/*
+		 * No need to go further if there's no more
+		 * room for filters.
+		 */
+		if (++index > ETM_ADDR_CMP_MAX)
+			return -EOPNOTSUPP;
 
-	/* See above declared @drv_cfg_tokens for the usable formats */
-	token = match_token(config, drv_cfg_tokens, args);
-	switch (token) {
-	case ETM_TOKEN_SINK:
-		/* Just a sink has been specified */
-		sink = match_strdup(&args[0]);
-		if (IS_ERR(sink)) {
-			ret = PTR_ERR(sink);
-			goto err;
-		}
-		break;
-	case ETM_TOKEN_SINK_CPU:
-		/* We have a sink and a CPU */
-		if (match_int(&args[0], &cpu)) {
-			ret = -EINVAL;
-			goto err;
-		}
-		sink = match_strdup(&args[1]);
-		if (IS_ERR(sink)) {
-			ret = PTR_ERR(sink);
-			goto err;
-		}
-		break;
-	default:
-		ret = -EINVAL;
-		goto err;
+		/* filter::size==0 means single address trigger */
+		if (filter->size) {
+			/*
+			 * The existing code relies on START/STOP filters
+			 * being address filters.
+			 */
+			if (filter->action == PERF_ADDR_FILTER_ACTION_START ||
+			    filter->action == PERF_ADDR_FILTER_ACTION_STOP)
+				return -EOPNOTSUPP;
+
+			range = true;
+		} else
+			address = true;
+
+		/*
+		 * At this time we don't allow range and start/stop filtering
+		 * to cohabitate, they have to be mutually exclusive.
+		 */
+		if (range && address)
+			return -EOPNOTSUPP;
 	}
 
-	/* If the CPUs don't match the sink is destined to another path */
-	if (event->cpu != cpu)
-		goto err;
-
-	/*
-	 * We have a valid configuration, allocate memory and add to the list
-	 * of driver configurables.
-	 */
-	drv_config = kzalloc(sizeof(*drv_config), GFP_KERNEL);
-	if (IS_ERR(drv_config)) {
-		ret = PTR_ERR(drv_config);
-		goto err;
-	}
-
-	drv_config->sink = sink;
-	list_add(&drv_config->entry, &event->drv_configs);
-
-out:
-	kfree(config);
-	return ret;
-
-err:
-	kfree(sink);
-	goto out;
+	return 0;
 }
 
-static void etm_free_drv_configs(struct perf_event *event)
+static void etm_addr_filters_sync(struct perf_event *event)
 {
-	struct perf_pmu_drv_config *config, *itr;
+	struct perf_addr_filters_head *head = perf_event_addr_filters(event);
+	unsigned long start, stop;
+	struct perf_addr_filter_range *fr = event->addr_filter_ranges;
+	struct etm_filters *filters = event->hw.addr_filters;
+	struct etm_filter *etm_filter;
+	struct perf_addr_filter *filter;
+	int i = 0;
 
-	list_for_each_entry_safe(config, itr, &event->drv_configs, entry) {
-		list_del(&config->entry);
-		kfree(config->sink);
-		kfree(config);
+	list_for_each_entry(filter, &head->list, entry) {
+		start = fr[i].start;
+		stop = start + fr[i].size;
+		etm_filter = &filters->etm_filter[i];
+
+		switch (filter->action) {
+		case PERF_ADDR_FILTER_ACTION_FILTER:
+			etm_filter->start_addr = start;
+			etm_filter->stop_addr = stop;
+			etm_filter->type = ETM_ADDR_TYPE_RANGE;
+			break;
+		case PERF_ADDR_FILTER_ACTION_START:
+			etm_filter->start_addr = start;
+			etm_filter->type = ETM_ADDR_TYPE_START;
+			break;
+		case PERF_ADDR_FILTER_ACTION_STOP:
+			etm_filter->stop_addr = stop;
+			etm_filter->type = ETM_ADDR_TYPE_STOP;
+			break;
+		}
+		i++;
 	}
+
+	filters->nr_filters = i;
 }
 
 int etm_perf_symlink(struct coresight_device *csdev, bool link)
@@ -485,21 +499,21 @@ static int __init etm_perf_init(void)
 {
 	int ret;
 
-	etm_pmu.capabilities	= PERF_PMU_CAP_EXCLUSIVE;
+	etm_pmu.capabilities		= PERF_PMU_CAP_EXCLUSIVE;
 
-	etm_pmu.attr_groups	= etm_pmu_attr_groups;
-	etm_pmu.task_ctx_nr	= perf_sw_context;
-	etm_pmu.read		= etm_event_read;
-	etm_pmu.event_init	= etm_event_init;
-	etm_pmu.setup_aux	= etm_setup_aux;
-	etm_pmu.free_aux	= etm_free_aux;
-	etm_pmu.start		= etm_event_start;
-	etm_pmu.stop		= etm_event_stop;
-	etm_pmu.add		= etm_event_add;
-	etm_pmu.del		= etm_event_del;
-	etm_pmu.get_drv_configs	= etm_get_drv_configs;
-	etm_pmu.free_drv_configs
-				= etm_free_drv_configs;
+	etm_pmu.attr_groups		= etm_pmu_attr_groups;
+	etm_pmu.task_ctx_nr		= perf_sw_context;
+	etm_pmu.read			= etm_event_read;
+	etm_pmu.event_init		= etm_event_init;
+	etm_pmu.setup_aux		= etm_setup_aux;
+	etm_pmu.free_aux		= etm_free_aux;
+	etm_pmu.start			= etm_event_start;
+	etm_pmu.stop			= etm_event_stop;
+	etm_pmu.add			= etm_event_add;
+	etm_pmu.del			= etm_event_del;
+	etm_pmu.addr_filters_sync	= etm_addr_filters_sync;
+	etm_pmu.addr_filters_validate	= etm_addr_filters_validate;
+	etm_pmu.nr_addr_filters		= ETM_ADDR_CMP_MAX;
 
 	ret = perf_pmu_register(&etm_pmu, CORESIGHT_ETM_PMU_NAME, -1);
 	if (ret == 0)

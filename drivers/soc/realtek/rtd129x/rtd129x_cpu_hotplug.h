@@ -1,5 +1,17 @@
-#ifndef DRIVERS_SOC_REALTEK_RTD129x_RTD129x_CPU_HOTPLUG_H_
-#define DRIVERS_SOC_REALTEK_RTD129x_RTD129x_CPU_HOTPLUG_H_
+/*
+ * rtd129x_cpu_hotplug.h
+ *
+ * Copyright (c) 2017 Realtek Semiconductor Corp.
+ *
+ * Author: Chih-Feng Tai <james.tai@realtek.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ */
+
+#ifndef RTD129x_CPU_HOTPLUG_H_
+#define RTD129x_CPU_HOTPLUG_H_
 
 #include <asm/virt.h>
 
@@ -13,4 +25,4 @@ static inline void cpu_do_lowpower(unsigned long secondary_entry_addr)
 	unreachable();
 }
 
-#endif /* DRIVERS_SOC_REALTEK_RTD129x_RTD129x_CPU_HOTPLUG_H_ */
+#endif /* RTD129x_CPU_HOTPLUG_H_ */

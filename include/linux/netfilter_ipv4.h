@@ -5,22 +5,43 @@
 #define __LINUX_IP_NETFILTER_H
 
 #include <uapi/linux/netfilter_ipv4.h>
-#if defined(CONFIG_RTL_HW_QOS_SUPPORT)
-/* IP Hooks */
-/* After promisc drops, checksum checks. */
-#define NF_IP_PRE_ROUTING	0
-/* If the packet is destined for this box. */
-#define NF_IP_LOCAL_IN		1
-/* If the packet is destined for another interface. */
-#define NF_IP_FORWARD		2
-/* Packets coming from a local process. */
-#define NF_IP_LOCAL_OUT		3
-/* Packets about to hit the wire. */
-#define NF_IP_POST_ROUTING	4
-#define NF_IP_NUMHOOKS		5
-#endif
+
+/* Extra routing may needed on local out, as the QUEUE target never returns
+ * control to the table.
+ */
+struct ip_rt_info {
+	__be32 daddr;
+	__be32 saddr;
+	u_int8_t tos;
+	u_int32_t mark;
+};
 
 int ip_route_me_harder(struct net *net, struct sk_buff *skb, unsigned addr_type);
+
+struct nf_queue_entry;
+
+#ifdef CONFIG_INET
 __sum16 nf_ip_checksum(struct sk_buff *skb, unsigned int hook,
 		       unsigned int dataoff, u_int8_t protocol);
+int nf_ip_route(struct net *net, struct dst_entry **dst, struct flowi *fl,
+		bool strict);
+int nf_ip_reroute(struct sk_buff *skb, const struct nf_queue_entry *entry);
+#else
+static inline __sum16 nf_ip_checksum(struct sk_buff *skb, unsigned int hook,
+				     unsigned int dataoff, u_int8_t protocol)
+{
+	return 0;
+}
+static inline int nf_ip_route(struct net *net, struct dst_entry **dst,
+			      struct flowi *fl, bool strict)
+{
+	return -EOPNOTSUPP;
+}
+static inline int nf_ip_reroute(struct sk_buff *skb,
+				const struct nf_queue_entry *entry)
+{
+	return -EOPNOTSUPP;
+}
+#endif /* CONFIG_INET */
+
 #endif /*__LINUX_IP_NETFILTER_H*/

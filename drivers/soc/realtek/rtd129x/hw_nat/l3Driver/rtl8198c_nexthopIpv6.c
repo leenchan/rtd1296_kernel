@@ -1,10 +1,15 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2013  
+* Copyright c                  Realtek Semiconductor Corporation, 2013
 * All rights reserved.
-* 
+*
 * Program : ipv6 nexthop table driver
-* Abstract : 
-* Author : Jia Wenjian (wenjain_jai@realsil.com.cn)  
+* Abstract :
+* Author : Jia Wenjian (wenjain_jai@realsil.com.cn)
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
 */
 
 /*      @doc RTL_LAYEREDDRV_API
@@ -18,14 +23,14 @@
 
         @head3 List of Symbols |
         Here is a list of all functions and variables in this module.
-        
+
         @index | RTL_LAYEREDDRV_API
 */
 #include <net/rtl/rtl_types.h>
 #include <net/rtl/rtl_glue.h>
 #include <net/rtl/rtl865x_netif.h>
 #include "common/rtl_errno.h"
-#include "common/rtl865x_netif_local.h" 
+#include "common/rtl865x_netif_local.h"
 #include "rtl865x_ip.h"
 #include "rtl8198c_nexthopIpv6.h"
 //#include "rtl865x_ppp.h"
@@ -95,20 +100,20 @@ static void _print_softNxtHop(void)
 @func int32 | rtl8198c_initIpv6NxtHopTable |initialize the nexthop table
 @rvalue SUCCESS | success.
 @rvalue FAILED | failed. system should reboot.
-@comm	
+@comm
 */
 int32 rtl8198c_initIpv6NxtHopTable(void)
 {
-	TBL_MEM_ALLOC(rtl865x_ipv6_nxtHopTable, rtl8198c_ipv6_nextHopEntry_t, IPV6_NXTHOP_ENTRY_NUM);	
+	TBL_MEM_ALLOC(rtl865x_ipv6_nxtHopTable, rtl8198c_ipv6_nextHopEntry_t, IPV6_NXTHOP_ENTRY_NUM);
 	memset(rtl865x_ipv6_nxtHopTable,0,sizeof(rtl8198c_ipv6_nextHopEntry_t)*IPV6_NXTHOP_ENTRY_NUM);
 	_rtl8198c_ipv6_nextHop_register_event();
-	return SUCCESS;	
+	return SUCCESS;
 }
 
 /*
 @func int32 | rtl8198c_reinitIpv6NxtHopTable |reinitialize the nexthop table
 @rvalue SUCCESS | success.
-@comm	
+@comm
 */
 int32 rtl8198c_reinitIpv6NxtHopTable(void)
 {
@@ -120,7 +125,7 @@ int32 rtl8198c_reinitIpv6NxtHopTable(void)
 		if(rtl865x_ipv6_nxtHopTable[i].valid)
 			_rtl8198c_delIpv6NxtHop(IPV6_NEXTHOP_L3,i);
 	}
-	
+
 	_rtl8198c_ipv6_nextHop_register_event();
 	return SUCCESS;
 }
@@ -136,12 +141,12 @@ static int32 _rtl8198c_synIpv6NxtHopToAsic(rtl8198c_ipv6_nextHopEntry_t *entry_t
 	int32 retval = 0;
 
 	retval = rtl865x_getReserveMacAddr(&reservedMac);
-	
+
 	bzero(&asic, sizeof(rtl8198C_tblAsicDrv_nextHopV6Param_t));
 
 	if (entry_t == NULL)
 		return RTL_EINVALIDINPUT;
-	
+
 	if (entry_t->nextHopType == IF_ETHER) {
 		rtl8198c_ipv6_arpMapping_entry_t arp_t;
 		int32 ret_arpFound = FAILED;
@@ -150,10 +155,10 @@ static int32 _rtl8198c_synIpv6NxtHopToAsic(rtl8198c_ipv6_nextHopEntry_t *entry_t
 		if ((entry_t->un.nexthop.v6_addr32[0]!=0)||(entry_t->un.nexthop.v6_addr32[1]!=0)||
 		     (entry_t->un.nexthop.v6_addr32[2]!=0)||(entry_t->un.nexthop.v6_addr32[3]!=0))
 			ret_arpFound = rtl8198c_getIpv6ArpMapping(entry_t->un.nexthop, &arp_t);
-		
+
 		rtl865x_getVlanFilterDatabaseId(entry_t->dstNetif->vid, &fid);
 		retval = rtl865x_Lookup_fdb_entry(fid, (ret_arpFound == SUCCESS)? &arp_t.mac : &reservedMac, FDB_DYNAMIC, &columIdx,&asic_l2);
-		
+
 		asic.nextHopRow = rtl8651_filterDbIndex( (ret_arpFound == SUCCESS)? &arp_t.mac : &reservedMac, fid );
 		asic.nextHopColumn = (retval == SUCCESS)? columIdx: 0;
 
@@ -176,26 +181,26 @@ static int32 _rtl8198c_synIpv6NxtHopToAsic(rtl8198c_ipv6_nextHopEntry_t *entry_t
 		asic.nextHopColumn = (retval == SUCCESS)? columIdx: 0;
 		asic.isPppoe = FALSE;
 		asic.pppoeIdx = 0;
-		
+
 		//printk("%d,%d,[%s]:[%d].\n",asic.nextHopRow,asic.nextHopColumn,__FUNCTION__,__LINE__);
 	}
 #endif
 #endif
-	else 
-	{	
+	else
+	{
 		/*session based interface type*/
-		rtl865x_ppp_t pppoe;		
+		rtl865x_ppp_t pppoe;
 		int32 pppidx = 0;
 
 		memset(&pppoe,0,sizeof(rtl865x_ppp_t));
-		
+
 		if(entry_t->un.pppSessionId)
 			retval = rtl865x_getPppBySessionId(entry_t->un.pppSessionId, &pppoe);
 
 		rtl865x_getVlanFilterDatabaseId(entry_t->dstNetif->vid,&fid);
 
 		retval =rtl865x_Lookup_fdb_entry(fid, (pppoe.valid)? &pppoe.server_mac : &reservedMac, FDB_DYNAMIC, &columIdx,&asic_l2);
-			
+
 		asic.nextHopRow = rtl8651_filterDbIndex( (pppoe.valid)? &pppoe.server_mac : &reservedMac, fid);
 		asic.nextHopColumn = (pppoe.valid)? columIdx: 0;
 		asic.isPppoe = (pppoe.type == IF_PPPOE)? TRUE: FALSE;
@@ -205,7 +210,7 @@ static int32 _rtl8198c_synIpv6NxtHopToAsic(rtl8198c_ipv6_nextHopEntry_t *entry_t
 		//printk("%s(%d): pppoeIdx(%d), pppoeType(%d), pppoevalid(%d),pppoeSid(%d)\n",__FUNCTION__,__LINE__,pppidx,pppoe.type,pppoe.valid,pppoe.sessionId);
 		asic.pppoeIdx	= (pppoe.type == IF_PPPOE)? pppidx: 0;
 	}
-	
+
 	if (entry_t->dstNetif->is_slave == 1) {
 		dstNetif = entry_t->dstNetif->master;
 
@@ -217,12 +222,12 @@ static int32 _rtl8198c_synIpv6NxtHopToAsic(rtl8198c_ipv6_nextHopEntry_t *entry_t
 
 	if(dstNetif == NULL)
 		printk("_%s(%d), BUG!!!!!!",__FUNCTION__,__LINE__);
-	
+
 	asic.dvid 			= dstNetif->asicIdx;
 
 	//printk("%s(%d), entryIdx(%d),asic.isPPPoe(%d),asic.pppoeIdx(%d),asic.dvid(%d)\n", __FUNCTION__,__LINE__,entry_t->entryIndex,asic.isPppoe,asic.pppoeIdx,asic.dvid);
 	rtl8198C_setAsicNextHopTableV6(entry_t->entryIndex,  &asic);
-	
+
 	return SUCCESS;
 }
 
@@ -234,7 +239,7 @@ static int32 _rtl8198c_arrangeIpv6NxtHop(uint32 start, uint32 num)
 
 	if(start < 0 || start + num >= IPV6_NXTHOP_ENTRY_NUM)
 		return RTL_EINVALIDINPUT;
-	
+
 	for(idx=start; idx<start+num; idx++)
 	{
 		entry = &rtl865x_ipv6_nxtHopTable[idx];
@@ -242,7 +247,7 @@ static int32 _rtl8198c_arrangeIpv6NxtHop(uint32 start, uint32 num)
 		if(entry->valid)
 			_rtl8198c_synIpv6NxtHopToAsic(entry);
 	}
-	
+
 	return SUCCESS;
 }
 
@@ -260,7 +265,7 @@ static int32 _rtl8198c_addIpv6NxtHop(uint32 attr, void *ref_ptr, rtl865x_netif_l
 	  *				   attr = NEXTHOP_DEFREDIRECT_ACL, ref_ptr = NULL,
 	  *				   attr = others, ref_ptr = NULL
 	  * (3) netif: destination network interface
-	  * (4) nexthop: 
+	  * (4) nexthop:
 	  *		a) netif->if_type == IF_ETHER, nexthop = nexthop ip address,
 	  *		b) netif->if_type == session based type, nexthop = session Id,
 	  *
@@ -276,7 +281,7 @@ static int32 _rtl8198c_addIpv6NxtHop(uint32 attr, void *ref_ptr, rtl865x_netif_l
 
 	if(netif == NULL)
 		return RTL_EINVALIDINPUT;
-	
+
 	/* Allocate an empty entry for new one */
 	/*Note: all nexthop entry referenced by L3 must be 2 entries aligned(reference l3 Datasheet)*/
 	for (entryIdx = 0; entryIdx < IPV6_NXTHOP_ENTRY_NUM; entryIdx++)
@@ -291,12 +296,12 @@ static int32 _rtl8198c_addIpv6NxtHop(uint32 attr, void *ref_ptr, rtl865x_netif_l
 						goto found;
 					}
 					break;
-					
+
 				case IPV6_NEXTHOP_DEFREDIRECT_ACL:
 					entry = &rtl865x_ipv6_nxtHopTable[entryIdx];
 					goto found;
 					break;
-					
+
 				default:
 					printk("ipv6: attr(%d) is not support.....\n",attr);
 					break;
@@ -334,7 +339,7 @@ found:
 			/*nexthop is sessionId*/
 			entry->un.pppSessionId = nexthop.v6_addr32[0];
 			break;
-		
+
 	}
 
 	if (attr == IPV6_NEXTHOP_L3) {
@@ -354,7 +359,7 @@ found:
 			rtl865x_referPpp(nexthop.v6_addr32[0]);
 			#endif
 		}
-		
+
 		/*FIXME_hyking:lazy, update the route information right here....*/
 		rt_t = (rtl8198c_ipv6_route_t *)ref_ptr;
 		rt_t ->un.nxthop.nxtHopSta = entryIdx;
@@ -363,7 +368,7 @@ found:
 	else {
 		_rtl8198c_arrangeIpv6NxtHop(entryIdx, 1);
 	}
-	
+
 	/*update reference dstnetif&pppoe arp?*/
 	rtl865x_referNetif(netif->name);
 	if((entry1->nextHopType==IF_PPPOE) || (entry1->nextHopType==IF_PPTP) || (entry1->nextHopType==IF_L2TP)){
@@ -373,7 +378,7 @@ found:
 		rtl865x_referPpp(nexthop.v6_addr32[0]);
 		#endif
 	}
-	
+
 	return SUCCESS;
 }
 
@@ -402,7 +407,7 @@ static int32 _rtl8198c_delIpv6NxtHop(uint32 attr, uint32 entryIdx)
 		#endif
 	}
 
-	rtl865x_deReferNetif(entry->dstNetif->name);	
+	rtl865x_deReferNetif(entry->dstNetif->name);
 	memset(entry, 0, sizeof(rtl8198c_ipv6_nextHopEntry_t));
 
 	/*jwj: Here not call _rtl8198c_arrangeIpv6NxtHop,because nexthop entry
@@ -411,7 +416,7 @@ static int32 _rtl8198c_delIpv6NxtHop(uint32 attr, uint32 entryIdx)
 	//_rtl8198c_arrangeIpv6NxtHop(entryIdx,1);
 
 	return SUCCESS;
-	
+
 }
 
 #if defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
@@ -424,7 +429,7 @@ int32 _rtl865x_eventHandle_6rd_addArp(rtl865x_arpMapping_entry_t * arp)
 	rtl865x_6rd_s * sixrdEntry=NULL;
 	if(arp == NULL)
 		return EVENT_CONTINUE_EXECUTE;
-	
+
 	entry = rtl865x_ipv6_nxtHopTable;
 	for(i = 0; i < IPV6_NXTHOP_ENTRY_NUM; i++,entry++)
 	{
@@ -439,7 +444,7 @@ int32 _rtl865x_eventHandle_6rd_addArp(rtl865x_arpMapping_entry_t * arp)
 				sixrdIndex=_rtl865x_getIpv66RDEntryByName(entry->dstNetif->name);
 				if(sixrdIndex!=FAILED)
 					sixrdEntry=_rtl865x_getIpv66RDEntryByIndex(sixrdIndex);
-		
+
 				if(sixrdEntry)
 				{
 					if(arp->ip == br_ip_addr)
@@ -459,10 +464,10 @@ int32 _rtl865x_eventHandle_6rd_delArp(rtl865x_arpMapping_entry_t * arp)
 	int32 i;
 	int32 sixrdIndex=FAILED;
 	rtl865x_6rd_s * sixrdEntry=NULL;
-	
+
 	if(arp == NULL)
 		return EVENT_CONTINUE_EXECUTE;
-	
+
 	entry = rtl865x_ipv6_nxtHopTable;
 	for(i = 0; i < IPV6_NXTHOP_ENTRY_NUM; i++,entry++)
 	{
@@ -472,7 +477,7 @@ int32 _rtl865x_eventHandle_6rd_delArp(rtl865x_arpMapping_entry_t * arp)
 			sixrdIndex=_rtl865x_getIpv66RDEntryByName(entry->dstNetif->name);
 			if(sixrdIndex!=FAILED)
 				sixrdEntry=_rtl865x_getIpv66RDEntryByIndex(sixrdIndex);
-			
+
 			if(sixrdEntry)
 			{
 				if(arp->ip == br_ip_addr)
@@ -507,7 +512,7 @@ static int32 _rtl8198c_eventHandle_addIpv6Arp(void *param)
 	int32 i;
 	rtl8198c_ipv6_arpMapping_entry_t *arp;
 	rtl8198c_ipv6_nextHopEntry_t *entry;
-	
+
 	if(param == NULL)
 		return EVENT_CONTINUE_EXECUTE;
 
@@ -525,8 +530,8 @@ static int32 _rtl8198c_eventHandle_addIpv6Arp(void *param)
 			/*update nexthop*/
 			if (memcmp(&entry->un.nexthop, &arp->ip, sizeof(inv6_addr_t))==0)
 				_rtl8198c_synIpv6NxtHopToAsic(entry);
-		}	
-		
+		}
+
 	}
 #if defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
 #if defined(CONFIG_RTL_HW_DSLITE_SUPPORT)
@@ -534,7 +539,7 @@ static int32 _rtl8198c_eventHandle_addIpv6Arp(void *param)
 	_rtl865x_eventHandle_addIpv6Arp(arp);
 #endif
 #endif
-	
+
 	return EVENT_CONTINUE_EXECUTE;
 }
 
@@ -548,7 +553,7 @@ static int32 _rtl8198c_eventHandle_delIpv6Arp(void *param)
 		return EVENT_CONTINUE_EXECUTE;
 
 	arp = (rtl8198c_ipv6_arpMapping_entry_t *)param;
-	
+
 	entry = rtl865x_ipv6_nxtHopTable;
 	for (i = 0; i < IPV6_NXTHOP_ENTRY_NUM; i++,entry++)
 	{
@@ -556,7 +561,7 @@ static int32 _rtl8198c_eventHandle_delIpv6Arp(void *param)
 			/*update nexthop*/
 			if (memcmp(&entry->un.nexthop, &arp->ip, sizeof(inv6_addr_t))==0)
 				_rtl8198c_synIpv6NxtHopToAsic(entry);
-		}		
+		}
 	}
 
 #if defined(CONFIG_RTL_8198C) || defined(CONFIG_RTL_8197F)
@@ -573,7 +578,7 @@ static int32 _rtl8198c_eventHandle_delIpv6Ppp(void *param)
 	int32 i;
 	rtl865x_ppp_t *pppoe;
 	rtl8198c_ipv6_nextHopEntry_t *entry;
-	
+
 	if(param == NULL)
 		return EVENT_CONTINUE_EXECUTE;
 
@@ -590,7 +595,7 @@ static int32 _rtl8198c_eventHandle_delIpv6Ppp(void *param)
 					entry->un.pppSessionId  = 0;
 					_rtl8198c_synIpv6NxtHopToAsic(entry);
 				}
-			}		
+			}
 	}
 
 	return EVENT_CONTINUE_EXECUTE;
@@ -605,20 +610,20 @@ static int32 _rtl8198c_ipv6_nextHop_register_event(void)
 	eventParam.event_action_fn = _rtl8198c_eventHandle_delIpv6Arp;
 	rtl865x_registerEvent(&eventParam);
 
-	memset(&eventParam, 0, sizeof(rtl865x_event_Param_t));	
+	memset(&eventParam, 0, sizeof(rtl865x_event_Param_t));
 	eventParam.eventLayerId = DEFAULT_IPV6_LAYER3_EVENT_LIST_ID;
 	eventParam.eventId = EVENT_ADD_IPV6_ARP;
 	eventParam.eventPriority = 0;
 	eventParam.event_action_fn = _rtl8198c_eventHandle_addIpv6Arp;
 	rtl865x_registerEvent(&eventParam);
 
-	memset(&eventParam, 0, sizeof(rtl865x_event_Param_t));	
+	memset(&eventParam, 0, sizeof(rtl865x_event_Param_t));
 	eventParam.eventLayerId = DEFAULT_IPV6_LAYER3_EVENT_LIST_ID;
 	eventParam.eventId = EVENT_DEL_PPP;
 	eventParam.eventPriority = 0;
 	eventParam.event_action_fn = _rtl8198c_eventHandle_delIpv6Ppp;
 	rtl865x_registerEvent(&eventParam);
-	
+
 	return SUCCESS;
 
 }
@@ -632,20 +637,20 @@ static int32 _rtl8198c_ipv6_nextHop_unRegister_event(void)
 	eventParam.event_action_fn = _rtl8198c_eventHandle_delIpv6Arp;
 	rtl865x_unRegisterEvent(&eventParam);
 
-	memset(&eventParam, 0, sizeof(rtl865x_event_Param_t));	
+	memset(&eventParam, 0, sizeof(rtl865x_event_Param_t));
 	eventParam.eventLayerId = DEFAULT_IPV6_LAYER3_EVENT_LIST_ID;
 	eventParam.eventId = EVENT_ADD_IPV6_ARP;
 	eventParam.eventPriority = 0;
 	eventParam.event_action_fn = _rtl8198c_eventHandle_addIpv6Arp;
 	rtl865x_unRegisterEvent(&eventParam);
 
-	memset(&eventParam, 0, sizeof(rtl865x_event_Param_t));	
+	memset(&eventParam, 0, sizeof(rtl865x_event_Param_t));
 	eventParam.eventLayerId = DEFAULT_IPV6_LAYER3_EVENT_LIST_ID;
 	eventParam.eventId = EVENT_DEL_PPP;
 	eventParam.eventPriority = 0;
 	eventParam.event_action_fn = _rtl8198c_eventHandle_delIpv6Ppp;
 	rtl865x_unRegisterEvent(&eventParam);
-	
+
 	return SUCCESS;
 
 }
@@ -659,17 +664,17 @@ static int32 _rtl8198c_ipv6_nextHop_unRegister_event(void)
 @parm inv6_addr_t | nexthop | nexthop. ipv6 ip address when linktype is ethernet, session id when linktype is ppp session based.
 @rvalue SUCCESS | success.
 @rvalue FAILED | failed.
-@comm	
+@comm
 */
 int32 rtl8198c_addIpv6NxtHop(uint32 attr, void *ref_ptr, rtl865x_netif_local_t *netif, inv6_addr_t nexthop)
 {
 	int32 ret = FAILED;
-	unsigned long flags=0;	
-	
+	unsigned long flags=0;
+
 	SMP_LOCK_ETH_HW(flags);
-	ret = _rtl8198c_addIpv6NxtHop(attr, ref_ptr, netif, nexthop);	
+	ret = _rtl8198c_addIpv6NxtHop(attr, ref_ptr, netif, nexthop);
 	SMP_UNLOCK_ETH_HW(flags);
-	
+
 	return ret;
 }
 
@@ -679,16 +684,16 @@ int32 rtl8198c_addIpv6NxtHop(uint32 attr, void *ref_ptr, rtl865x_netif_local_t *
 @parm uint32 | entryIdx | entry index.
 @rvalue SUCCESS | success.
 @rvalue FAILED | failed.
-@comm	
+@comm
 */
 int32 rtl8198c_delIpv6NxtHop(uint32 attr, uint32 entryIdx)
 {
 	int32 retval = FAILED;
 	unsigned long flags=0;
-	
+
 	SMP_LOCK_ETH_HW(flags);
 	retval = _rtl8198c_delIpv6NxtHop(attr, entryIdx);
 	SMP_UNLOCK_ETH_HW(flags);
-	
-	return retval;	
+
+	return retval;
 }

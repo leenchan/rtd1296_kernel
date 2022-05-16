@@ -1,9 +1,14 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2008  
+* Copyright c                  Realtek Semiconductor Corporation, 2008
 * All rights reserved.
-* 
-* Abstract : 
-* Author : hyking (hyking_liu@realsil.com.cn) 
+*
+* Abstract :
+* Author : hyking (hyking_liu@realsil.com.cn)
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
 */
 
 #ifndef RTL865X_EVENT_MANAGEMENT_H
@@ -30,8 +35,8 @@ typedef struct action_param_s
 typedef struct event_node_s
 {
 	uint32 valid;
-	int32 priority; /*priority: minimal value indicate high priority*/	
-	void (*event_action)(void *param);	
+	int32 priority; /*priority: minimal value indicate high priority*/
+	void (*event_action)(void *param);
 	struct event_node_s *pre,*next;
 }event_node_t;
 
@@ -172,7 +177,7 @@ typedef struct rtl865x_eventMgr_param_s
 
 typedef struct rtl865x_event_Param_s
 {
-	int32 eventLayerId;	
+	int32 eventLayerId;
 	int32 eventId;
 	int32 eventPriority;
 	int32 (*event_action_fn)(void *param);
@@ -190,8 +195,8 @@ typedef struct action_param_s
 typedef struct rtl865x_event_s
 {
 	int32 eventId;
-	int32 eventPriority; /*priority: less value indicate higher priority*/	
-	int32 (*event_action_fn)(void *param);	
+	int32 eventPriority; /*priority: less value indicate higher priority*/
+	int32 (*event_action_fn)(void *param);
 	CTAILQ_ENTRY(rtl865x_event_s) next;
 }rtl865x_event_t;
 
@@ -201,12 +206,12 @@ typedef CTAILQ_HEAD(_event_head_s, rtl865x_event_s) rtl865x_event_Head_t;
 typedef struct rtl865x_eventLayerList_s
 {
 	int32 eventLayerId;
-	rtl865x_event_Head_t eventHead; 
+	rtl865x_event_Head_t eventHead;
 	CTAILQ_ENTRY(rtl865x_eventLayerList_s) next;
 }rtl865x_eventLayerList_t;
 
 typedef CTAILQ_HEAD(_eventLayerList_head_s, rtl865x_eventLayerList_s) rtl865x_eventLayerList_Head_t;
-	
+
 struct rtl865x_eventTables_s {
 	struct freeEntryList_s {
 		rtl865x_event_Head_t eventHead;

@@ -1,3 +1,12 @@
+/*
+ * rtd129x_fan.c - fan driver
+ *
+ * Copyright (c) 2017 Realtek Semiconductor Corp.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ */
 
 #include <linux/device.h>
 #include <linux/platform_device.h>
@@ -8,9 +17,10 @@
 #include <linux/of_irq.h>
 #include <linux/of_device.h>
 #include <linux/slab.h>
-#include <linux/reset-helper.h> // rstc_get
 #include <linux/reset.h>
 #include <linux/clk.h>
+#include <linux/clkdev.h>
+#include <linux/clk-provider.h>
 #include <linux/pwm.h>
 
 #define REG_FAN_CTRL 0x0
@@ -295,9 +305,9 @@ static int rtk_fan_init(struct rtk_fan_data *fan_data, struct platform_device *p
 	u32 value;
 
 	/* GET clock */
-	struct clk *clk_fan = clk_get(NULL, "clk_en_fan");
+	struct clk *clk_fan = clk_get(dev, NULL);
 	/* GET reset controller */
-	struct reset_control *reset_fan = rstc_get("rstn_fan");
+	struct reset_control *reset_fan = reset_control_get(dev, NULL);
 
 	reset_control_deassert(reset_fan);
 	clk_prepare_enable(clk_fan);
@@ -406,11 +416,11 @@ static const struct of_device_id rtk_fan_of_match[] = {
 };
 
 static struct platform_driver rtk_fan_driver = {
-	.probe	= rtk_fan_probe,
-	.remove	= rtk_fan_remove,
+	.probe = rtk_fan_probe,
+	.remove = rtk_fan_remove,
 	.driver = {
-		.name	= "rtk-fan",
-		.owner	= THIS_MODULE,
+		.name = "rtk-fan",
+		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(rtk_fan_of_match),
 	},
 };

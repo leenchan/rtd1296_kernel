@@ -1,8 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for the PCI specific kernel interface routines under Linux.
 #
 
 obj-y				+= pci.o
+obj-$(CONFIG_PCI_DRIVERS_LEGACY)+= pci-legacy.o
+obj-$(CONFIG_PCI_DRIVERS_GENERIC)+= pci-generic.o
 
 #
 # PCI bus host bridge specific code
@@ -43,6 +46,7 @@ obj-$(CONFIG_SIBYTE_BCM1x80)	+= pci-bcm1480.o pci-bcm1480ht.o
 obj-$(CONFIG_SNI_RM)		+= fixup-sni.o ops-sni.o
 obj-$(CONFIG_LANTIQ)		+= fixup-lantiq.o
 obj-$(CONFIG_PCI_LANTIQ)	+= pci-lantiq.o ops-lantiq.o
+obj-$(CONFIG_SOC_MT7620)	+= pci-mt7620.o
 obj-$(CONFIG_SOC_RT288X)	+= pci-rt2880.o
 obj-$(CONFIG_SOC_RT3883)	+= pci-rt3883.o
 obj-$(CONFIG_TANBAC_TB0219)	+= fixup-tb0219.o
@@ -60,8 +64,6 @@ obj-$(CONFIG_MIKROTIK_RB532)	+= pci-rc32434.o ops-rc32434.o fixup-rc32434.o
 obj-$(CONFIG_CAVIUM_OCTEON_SOC) += pci-octeon.o pcie-octeon.o
 obj-$(CONFIG_CPU_XLR)		+= pci-xlr.o
 obj-$(CONFIG_CPU_XLP)		+= pci-xlp.o
-obj-$(CONFIG_PCIE_RTL8117_CORE)	+= pcie-rtl8117-core.o
-obj-$(CONFIG_PCIE_RTL8117_HOST)	+= pcie-rtl8117.o
 
 ifdef CONFIG_PCI_MSI
 obj-$(CONFIG_CAVIUM_OCTEON_SOC) += msi-octeon.o

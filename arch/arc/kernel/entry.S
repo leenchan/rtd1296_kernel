@@ -35,7 +35,7 @@ ENTRY(sys_clone_wrapper)
 	btst r10, TIF_SYSCALL_TRACE
 	bnz  tracesys_exit
 
-	b ret_from_system_call
+	b .Lret_from_system_call
 END(sys_clone_wrapper)
 
 ENTRY(ret_from_fork)
@@ -60,18 +60,6 @@ ENTRY(ret_from_fork)
 	;    out whenever kernel_execve (now inline do_fork()) is involved
 	b    ret_from_exception
 END(ret_from_fork)
-
-#ifdef CONFIG_ARC_DW2_UNWIND
-; Workaround for bug 94179 (STAR ):
-; Despite -fasynchronous-unwind-tables, linker is not making dwarf2 unwinder
-; section (.debug_frame) as loadable. So we force it here.
-; This also fixes STAR 9000487933 where the prev-workaround (objcopy --setflag)
-; would not work after a clean build due to kernel build system dependencies.
-.section .debug_frame, "wa",@progbits
-
-; Reset to .text as this file is included in entry-<isa>.S
-.section .text, "ax",@progbits
-#endif
 
 ;################### Non TLB Exception Handling #############################
 
@@ -103,6 +91,12 @@ ENTRY(EV_MachineCheck)
 	lr  r2, [ecr]
 	lr  r0, [efa]
 	mov r1, sp
+
+	; hardware auto-disables MMU, re-enable it to allow kernel vaddr
+	; access for say stack unwinding of modules for crash dumps
+	lr	r3, [ARC_REG_PID]
+	or	r3, r3, MMU_ENABLE
+	sr	r3, [ARC_REG_PID]
 
 	lsr  	r3, r2, 8
 	bmsk 	r3, r3, 7
@@ -162,7 +156,6 @@ END(EV_Extension)
 tracesys:
 	; save EFA in case tracer wants the PC of traced task
 	; using ERET won't work since next-PC has already committed
-	lr  r12, [efa]
 	GET_CURR_TASK_FIELD_PTR   TASK_THREAD, r11
 	st  r12, [r11, THREAD_FAULT_ADDR]	; thread.fault_address
 
@@ -205,14 +198,8 @@ tracesys_exit:
 ; Breakpoint TRAP
 ; ---------------------------------------------
 trap_with_param:
-
-	; stop_pc info by gdb needs this info
-	lr  r0, [efa]
+	mov r0, r12	; EFA in case ptracer/gdb wants stop_pc
 	mov r1, sp
-
-	; Now that we have read EFA, it is safe to do "fake" rtie
-	;   and get out of CPU exception mode
-	FAKE_RET_FROM_EXCPN
 
 	; Save callee regs in case gdb wants to have a look
 	; SP will grow up by size of CALLEE Reg-File
@@ -240,15 +227,16 @@ ENTRY(EV_Trap)
 
 	EXCEPTION_PROLOGUE
 
+	lr  r12, [efa]
+
+	FAKE_RET_FROM_EXCPN
+
 	;============ TRAP 1   :breakpoints
 	; Check ECR for trap with arg (PROLOGUE ensures r9 has ECR)
 	bmsk.f 0, r9, 7
 	bnz    trap_with_param
 
 	;============ TRAP  (no param): syscall top level
-
-	; First return from Exception to pure K mode (Exception/IRQs renabled)
-	FAKE_RET_FROM_EXCPN
 
 	; If syscall tracing ongoing, invoke pre-post-hooks
 	GET_CURR_THR_INFO_FLAGS   r10
@@ -260,20 +248,18 @@ ENTRY(EV_Trap)
 	; syscall num shd not exceed the total system calls avail
 	cmp     r8,  NR_syscalls
 	mov.hi  r0, -ENOSYS
-	bhi     ret_from_system_call
+	bhi     .Lret_from_system_call
 
 	; Offset into the syscall_table and call handler
 	ld.as   r9,[sys_call_table, r8]
 	jl      [r9]        ; Entry into Sys Call Handler
 
-	; fall through to ret_from_system_call
-END(EV_Trap)
-
-ENTRY(ret_from_system_call)
+.Lret_from_system_call:
 
 	st  r0, [sp, PT_r0]     ; sys call return value in pt_regs
 
-	; fall through yet again to ret_from_exception
+	; fall through to ret_from_exception
+END(EV_Trap)
 
 ;############# Return from Intr/Excp/Trap (Linux Specifics) ##############
 ;

@@ -51,7 +51,6 @@ NESTED(except_vec3_generic, 0, sp)
  * Be careful when changing this, it has to be at most 256 (as a special
  * exception) bytes to fit into space reserved for the exception handler.
  */
-#ifndef CONFIG_CPU_RLX
 NESTED(except_vec3_r4000, 0, sp)
 	.set	push
 	.set	arch=r4000
@@ -105,7 +104,6 @@ handle_vcei:
 	eret
 	.set	pop
 	END(except_vec3_r4000)
-#endif
 
 	__FINIT
 
@@ -132,11 +130,10 @@ LEAF(__r4k_wait)
 	/* end of rollback region (the region size must be power of two) */
 1:
 	jr	ra
-	nop
+	 nop
 	.set	pop
 	END(__r4k_wait)
 
-#ifndef CONFIG_CPU_RLX
 	.macro	BUILD_ROLLBACK_PROLOGUE handler
 	FEXPORT(rollback_\handler)
 	.set	push
@@ -145,19 +142,15 @@ LEAF(__r4k_wait)
 	PTR_LA	k1, __r4k_wait
 	ori	k0, 0x1f	/* 32 byte rollback region */
 	xori	k0, 0x1f
-	bne	k0, k1, 9f
+	bne	k0, k1, \handler
 	MTC0	k0, CP0_EPC
-9:
 	.set pop
 	.endm
-#else
-	.macro	BUILD_ROLLBACK_PROLOGUE handler
-	.endm
-#endif
 
 	.align	5
 BUILD_ROLLBACK_PROLOGUE handle_int
 NESTED(handle_int, PT_SIZE, sp)
+	.cfi_signal_frame
 #ifdef CONFIG_TRACE_IRQFLAGS
 	/*
 	 * Check to see if the interrupted code has just disabled
@@ -172,14 +165,14 @@ NESTED(handle_int, PT_SIZE, sp)
 	.set	push
 	.set	noat
 	mfc0	k0, CP0_STATUS
-#if defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX) || defined(CONFIG_CPU_RLX)
+#if defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX)
 	and	k0, ST0_IEP
 	bnez	k0, 1f
 
 	mfc0	k0, CP0_EPC
 	.set	noreorder
 	j	k0
-	rfe
+	 rfe
 #else
 	and	k0, ST0_IE
 	bnez	k0, 1f
@@ -189,57 +182,57 @@ NESTED(handle_int, PT_SIZE, sp)
 1:
 	.set pop
 #endif
-	SAVE_ALL
+	SAVE_ALL docfi=1
 	CLI
 	TRACE_IRQS_OFF
 
 	LONG_L	s0, TI_REGS($28)
 	LONG_S	sp, TI_REGS($28)
-	PTR_LA	ra, ret_from_irq
-	PTR_LA  v0, plat_irq_dispatch
-	jr	v0
+
+	/*
+	 * SAVE_ALL ensures we are using a valid kernel stack for the thread.
+	 * Check if we are already using the IRQ stack.
+	 */
+	move	s1, sp # Preserve the sp
+
+	/* Get IRQ stack for this CPU */
+	ASM_CPUID_MFC0	k0, ASM_SMP_CPUID_REG
+#if defined(CONFIG_32BIT) || defined(KBUILD_64BIT_SYM32)
+	lui	k1, %hi(irq_stack)
+#else
+	lui	k1, %highest(irq_stack)
+	daddiu	k1, %higher(irq_stack)
+	dsll	k1, 16
+	daddiu	k1, %hi(irq_stack)
+	dsll	k1, 16
+#endif
+	LONG_SRL	k0, SMP_CPUID_PTRSHIFT
+	LONG_ADDU	k1, k0
+	LONG_L	t0, %lo(irq_stack)(k1)
+
+	# Check if already on IRQ stack
+	PTR_LI	t1, ~(_THREAD_SIZE-1)
+	and	t1, t1, sp
+	beq	t0, t1, 2f
+
+	/* Switch to IRQ stack */
+	li	t1, _IRQ_STACK_START
+	PTR_ADD sp, t0, t1
+
+	/* Save task's sp on IRQ stack so that unwinding can follow it */
+	LONG_S	s1, 0(sp)
+2:
+	jal	plat_irq_dispatch
+
+	/* Restore sp */
+	move	sp, s1
+
+	j	ret_from_irq
 #ifdef CONFIG_CPU_MICROMIPS
 	nop
 #endif
 	END(handle_int)
 
-#ifdef CONFIG_CPU_RLX
-	.align	6
-NESTED(handle_vec, PT_SIZE, sp)
-	.set push
-	.set noreorder
-	b	9f
-	 li	k0, 0
-	b	9f
-	 li	k0, 1
-	b	9f
-	 li	k0, 2
-	b	9f
-	 li	k0, 3
-	b	9f
-	 li	k0, 4
-	b	9f
-	 li	k0, 5
-	b	9f
-	 li	k0, 6
-	b	9f
-	 li	k0, 7
-	.set pop
-
-9:	mtlxc0	k0, LXCP0_TR1
-	SAVE_ALL
-	CLI
-	TRACE_IRQS_OFF
-
-	LONG_L	s0, TI_REGS($28)
-	LONG_S	sp, TI_REGS($28)
-	PTR_LA	ra, ret_from_irq
-	mflxc0	a0, LXCP0_TR1
-	j	mips_do_lopi_IRQ
-	END(handle_vec)
-#endif
-
-#ifndef CONFIG_CPU_RLX
 	__INIT
 
 /*
@@ -275,11 +268,10 @@ NESTED(except_vec_ejtag_debug, 0, sp)
  * This prototype is copied to ebase + n*IntCtl.VS and patched
  * to invoke the handler
  */
-#ifdef CONFIG_CPU_MIPSR2_IRQ_VI
 BUILD_ROLLBACK_PROLOGUE except_vec_vi
 NESTED(except_vec_vi, 0, sp)
-	SAVE_SOME
-	SAVE_AT
+	SAVE_SOME docfi=1
+	SAVE_AT docfi=1
 	.set	push
 	.set	noreorder
 	PTR_LA	v1, except_vec_vi_handler
@@ -308,10 +300,47 @@ NESTED(except_vec_vi_handler, 0, sp)
 
 	LONG_L	s0, TI_REGS($28)
 	LONG_S	sp, TI_REGS($28)
-	PTR_LA	ra, ret_from_irq
-	jr	v0
-	END(except_vec_vi_handler)
+
+	/*
+	 * SAVE_ALL ensures we are using a valid kernel stack for the thread.
+	 * Check if we are already using the IRQ stack.
+	 */
+	move	s1, sp # Preserve the sp
+
+	/* Get IRQ stack for this CPU */
+	ASM_CPUID_MFC0	k0, ASM_SMP_CPUID_REG
+#if defined(CONFIG_32BIT) || defined(KBUILD_64BIT_SYM32)
+	lui	k1, %hi(irq_stack)
+#else
+	lui	k1, %highest(irq_stack)
+	daddiu	k1, %higher(irq_stack)
+	dsll	k1, 16
+	daddiu	k1, %hi(irq_stack)
+	dsll	k1, 16
 #endif
+	LONG_SRL	k0, SMP_CPUID_PTRSHIFT
+	LONG_ADDU	k1, k0
+	LONG_L	t0, %lo(irq_stack)(k1)
+
+	# Check if already on IRQ stack
+	PTR_LI	t1, ~(_THREAD_SIZE-1)
+	and	t1, t1, sp
+	beq	t0, t1, 2f
+
+	/* Switch to IRQ stack */
+	li	t1, _IRQ_STACK_START
+	PTR_ADD sp, t0, t1
+
+	/* Save task's sp on IRQ stack so that unwinding can follow it */
+	LONG_S	s1, 0(sp)
+2:
+	jalr	v0
+
+	/* Restore sp */
+	move	sp, s1
+
+	j	ret_from_irq
+	END(except_vec_vi_handler)
 
 /*
  * EJTAG debug exception handler.
@@ -325,20 +354,60 @@ NESTED(ejtag_debug_handler, PT_SIZE, sp)
 	sll	k0, k0, 30	# Check for SDBBP.
 	bgez	k0, ejtag_return
 
+#ifdef CONFIG_SMP
+1:	PTR_LA	k0, ejtag_debug_buffer_spinlock
+	ll	k0, 0(k0)
+	bnez	k0, 1b
+	PTR_LA	k0, ejtag_debug_buffer_spinlock
+	sc	k0, 0(k0)
+	beqz	k0, 1b
+# ifdef CONFIG_WEAK_REORDERING_BEYOND_LLSC
+	sync
+# endif
+
 	PTR_LA	k0, ejtag_debug_buffer
 	LONG_S	k1, 0(k0)
+
+	ASM_CPUID_MFC0 k1, ASM_SMP_CPUID_REG
+	PTR_SRL	k1, SMP_CPUID_PTRSHIFT
+	PTR_SLL	k1, LONGLOG
+	PTR_LA	k0, ejtag_debug_buffer_per_cpu
+	PTR_ADDU k0, k1
+
+	PTR_LA	k1, ejtag_debug_buffer
+	LONG_L	k1, 0(k1)
+	LONG_S	k1, 0(k0)
+
+	PTR_LA	k0, ejtag_debug_buffer_spinlock
+	sw	zero, 0(k0)
+#else
+	PTR_LA	k0, ejtag_debug_buffer
+	LONG_S	k1, 0(k0)
+#endif
+
 	SAVE_ALL
 	move	a0, sp
 	jal	ejtag_exception_handler
 	RESTORE_ALL
+
+#ifdef CONFIG_SMP
+	ASM_CPUID_MFC0 k1, ASM_SMP_CPUID_REG
+	PTR_SRL	k1, SMP_CPUID_PTRSHIFT
+	PTR_SLL	k1, LONGLOG
+	PTR_LA	k0, ejtag_debug_buffer_per_cpu
+	PTR_ADDU k0, k1
+	LONG_L	k1, 0(k0)
+#else
 	PTR_LA	k0, ejtag_debug_buffer
 	LONG_L	k1, 0(k0)
+#endif
 
 ejtag_return:
+	back_to_back_c0_hazard
 	MFC0	k0, CP0_DESAVE
 	.set	mips32
 	deret
-	.set pop
+	.set	pop
 	END(ejtag_debug_handler)
 
 /*
@@ -348,6 +417,12 @@ ejtag_return:
 	.data
 EXPORT(ejtag_debug_buffer)
 	.fill	LONGSIZE
+#ifdef CONFIG_SMP
+EXPORT(ejtag_debug_buffer_spinlock)
+	.fill	LONGSIZE
+EXPORT(ejtag_debug_buffer_per_cpu)
+	.fill	LONGSIZE * NR_CPUS
+#endif
 	.previous
 
 	__INIT
@@ -368,6 +443,7 @@ NESTED(except_vec_nmi, 0, sp)
 	__FINIT
 
 NESTED(nmi_handler, PT_SIZE, sp)
+	.cfi_signal_frame
 	.set	push
 	.set	noat
 	/*
@@ -375,10 +451,10 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	 * Clear BEV - required for page fault exception handler to work
 	 */
 	mfc0	k0, CP0_STATUS
-	ori     k0, k0, ST0_EXL
+	ori	k0, k0, ST0_EXL
 	li	k1, ~(ST0_BEV | ST0_ERL)
-	and     k0, k0, k1
-	mtc0    k0, CP0_STATUS
+	and	k0, k0, k1
+	mtc0	k0, CP0_STATUS
 	_ehb
 	SAVE_ALL
 	move	a0, sp
@@ -386,7 +462,6 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	/* nmi_exception_handler never returns */
 	.set	pop
 	END(nmi_handler)
-#endif
 
 	.macro	__build_clear_none
 	.endm
@@ -401,24 +476,22 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	TRACE_IRQS_OFF
 	.endm
 
-#ifdef CONFIG_CPU_HAS_FPU
 	.macro	__build_clear_fpe
+	CLI
+	TRACE_IRQS_OFF
 	.set	push
 	/* gas fails to assemble cfc1 for some archs (octeon).*/ \
 	.set	mips1
 	SET_HARDFLOAT
 	cfc1	a1, fcr31
 	.set	pop
-	CLI
-	TRACE_IRQS_OFF
 	.endm
 
 	.macro	__build_clear_msa_fpe
-	_cfcmsa	a1, MSA_CSR
 	CLI
 	TRACE_IRQS_OFF
+	_cfcmsa	a1, MSA_CSR
 	.endm
-#endif
 
 	.macro	__build_clear_ade
 	MFC0	t0, CP0_BADVADDR
@@ -445,7 +518,7 @@ NESTED(nmi_handler, PT_SIZE, sp)
 
 	.macro	__BUILD_count exception
 	LONG_L	t0,exception_count_\exception
-	LONG_ADDIU t0, 1
+	LONG_ADDIU	t0, 1
 	LONG_S	t0,exception_count_\exception
 	.comm	exception_count\exception, 8, 8
 	.endm
@@ -453,6 +526,7 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	.macro	__BUILD_HANDLER exception handler clear verbose ext
 	.align	5
 	NESTED(handle_\exception, PT_SIZE, sp)
+	.cfi_signal_frame
 	.set	noat
 	SAVE_ALL
 	FEXPORT(handle_\exception\ext)
@@ -460,8 +534,8 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	.set	at
 	__BUILD_\verbose \exception
 	move	a0, sp
-	PTR_LA	ra, ret_from_exception
-	j	do_\handler
+	jal	do_\handler
+	j	ret_from_exception
 	END(handle_\exception)
 	.endm
 
@@ -477,40 +551,37 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	BUILD_HANDLER ri ri sti silent			/* #10 */
 	BUILD_HANDLER cpu cpu sti silent		/* #11 */
 	BUILD_HANDLER ov ov sti silent			/* #12 */
-#ifndef CONFIG_CPU_RLX
 	BUILD_HANDLER tr tr sti silent			/* #13 */
 	BUILD_HANDLER msa_fpe msa_fpe msa_fpe silent	/* #14 */
 	BUILD_HANDLER fpe fpe fpe silent		/* #15 */
 	BUILD_HANDLER ftlb ftlb none silent		/* #16 */
 	BUILD_HANDLER msa msa sti silent		/* #21 */
 	BUILD_HANDLER mdmx mdmx sti silent		/* #22 */
-#endif
 #ifdef	CONFIG_HARDWARE_WATCHPOINTS
 	/*
 	 * For watch, interrupts will be enabled after the watch
 	 * registers are read.
 	 */
 	BUILD_HANDLER watch watch cli silent		/* #23 */
+#else
+	BUILD_HANDLER watch watch sti verbose		/* #23 */
 #endif
-#ifndef CONFIG_CPU_RLX
 	BUILD_HANDLER mcheck mcheck cli verbose		/* #24 */
 	BUILD_HANDLER mt mt sti silent			/* #25 */
 	BUILD_HANDLER dsp dsp sti silent		/* #26 */
-#endif
 	BUILD_HANDLER reserved reserved sti verbose	/* others */
 
-#if !defined(CONFIG_CPU_RLX) && !defined(CONFIG_CPU_HAS_TLS)
 	.align	5
-	LEAF(handle_ri_rdhwr_vivt)
+	LEAF(handle_ri_rdhwr_tlbp)
 	.set	push
 	.set	noat
 	.set	noreorder
 	/* check if TLB contains a entry for EPC */
 	MFC0	k1, CP0_ENTRYHI
-	andi	k1, 0xff	/* ASID_MASK */
+	andi	k1, MIPS_ENTRYHI_ASID | MIPS_ENTRYHI_ASIDX
 	MFC0	k0, CP0_EPC
-	PTR_SRL k0, _PAGE_SHIFT + 1
-	PTR_SLL k0, _PAGE_SHIFT + 1
+	PTR_SRL	k0, _PAGE_SHIFT + 1
+	PTR_SLL	k0, _PAGE_SHIFT + 1
 	or	k1, k0
 	MTC0	k1, CP0_ENTRYHI
 	mtc0_tlbw_hazard
@@ -520,7 +591,7 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	.set	pop
 	bltz	k1, handle_ri	/* slow path */
 	/* fall thru */
-	END(handle_ri_rdhwr_vivt)
+	END(handle_ri_rdhwr_tlbp)
 
 	LEAF(handle_ri_rdhwr)
 	.set	push
@@ -530,27 +601,27 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	/* microMIPS: 0x007d6b3c: rdhwr v1,$29 */
 	MFC0	k1, CP0_EPC
 #if defined(CONFIG_CPU_MICROMIPS) || defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS64_R2)
-	and     k0, k1, 1
-	beqz    k0, 1f
-	xor     k1, k0
-	lhu     k0, (k1)
-	lhu     k1, 2(k1)
-	ins     k1, k0, 16, 16
-	lui     k0, 0x007d
-	b       docheck
-	ori     k0, 0x6b3c
+	and	k0, k1, 1
+	beqz	k0, 1f
+	 xor	k1, k0
+	lhu	k0, (k1)
+	lhu	k1, 2(k1)
+	ins	k1, k0, 16, 16
+	lui	k0, 0x007d
+	b	docheck
+	 ori	k0, 0x6b3c
 1:
-	lui     k0, 0x7c03
-	lw      k1, (k1)
-	ori     k0, 0xe83b
+	lui	k0, 0x7c03
+	lw	k1, (k1)
+	ori	k0, 0xe83b
 #else
-	andi    k0, k1, 1
-	bnez    k0, handle_ri
-	lui     k0, 0x7c03
-	lw      k1, (k1)
-	ori     k0, 0xe83b
+	andi	k0, k1, 1
+	bnez	k0, handle_ri
+	 lui	k0, 0x7c03
+	lw	k1, (k1)
+	ori	k0, 0xe83b
 #endif
-	.set    reorder
+	.set	reorder
 docheck:
 	bne	k0, k1, handle_ri	/* if not ours */
 
@@ -585,7 +656,6 @@ isrdhwr:
 #endif
 	.set	pop
 	END(handle_ri_rdhwr)
-#endif
 
 #ifdef CONFIG_64BIT
 /* A temporary overflow handler used by check_daddi(). */

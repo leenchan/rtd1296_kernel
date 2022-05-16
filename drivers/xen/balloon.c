@@ -41,8 +41,8 @@
 #include <linux/cpu.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/cred.h>
 #include <linux/errno.h>
-#include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/bootmem.h>
 #include <linux/pagemap.h>
@@ -71,6 +71,7 @@
 #include <xen/balloon.h>
 #include <xen/features.h>
 #include <xen/page.h>
+#include <xen/mem-reservation.h>
 
 static int xen_hotplug_unpopulated;
 
@@ -157,13 +158,6 @@ static DECLARE_DELAYED_WORK(balloon_worker, balloon_process);
 #define GFP_BALLOON \
 	(GFP_HIGHUSER | __GFP_NOWARN | __GFP_NORETRY | __GFP_NOMEMALLOC)
 
-static void scrub_page(struct page *page)
-{
-#ifdef CONFIG_XEN_SCRUB_PAGES
-	clear_highpage(page);
-#endif
-}
-
 /* balloon_append: add the given page to the balloon. */
 static void __balloon_append(struct page *page)
 {
@@ -181,7 +175,6 @@ static void __balloon_append(struct page *page)
 static void balloon_append(struct page *page)
 {
 	__balloon_append(page);
-	adjust_managed_page_count(page, -1);
 }
 
 /* balloon_retrieve: rescue a page from the balloon, if it is not empty. */
@@ -201,8 +194,6 @@ static struct page *balloon_retrieve(bool require_lowmem)
 		balloon_stats.balloon_high--;
 	else
 		balloon_stats.balloon_low--;
-
-	adjust_managed_page_count(page, 1);
 
 	return page;
 }
@@ -270,7 +261,7 @@ static struct resource *additional_memory_resource(phys_addr_t size)
 		return NULL;
 
 	res->name = "System RAM";
-	res->flags = IORESOURCE_MEM | IORESOURCE_BUSY;
+	res->flags = IORESOURCE_SYSTEM_RAM | IORESOURCE_BUSY;
 
 	ret = allocate_resource(&iomem_resource, res,
 				size, 0, -1,
@@ -352,7 +343,19 @@ static enum bp_state reserve_additional_memory(void)
 	}
 #endif
 
-	rc = add_memory_resource(nid, resource);
+	/*
+	 * add_memory_resource() will call online_pages() which in its turn
+	 * will call xen_online_page() callback causing deadlock if we don't
+	 * release balloon_mutex here. Unlocking here is safe because the
+	 * callers drop the mutex before trying again.
+	 */
+	mutex_unlock(&balloon_mutex);
+	/* add_memory_resource() requires the device_hotplug lock */
+	lock_device_hotplug();
+	rc = add_memory_resource(nid, resource, memhp_auto_online);
+	unlock_device_hotplug();
+	mutex_lock(&balloon_mutex);
+
 	if (rc) {
 		pr_warn("Cannot add additional memory (%i)\n", rc);
 		goto err;
@@ -392,7 +395,8 @@ static struct notifier_block xen_memory_nb = {
 #else
 static enum bp_state reserve_additional_memory(void)
 {
-	balloon_stats.target_pages = balloon_stats.current_pages;
+	balloon_stats.target_pages = balloon_stats.current_pages +
+				     balloon_stats.target_unpopulated;
 	return BP_ECANCELED;
 }
 #endif /* CONFIG_XEN_BALLOON_MEMORY_HOTPLUG */
@@ -412,11 +416,6 @@ static enum bp_state increase_reservation(unsigned long nr_pages)
 	int rc;
 	unsigned long i;
 	struct page   *page;
-	struct xen_memory_reservation reservation = {
-		.address_bits = 0,
-		.extent_order = EXTENT_ORDER,
-		.domid        = DOMID_SELF
-	};
 
 	if (nr_pages > ARRAY_SIZE(frame_list))
 		nr_pages = ARRAY_SIZE(frame_list);
@@ -428,16 +427,11 @@ static enum bp_state increase_reservation(unsigned long nr_pages)
 			break;
 		}
 
-		/* XENMEM_populate_physmap requires a PFN based on Xen
-		 * granularity.
-		 */
 		frame_list[i] = page_to_xen_pfn(page);
 		page = balloon_next_page(page);
 	}
 
-	set_xen_guest_handle(reservation.extent_start, frame_list);
-	reservation.nr_extents = nr_pages;
-	rc = HYPERVISOR_memory_op(XENMEM_populate_physmap, &reservation);
+	rc = xenmem_reservation_increase(nr_pages, frame_list);
 	if (rc <= 0)
 		return BP_EAGAIN;
 
@@ -445,32 +439,10 @@ static enum bp_state increase_reservation(unsigned long nr_pages)
 		page = balloon_retrieve(false);
 		BUG_ON(page == NULL);
 
-#ifdef CONFIG_XEN_HAVE_PVMMU
-		/*
-		 * We don't support PV MMU when Linux and Xen is using
-		 * different page granularity.
-		 */
-		BUILD_BUG_ON(XEN_PAGE_SIZE != PAGE_SIZE);
-
-		if (!xen_feature(XENFEAT_auto_translated_physmap)) {
-			unsigned long pfn = page_to_pfn(page);
-
-			set_phys_to_machine(pfn, frame_list[i]);
-
-			/* Link back into the page tables if not highmem. */
-			if (!PageHighMem(page)) {
-				int ret;
-				ret = HYPERVISOR_update_va_mapping(
-						(unsigned long)__va(pfn << PAGE_SHIFT),
-						mfn_pte(frame_list[i], PAGE_KERNEL),
-						0);
-				BUG_ON(ret);
-			}
-		}
-#endif
+		xenmem_reservation_va_mapping_update(1, &page, &frame_list[i]);
 
 		/* Relinquish the page back to the allocator. */
-		__free_reserved_page(page);
+		free_reserved_page(page);
 	}
 
 	balloon_stats.current_pages += rc;
@@ -484,11 +456,6 @@ static enum bp_state decrease_reservation(unsigned long nr_pages, gfp_t gfp)
 	unsigned long i;
 	struct page *page, *tmp;
 	int ret;
-	struct xen_memory_reservation reservation = {
-		.address_bits = 0,
-		.extent_order = EXTENT_ORDER,
-		.domid        = DOMID_SELF
-	};
 	LIST_HEAD(pages);
 
 	if (nr_pages > ARRAY_SIZE(frame_list))
@@ -501,7 +468,8 @@ static enum bp_state decrease_reservation(unsigned long nr_pages, gfp_t gfp)
 			state = BP_EAGAIN;
 			break;
 		}
-		scrub_page(page);
+		adjust_managed_page_count(page, -1);
+		xenmem_reservation_scrub_page(page);
 		list_add(&page->lru, &pages);
 	}
 
@@ -520,28 +488,10 @@ static enum bp_state decrease_reservation(unsigned long nr_pages, gfp_t gfp)
 	 */
 	i = 0;
 	list_for_each_entry_safe(page, tmp, &pages, lru) {
-		/* XENMEM_decrease_reservation requires a GFN */
 		frame_list[i++] = xen_page_to_gfn(page);
 
-#ifdef CONFIG_XEN_HAVE_PVMMU
-		/*
-		 * We don't support PV MMU when Linux and Xen is using
-		 * different page granularity.
-		 */
-		BUILD_BUG_ON(XEN_PAGE_SIZE != PAGE_SIZE);
+		xenmem_reservation_va_mapping_reset(1, &page);
 
-		if (!xen_feature(XENFEAT_auto_translated_physmap)) {
-			unsigned long pfn = page_to_pfn(page);
-
-			if (!PageHighMem(page)) {
-				ret = HYPERVISOR_update_va_mapping(
-						(unsigned long)__va(pfn << PAGE_SHIFT),
-						__pte_ma(0), 0);
-				BUG_ON(ret);
-			}
-			__set_phys_to_machine(pfn, INVALID_P2M_ENTRY);
-		}
-#endif
 		list_del(&page->lru);
 
 		balloon_append(page);
@@ -549,9 +499,7 @@ static enum bp_state decrease_reservation(unsigned long nr_pages, gfp_t gfp)
 
 	flush_tlb_all();
 
-	set_xen_guest_handle(reservation.extent_start, frame_list);
-	reservation.nr_extents   = nr_pages;
-	ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
+	ret = xenmem_reservation_decrease(nr_pages, frame_list);
 	BUG_ON(ret != nr_pages);
 
 	balloon_stats.current_pages -= nr_pages;
@@ -583,8 +531,15 @@ static void balloon_process(struct work_struct *work)
 				state = reserve_additional_memory();
 		}
 
-		if (credit < 0)
-			state = decrease_reservation(-credit, GFP_BALLOON);
+		if (credit < 0) {
+			long n_pages;
+
+			n_pages = min(-credit, si_mem_available());
+			state = decrease_reservation(n_pages, GFP_BALLOON);
+			if (state == BP_DONE && n_pages != -credit &&
+			    n_pages < totalreserve_pages)
+				state = BP_EAGAIN;
+		}
 
 		state = update_schedule(state);
 
@@ -623,6 +578,9 @@ static int add_ballooned_pages(int nr_pages)
 		}
 	}
 
+	if (si_mem_available() < nr_pages)
+		return -ENOMEM;
+
 	st = decrease_reservation(nr_pages, GFP_USER);
 	if (st != BP_DONE)
 		return -ENOMEM;
@@ -657,9 +615,11 @@ int alloc_xenballooned_pages(int nr_pages, struct page **pages)
 			 */
 			BUILD_BUG_ON(XEN_PAGE_SIZE != PAGE_SIZE);
 
-			ret = xen_alloc_p2m_entry(page_to_pfn(page));
-			if (ret < 0)
-				goto out_undo;
+			if (!xen_feature(XENFEAT_auto_translated_physmap)) {
+				ret = xen_alloc_p2m_entry(page_to_pfn(page));
+				if (ret < 0)
+					goto out_undo;
+			}
 #endif
 		} else {
 			ret = add_ballooned_pages(nr_pages - pgno);
@@ -702,6 +662,7 @@ void free_xenballooned_pages(int nr_pages, struct page **pages)
 }
 EXPORT_SYMBOL(free_xenballooned_pages);
 
+#ifdef CONFIG_XEN_PV
 static void __init balloon_add_region(unsigned long start_pfn,
 				      unsigned long pages)
 {
@@ -725,19 +686,22 @@ static void __init balloon_add_region(unsigned long start_pfn,
 
 	balloon_stats.total_pages += extra_pfn_end - start_pfn;
 }
+#endif
 
 static int __init balloon_init(void)
 {
-	int i;
-
 	if (!xen_domain())
 		return -ENODEV;
 
 	pr_info("Initialising balloon driver\n");
 
+#ifdef CONFIG_XEN_PV
 	balloon_stats.current_pages = xen_pv_domain()
 		? min(xen_start_info->nr_pages - xen_released_pages, max_pfn)
 		: get_num_physpages();
+#else
+	balloon_stats.current_pages = get_num_physpages();
+#endif
 	balloon_stats.target_pages  = balloon_stats.current_pages;
 	balloon_stats.balloon_low   = 0;
 	balloon_stats.balloon_high  = 0;
@@ -746,7 +710,7 @@ static int __init balloon_init(void)
 	balloon_stats.schedule_delay = 1;
 	balloon_stats.max_schedule_delay = 32;
 	balloon_stats.retry_count = 1;
-	balloon_stats.max_retry_count = RETRY_UNLIMITED;
+	balloon_stats.max_retry_count = 4;
 
 #ifdef CONFIG_XEN_BALLOON_MEMORY_HOTPLUG
 	set_online_page_callback(&xen_online_page);
@@ -754,18 +718,24 @@ static int __init balloon_init(void)
 	register_sysctl_table(xen_root);
 #endif
 
-	/*
-	 * Initialize the balloon with pages from the extra memory
-	 * regions (see arch/x86/xen/setup.c).
-	 */
-	for (i = 0; i < XEN_EXTRA_MEM_MAX_REGIONS; i++)
-		if (xen_extra_mem[i].n_pfns)
-			balloon_add_region(xen_extra_mem[i].start_pfn,
-					   xen_extra_mem[i].n_pfns);
+#ifdef CONFIG_XEN_PV
+	{
+		int i;
+
+		/*
+		 * Initialize the balloon with pages from the extra memory
+		 * regions (see arch/x86/xen/setup.c).
+		 */
+		for (i = 0; i < XEN_EXTRA_MEM_MAX_REGIONS; i++)
+			if (xen_extra_mem[i].n_pfns)
+				balloon_add_region(xen_extra_mem[i].start_pfn,
+						   xen_extra_mem[i].n_pfns);
+	}
+#endif
+
+	/* Init the xen-balloon driver. */
+	xen_balloon_init();
 
 	return 0;
 }
-
 subsys_initcall(balloon_init);
-
-MODULE_LICENSE("GPL");

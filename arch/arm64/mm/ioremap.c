@@ -55,11 +55,8 @@ static void __iomem *__ioremap_caller(phys_addr_t phys_addr, size_t size,
 	/*
 	 * Don't allow RAM to be mapped.
 	 */
-#ifdef CONFIG_RTK_MEM_REMAP     //Allow Realtek RTD1295 to mapping RAM area, jamestai20151213
-#else
-        if (WARN_ON(pfn_valid(__phys_to_pfn(phys_addr))))
-                return NULL;
-#endif
+	if (WARN_ON(pfn_valid(__phys_to_pfn(phys_addr))))
+		return NULL;
 
 	area = get_vm_area_caller(size, VM_IOREMAP, caller);
 	if (!area)
@@ -78,16 +75,6 @@ static void __iomem *__ioremap_caller(phys_addr_t phys_addr, size_t size,
 
 void __iomem *__ioremap(phys_addr_t phys_addr, size_t size, pgprot_t prot)
 {
-#ifdef CONFIG_PCIE_RTD1295
-	if (is_pcie1_memory((u64)phys_addr))
-		return (void __iomem *)phys_addr;
-#endif
-
-#ifdef CONFIG_PCIE2_RTD1295
-	if (is_pcie2_memory((u64)phys_addr))
-		return (void __iomem *)phys_addr;
-#endif
-
 	return __ioremap_caller(phys_addr, size, prot,
 				__builtin_return_address(0));
 }
@@ -97,21 +84,11 @@ void __iounmap(volatile void __iomem *io_addr)
 {
 	unsigned long addr = (unsigned long)io_addr & PAGE_MASK;
 
-#ifdef CONFIG_PCIE_RTD1295
-	if (is_pcie1_memory((u64)io_addr))
-		return;
-#endif
-
-#ifdef CONFIG_PCIE2_RTD1295
-	if (is_pcie2_memory((u64)io_addr))
-		return;
-#endif
-
 	/*
 	 * We could get an address outside vmalloc range in case
 	 * of ioremap_cache() reusing a RAM mapping.
 	 */
-	if (VMALLOC_START <= addr && addr < VMALLOC_END)
+	if (is_vmalloc_addr((void *)addr))
 		vunmap((void *)addr);
 }
 EXPORT_SYMBOL(__iounmap);

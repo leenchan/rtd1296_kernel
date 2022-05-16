@@ -6,6 +6,11 @@
 * Abstract :
 * Author : Yung-Chieh Lo (yjlou@realtek.com.tw)
 * $Id: romeperf.c,v 1.1 2007-12-21 10:28:22 davidhsu Exp $
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
 */
 
 #include "romeperf.h"
@@ -118,7 +123,7 @@ __asm__ __volatile__ \
 #else
 /* set counter controls:  	0   	 	1 		2 		3
 ** counter0 cycles	  		(0x08) 	(0x08) 	(0x08) 	(0x08)
-** counter1 ifetches 	  	(0x01) 	(0x01) 	(0x01)	
+** counter1 ifetches 	  	(0x01) 	(0x01) 	(0x01)
 ** counter1 dmiss busy			       				(0x0b)
 ** counter2 ld+stores 	  	(0x06)	       			(0x06)
 ** counter2 icache misses	 		(0x02) 	(0x02)
@@ -519,7 +524,7 @@ int rtl865x_perf_proc_read( char *page, char **start, off_t off, int count, int 
 	//spin_lock_irq(x);
 	unsigned long flags = 0;
 	local_irq_save(flags);
-	
+
 
 //	rtl8651_romeperfDump(79, 98);
 	rtl8651_romeperfDump(79, 80);

@@ -12,42 +12,6 @@ menuconfig UIO
 
 if UIO
 
-config UIO_ASSIGN_MINOR
-	bool "UIO supports assigning minor number"
-	default n
-
-config UIO_RTK_RBUS
-	bool "Memory mapping RBUS area to userspace"
-	default n
-	select UIO_ASSIGN_MINOR
-	help
-	  Memory mapping RBUS area to userspace
-
-config UIO_RTK_REFCLK
-	bool "Memory mapping Reference Clock area to userspace"
-	default n
-	select UIO_ASSIGN_MINOR
-	help
-	  Memory mapping Reference Clock area to userspace
-
-config UIO_RTK_SE
-	bool "Streaming Engine driver use UIO mode"
-	default n
-	select UIO_ASSIGN_MINOR
-	select CONFIG_UIO_PDRV_GENIRQ
-	select CONFIG_UIO_DMEM_GENIRQ
-	help
-	  Realtek Streaming Engine driver using UIO mode
-	  
-config UIO_RTK_MD
-	bool "Moving Data Engine driver use UIO mode"
-	default n
-	select UIO_ASSIGN_MINOR
-	select CONFIG_UIO_PDRV_GENIRQ
-	select CONFIG_UIO_DMEM_GENIRQ
-	help
-	  Realtek Moving Data Engine driver using UIO mode
-
 config UIO_CIF
 	tristate "generic Hilscher CIF Card driver"
 	depends on PCI
@@ -191,4 +155,13 @@ config UIO_MF624
 
 	  If you compile this as a module, it will be called uio_mf624.
 
+config UIO_HV_GENERIC
+	tristate "Generic driver for Hyper-V VMBus"
+	depends on HYPERV
+	help
+	  Generic driver that you can bind, dynamically, to any
+	  Hyper-V VMBus device. It is useful to provide direct access
+	  to network and storage devices from userspace.
+
+	  If you compile this as a module, it will be called uio_hv_generic.
 endif

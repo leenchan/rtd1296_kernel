@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2017 Realtek Semiconductor Corporation.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ */
+
 /**************************************************************
 // Spec Version                  : 0.1.4
 // Parser Version                : DVR_Parser_6.11(120105)
@@ -5,7 +14,7 @@
 // Naming Rule                   :  Module_Register_Name
 // Naming Rule                   : Module_Register_Name
 // Parse Option                  : Only Parse _op1
-// Parse Address Region          : All Address Region 
+// Parse Address Region          : All Address Region
 // Decode bit number             : 12 bits
 // Firmware Header Generate Date : 2015/7/3 10:28:8
 ***************************************************************/
@@ -14,7 +23,7 @@
 #ifndef _ISO_REG_H_INCLUDED_
 #define _ISO_REG_H_INCLUDED_
 #ifdef  _ISO_USE_STRUCT
-typedef struct 
+typedef struct
 {
 unsigned int     i2c1_req_int:1;
 unsigned int     porb_av_cen_int:1;
@@ -42,7 +51,7 @@ unsigned int     tc3_int:1;
 unsigned int     write_data:1;
 }ISO_ISR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     i2c1_req_int:1;
 unsigned int     porb_av_cen_int:1;
@@ -64,7 +73,7 @@ unsigned int     tc3_int:1;
 unsigned int     write_data:1;
 }ISO_UMSK_ISR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     int30_a:1;
 unsigned int     int29_a:1;
@@ -100,7 +109,7 @@ unsigned int     int0_a:1;
 unsigned int     write_data:1;
 }ISO_UMSK_ISR_GPA0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     int30_da:1;
 unsigned int     int29_da:1;
@@ -136,7 +145,7 @@ unsigned int     int0_da:1;
 unsigned int     write_data:1;
 }ISO_UMSK_ISR_GPDA0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     int34_a:1;
@@ -146,7 +155,7 @@ unsigned int     int31_a:1;
 unsigned int     write_data:1;
 }ISO_UMSK_ISR_GPA1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     int34_da:1;
@@ -156,20 +165,20 @@ unsigned int     int31_da:1;
 unsigned int     write_data:1;
 }ISO_UMSK_ISR_GPDA1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     gp_int:31;
 unsigned int     reserved_0:1;
 }ISO_FAST_INT_EN_0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     gp_int:4;
 unsigned int     reserved_1:1;
 }ISO_FAST_INT_EN_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     gpioda_int:1;
@@ -177,12 +186,12 @@ unsigned int     gpioa_int:1;
 unsigned int     write_data:1;
 }ISO_FAST_ISR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dmy:32;
 }ISO_RESERVED_USE_3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     write_en2:1;
@@ -193,7 +202,7 @@ unsigned int     reserved_2:2;
 unsigned int     enable:1;
 }ISO_REG_DBG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     write_en5:1;
 unsigned int     standby_dbg_sel:7;
@@ -211,7 +220,7 @@ unsigned int     reserved_3:2;
 unsigned int     enable:1;
 }ISO_DBG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     testmode:1;
@@ -219,19 +228,19 @@ unsigned int     boot_sel:1;
 unsigned int     bound_opt:14;
 }ISO_CHIP_INFO1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:6;
 unsigned int     pow_latch:26;
 }ISO_CHIP_INFO2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:6;
 unsigned int     pow_latch_ori:26;
 }ISO_CHIP_INFO3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:14;
 unsigned int     write_en9:1;
@@ -254,7 +263,7 @@ unsigned int     write_en1:1;
 unsigned int     ejtag_en:1;
 }ISO_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     hsec_sync:1;
@@ -262,7 +271,7 @@ unsigned int     hsec_int_en:1;
 unsigned int     alarm_int_en:1;
 }ISO_RTC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     bi_bypass:1;
@@ -270,14 +279,14 @@ unsigned int     iso_ctrl_en1:1;
 unsigned int     iso_ctrl_en0:1;
 }ISO_CELL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     top_vdd_on:1;
 unsigned int     scpu_vdd_on:1;
 }ISO_POWER;
 
-typedef struct 
+typedef struct
 {
 unsigned int     i2c1_req:1;
 unsigned int     porb_av_cen:1;
@@ -301,7 +310,7 @@ unsigned int     ur0:1;
 unsigned int     reserved_8:2;
 }ISO_SCPU_INT_EN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     dcp_ctrl3:1;
@@ -310,7 +319,7 @@ unsigned int     dcp_ctrl1:1;
 unsigned int     dcp_ctrl0:1;
 }ISO_USB;
 
-typedef struct 
+typedef struct
 {
 unsigned int     i2c1_req:1;
 unsigned int     reserved_0:8;
@@ -332,18 +341,18 @@ unsigned int     ur0:1;
 unsigned int     reserved_8:2;
 }ISO_ACPU_INT_EN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     acpu_boot_info:32;
 }ISO_CPU_ST1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     acpu_boot_info_valid:1;
 }ISO_CPU_ST1V;
 
-typedef struct 
+typedef struct
 {
 unsigned int     rvd31:1;
 unsigned int     rvd30:1;
@@ -379,7 +388,7 @@ unsigned int     rvd1:1;
 unsigned int     rvd0:1;
 }ISO_DUMMY1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     rvd31:1;
 unsigned int     rvd30:1;
@@ -415,7 +424,7 @@ unsigned int     rvd1:1;
 unsigned int     rvd0:1;
 }ISO_DUMMY2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     sel_xtal25m_cen_l:1;
@@ -431,19 +440,19 @@ unsigned int     powercut_ana_d2a_isolate_b:1;
 unsigned int     powercut_ana_a2d_isolate_b:1;
 }ISO_POWERCUT_ETN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     etn_bpsgphy_mode:1;
 unsigned int     etn_ocd_mode:1;
 }ISO_ETN_TESTIO;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dmy:32;
 }ISO_RESERVED_USE_0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     timer:1;
@@ -453,19 +462,19 @@ unsigned int     ir_tx:1;
 unsigned int     ir_raw:1;
 }ISO_LPI;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     cnt_wait_pwr:16;
 }ISO_WD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     plletn_wdout:1;
 }ISO_PLL_WDOUT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:4;
 unsigned int     plletn_oeb:1;
@@ -482,17 +491,17 @@ unsigned int     plletn_lf_cp:2;
 unsigned int     plletn_ip:3;
 }ISO_PLL_ETN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dmy:32;
 }ISO_RESERVED_USE_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dmy:32;
 }ISO_RESERVED_USE_2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dmy1:20;
 unsigned int     reserved_0:3;
@@ -501,7 +510,7 @@ unsigned int     reserved_1:3;
 unsigned int     sel:5;
 }ISO_I2C1_SDA_DEL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dmy1:20;
 unsigned int     reserved_0:3;
@@ -510,7 +519,7 @@ unsigned int     reserved_1:3;
 unsigned int     sel:5;
 }ISO_I2C0_SDA_DEL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:18;
 unsigned int     rstn_cbus:1;
@@ -529,7 +538,7 @@ unsigned int     rstn_ir:1;
 unsigned int     reserved_1:1;
 }ISO_SOFT_RESET;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:19;
 unsigned int     clk_en_etn_sys:1;
@@ -547,7 +556,7 @@ unsigned int     reserved_1:1;
 unsigned int     clk_en_misc_mix:1;
 }ISO_CLOCK_ENABLE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:7;
 unsigned int     rd_only_0_en:1;
@@ -561,43 +570,43 @@ unsigned int     reserved_4:8;
 unsigned int     protect_0_en:1;
 }ISO_DC_0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     mem_saddr0:22;
 unsigned int     reserved_0:10;
 }ISO_DC_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     mem_eaddr0:22;
 unsigned int     reserved_0:10;
 }ISO_DC_2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     blk_saddr0:22;
 unsigned int     reserved_0:10;
 }ISO_DC_3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     blk_eaddr0:22;
 unsigned int     reserved_0:10;
 }ISO_DC_4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ro_saddr0:22;
 unsigned int     reserved_0:10;
 }ISO_DC_5;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ro_eaddr0:22;
 unsigned int     reserved_0:10;
 }ISO_DC_6;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:7;
 unsigned int     md_tee_protect_en:1;
@@ -611,7 +620,7 @@ unsigned int     cr_tee_protect_en:1;
 unsigned int     nf_tee_protect_en:1;
 }ISO_DC_7;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:7;
 unsigned int     scpu_tee_protect_en:1;
@@ -623,7 +632,7 @@ unsigned int     reserved_3:7;
 unsigned int     audio_protect_en:1;
 }ISO_DC_8;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:17;
 unsigned int     scpu_tee_blk_protect_en:1;
@@ -643,7 +652,7 @@ unsigned int     cr_tee_blk_protect_en:1;
 unsigned int     nf_tee_blk_protect_en:1;
 }ISO_DC_9;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:3;
 unsigned int     scpu_tee_ro_protect_en:1;
@@ -665,19 +674,19 @@ unsigned int     cr_tee_ro_protect_en:1;
 unsigned int     nf_tee_ro_protect_en:1;
 }ISO_DC_A;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     xtal_pad_drv:2;
 }ISO_PLL_XTAL_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     int_option:1;
 }ISO_HDMI_RX;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:18;
 unsigned int     reg_reserve:2;
@@ -687,7 +696,7 @@ unsigned int     s_emb:7;
 unsigned int     rstb_emb:1;
 }ISO_PLL_ETN_OSC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     int_30:1;
 unsigned int     int_29:1;
@@ -723,7 +732,7 @@ unsigned int     int_0:1;
 unsigned int     write_data:1;
 }ISO_FAST_ISR_GPIO0_A;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     int_34:1;
@@ -733,7 +742,7 @@ unsigned int     int_31:1;
 unsigned int     write_data:1;
 }ISO_FAST_ISR_GPIO1_A;
 
-typedef struct 
+typedef struct
 {
 unsigned int     int_30:1;
 unsigned int     int_29:1;
@@ -769,7 +778,7 @@ unsigned int     int_0:1;
 unsigned int     write_data:1;
 }ISO_FAST_ISR_GPIO0_DA;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     int_34:1;
@@ -779,32 +788,32 @@ unsigned int     int_31:1;
 unsigned int     write_data:1;
 }ISO_FAST_ISR_GPIO1_DA;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     int_en:1;
 unsigned int     en:1;
 }ISO_I2C1_REQ_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     val:16;
 }ISO_I2C1_REQ_START;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     val:16;
 }ISO_I2C1_REQ_SCL_LCNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     val:16;
 }ISO_I2C1_REQ_STOP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     dv_cen_int_en:1;
@@ -814,7 +823,7 @@ unsigned int     av_cen_int_en:1;
 unsigned int     av_cen_ha:1;
 }ISO_POR_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:7;
 unsigned int     reg_iso_por:1;
@@ -832,7 +841,7 @@ unsigned int     reserved_6:2;
 unsigned int     reg_d10_por:2;
 }ISO_POR_VTH;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     porb_dv_cen_l:1;
@@ -840,7 +849,7 @@ unsigned int     reserved_1:3;
 unsigned int     porb_av_cen_l:1;
 }ISO_POR_DATAI;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     write_en2:1;
@@ -849,7 +858,7 @@ unsigned int     write_en1:1;
 unsigned int     av_cen:3;
 }ISO_POR_DEB;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     ve_fo_block_nwc:1;
@@ -862,7 +871,7 @@ unsigned int     dc_mem_port_lock:1;
 unsigned int     secure_rbus:1;
 }ISO_SB2_0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:17;
 unsigned int     reg_emb_i_sel:1;
@@ -876,7 +885,7 @@ unsigned int     reg_bg_dummy:1;
 unsigned int     reg_en_emb:1;
 }ISO_MBIAS;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     reg_por15n_1:1;
@@ -885,55 +894,55 @@ unsigned int     reg_pwdpad15n_1:1;
 unsigned int     reg_pwdpad15n_0:1;
 }ISO_DDR_IO_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     reg_pwdpad3_disp:1;
 }ISO_DISP_IO_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     iso_sb3_req_mask_reg:1;
 }ISO_SB3_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:25;
 unsigned int     tmux_dbg_sel:7;
 }ISO_ISO_TMUX_DBG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dummy:32;
 }ISO_ISO_MODE_REG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     l2h_delay_cycle:32;
 }ISO_USB0_SRAM_PWR0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     h2l_delay_cycle:32;
 }ISO_USB0_SRAM_PWR1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sd_reg:32;
 }ISO_USB0_SRAM_PWR2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     mux_reg:32;
 }ISO_USB0_SRAM_PWR3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ctrl:32;
 }ISO_USB0_SRAM_PWR4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     ve3_sram_int_mask:1;
@@ -943,42 +952,42 @@ unsigned int     reserved_2:1;
 unsigned int     write_data:1;
 }ISO_USB0_SRAM_PWR5;
 
-typedef struct 
+typedef struct
 {
 unsigned int     last_delay_cycle:32;
 }ISO_USB0_SRAM_PWR6;
 
-typedef struct 
+typedef struct
 {
 unsigned int     pg_switch_info:32;
 }ISO_USB0_SRAM_PWR7;
 
-typedef struct 
+typedef struct
 {
 unsigned int     l2h_delay_cycle:32;
 }ISO_USB1_SRAM_PWR0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     h2l_delay_cycle:32;
 }ISO_USB1_SRAM_PWR1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sd_reg:32;
 }ISO_USB1_SRAM_PWR2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     mux_reg:32;
 }ISO_USB1_SRAM_PWR3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ctrl:32;
 }ISO_USB1_SRAM_PWR4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     ve3_sram_int_mask:1;
@@ -988,17 +997,17 @@ unsigned int     reserved_2:1;
 unsigned int     write_data:1;
 }ISO_USB1_SRAM_PWR5;
 
-typedef struct 
+typedef struct
 {
 unsigned int     last_delay_cycle:32;
 }ISO_USB1_SRAM_PWR6;
 
-typedef struct 
+typedef struct
 {
 unsigned int     pg_switch_info:32;
 }ISO_USB1_SRAM_PWR7;
 
-typedef struct 
+typedef struct
 {
 unsigned int     iso_usb_u2phy_hst_dcp_en_3:1;
 unsigned int     iso_usb_u2phy_hst_dcp_en_2:1;
@@ -1028,7 +1037,7 @@ unsigned int     iso_usb_p3_pg_en:1;
 unsigned int     iso_usb_p012_pg_en:1;
 }ISO_USB_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     so_etn_sram_ls_gap:2;
@@ -1037,22 +1046,22 @@ unsigned int     so_etn_pwr_ctrl_sw_rst:1;
 unsigned int     iso_etn_pwr_ctrl_en:1;
 }ISO_ETN_DBUS_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     iso_etn_drom_golden:32;
 }ISO_ETN_BIST_DROM_GOLDEN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     iso_etn_irom_golden:32;
 }ISO_ETN_BIST_IROM_GOLDEN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     iso_etn_ftr_rom_golden:32;
 }ISO_ETN_BIST_FTR_ROM_GOLDEN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:10;
 unsigned int     osc_count_limit:12;
@@ -1062,7 +1071,7 @@ unsigned int     dco_sel:1;
 unsigned int     cal_enable:1;
 }ISO_DCO_0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:7;
 unsigned int     dco_count_latch:12;
@@ -1070,69 +1079,69 @@ unsigned int     xtal_count_latch:12;
 unsigned int     dco_cal_done:1;
 }ISO_DCO_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     gpdir:32;
 }ISO_GPDIR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     gpdato:32;
 }ISO_GPDATO;
 
-typedef struct 
+typedef struct
 {
 unsigned int     gpdati:32;
 }ISO_GPDATI;
 
-typedef struct 
+typedef struct
 {
 unsigned int     gp:32;
 }ISO_GPIE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     gpha:32;
 }ISO_GPDP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     write_en1:1;
 unsigned int     clk1:3;
 }ISO_GPDEB;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     gpdir_1:3;
 }ISO_GPDIR_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     gpdato_1:3;
 }ISO_GPDATO_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     gpdati_1:3;
 }ISO_GPDATI_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     gp_1:3;
 }ISO_GPIE_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     gpha_1:3;
 }ISO_GPDP_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     i2c_scl_0_smt:1;
 unsigned int     i2c_scl_0_e2:1;
@@ -1168,7 +1177,7 @@ unsigned int     iso_gpio_2_pud_en:1;
 unsigned int     iso_gpio_2_pud_sel:1;
 }ISO_PFUNC0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     etn_led_rxtx_smt:1;
 unsigned int     etn_led_rxtx_e2:1;
@@ -1204,7 +1213,7 @@ unsigned int     ur1_rx_pud_en:1;
 unsigned int     ur1_rx_pud_sel:1;
 }ISO_PFUNC1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     i2c_scl_1_smt:1;
 unsigned int     i2c_scl_1_e2:1;
@@ -1240,7 +1249,7 @@ unsigned int     standby_pud_en:1;
 unsigned int     standby_pud_sel:1;
 }ISO_PFUNC2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     nat_led_3_smt:1;
 unsigned int     nat_led_3_e2:1;
@@ -1275,7 +1284,7 @@ unsigned int     boption2_en:1;
 unsigned int     boption2_sel:1;
 }ISO_PFUNC3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:2;
 unsigned int     etn_led_rxtx:2;
@@ -1295,7 +1304,7 @@ unsigned int     iso_gpio_5:2;
 unsigned int     iso_gpio_4:2;
 }ISO_MUXPAD0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ur2_loc:2;
 unsigned int     ejtag_avcpu_loc:2;
@@ -1316,7 +1325,7 @@ unsigned int     i2c_sda_6:2;
 unsigned int     i2c_scl_6:2;
 }ISO_MUXPAD1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:4;
 unsigned int     boot_sel_smt:1;
@@ -1349,7 +1358,7 @@ unsigned int     iso_gpio_21_pud_en:1;
 unsigned int     iso_gpio_21_pud_sel:1;
 }ISO_PFUNC4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     i2c_tg_enable:1;
@@ -1363,7 +1372,7 @@ unsigned int     iso_gpio_22:2;
 unsigned int     iso_gpio_21:2;
 }ISO_MUXPAD2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     wd_rset_smt:1;
@@ -1380,7 +1389,7 @@ unsigned int     iso_gpio_33_pud_en:1;
 unsigned int     iso_gpio_33_pud_sel:1;
 }ISO_PFUNC5;
 
-typedef struct 
+typedef struct
 {
 unsigned int     irrbl:8;
 unsigned int     irrml:8;
@@ -1388,7 +1397,7 @@ unsigned int     irrdzl:8;
 unsigned int     irrdol:8;
 }ISO_IR_PSR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:10;
 unsigned int     irrdl:6;
@@ -1396,19 +1405,19 @@ unsigned int     irrrl:8;
 unsigned int     irrsl:8;
 }ISO_IR_PER;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     irfd:16;
 }ISO_IR_SF;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     iriotcdp:16;
 }ISO_IR_DPIR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     irsr:1;
 unsigned int     reserved_0:5;
@@ -1431,12 +1440,12 @@ unsigned int     irdpm:1;
 unsigned int     irdn:5;
 }ISO_IR_CR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     irrp:32;
 }ISO_IR_RP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     slen_big:1;
@@ -1447,7 +1456,7 @@ unsigned int     irrf:1;
 unsigned int     irdvf:1;
 }ISO_IR_SR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:6;
 unsigned int     write_en2:1;
@@ -1458,31 +1467,31 @@ unsigned int     write_en1:1;
 unsigned int     fifo_thr:6;
 }ISO_IR_RAW_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dat:32;
 }ISO_IR_RAW_FF;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     cnt:16;
 }ISO_IR_RAW_SAMPLE_TIME;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     val:6;
 }ISO_IR_RAW_WL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:8;
 unsigned int     len:8;
 unsigned int     clk:16;
 }ISO_IR_RAW_DEB;
 
-typedef struct 
+typedef struct
 {
 unsigned int     irrbl:8;
 unsigned int     irrml:8;
@@ -1490,26 +1499,26 @@ unsigned int     irrdzl:8;
 unsigned int     irrdol:8;
 }ISO_IR_PSR_UP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     irrrl:8;
 unsigned int     irrsl:8;
 }ISO_IR_PER_UP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:23;
 unsigned int     rc6_en:1;
 unsigned int     irtr:8;
 }ISO_IR_CTRL_RC6;
 
-typedef struct 
+typedef struct
 {
 unsigned int     irrp:32;
 }ISO_IR_RP2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     irtx_en:1;
 unsigned int     reserved_0:20;
@@ -1523,13 +1532,13 @@ unsigned int     reserved_1:3;
 unsigned int     start:1;
 }ISO_IRTX_CFG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     irtx_fd:16;
 }ISO_IRTX_TIM;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:12;
 unsigned int     pwm_clksrc_div:4;
@@ -1537,7 +1546,7 @@ unsigned int     pwm_clk_duty:8;
 unsigned int     pwm_clk_div:8;
 }ISO_IRTX_PWM_SETTING;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:18;
 unsigned int     data_thr:6;
@@ -1547,7 +1556,7 @@ unsigned int     emp_en:1;
 unsigned int     req_en:1;
 }ISO_IRTX_INT_EN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     fin_flag:1;
@@ -1555,7 +1564,7 @@ unsigned int     emp_flag:1;
 unsigned int     req_flag:1;
 }ISO_IRTX_INT_ST;
 
-typedef struct 
+typedef struct
 {
 unsigned int     fifo_rst:1;
 unsigned int     reserved_0:19;
@@ -1564,12 +1573,12 @@ unsigned int     wrp:4;
 unsigned int     rdp:4;
 }ISO_IRTX_FIFO_ST;
 
-typedef struct 
+typedef struct
 {
 unsigned int     data:32;
 }ISO_IRTX_FIFO;
 
-typedef struct 
+typedef struct
 {
 unsigned int     len_11:8;
 unsigned int     len_10:8;
@@ -1577,13 +1586,13 @@ unsigned int     len_01:8;
 unsigned int     len_00:8;
 }ISO_IRRCMM_TIMING;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     dec_by_min_max:1;
 }ISO_IR_CR1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     rcmm_ap_max:8;
 unsigned int     rcmm_ap_min:8;
@@ -1591,7 +1600,7 @@ unsigned int     rcmm_kb_max:8;
 unsigned int     rcmm_kb_min:8;
 }ISO_IRRCMM_APKB;
 
-typedef struct 
+typedef struct
 {
 unsigned int     rcmm_apoint:1;
 unsigned int     rcmm_kboard:1;
@@ -1599,60 +1608,60 @@ unsigned int     remote_cnt_lead_high:14;
 unsigned int     remote_cnt_lead_low:16;
 }ISO_IRRXRCLFIFO;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     set:1;
 }ISO_DRM_ST;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_DRM_SECURE_CLK;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_DRM_ELAPSED;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     clk_div_en:1;
 unsigned int     clk_sel:1;
 }ISO_DRM_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     init:32;
 }ISO_DRM_CLK_DIV;
 
-typedef struct 
+typedef struct
 {
 unsigned int     tc3tvr:32;
 }ISO_TC3TVR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     tc3cvr:32;
 }ISO_TC3CVR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     tc3en:1;
 unsigned int     tc3mode:1;
@@ -1661,23 +1670,23 @@ unsigned int     rvda:5;
 unsigned int     reserved_0:24;
 }ISO_TC3CR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     tc3ie:1;
 unsigned int     reserved_0:31;
 }ISO_TC3ICR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     tc4tvr:32;
 }ISO_TC4TVR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     tc4cvr:32;
 }ISO_TC4CVR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     tc4en:1;
 unsigned int     tc4mode:1;
@@ -1686,58 +1695,58 @@ unsigned int     rvda:5;
 unsigned int     reserved_0:24;
 }ISO_TC4CR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     tc4ie:1;
 unsigned int     reserved_0:31;
 }ISO_TC4ICR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dat:32;
 }ISO_NORST;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST5;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST6;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST7;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST8;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST9;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST10;
 
-typedef struct 
+typedef struct
 {
 unsigned int     wd_int_en:1;
 unsigned int     reserved_0:15;
@@ -1746,109 +1755,109 @@ unsigned int     wdc:4;
 unsigned int     wden:8;
 }ISO_TCWCR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     wdclr:1;
 }ISO_TCWTR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sel:32;
 }ISO_TCWNMI;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sel:32;
 }ISO_TCWOV;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     set:1;
 }ISO_DRM_ST_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_DRM_SECURE_CLK_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_DRM_ELAPSED_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     clk_div_en:1;
 unsigned int     clk_sel:1;
 }ISO_DRM_CTRL_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     init:32;
 }ISO_DRM_CLK_DIV_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST1_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST2_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     val:32;
 }ISO_COLD_RST3_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dat:32;
 }ISO_NORST_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dat:32;
 }ISO_NORST1_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dat:32;
 }ISO_NORST2_SWC;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sel:32;
 }ISO_TCWOV_RSTB_CNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     dmy:1;
 unsigned int     oe:1;
 }ISO_TCWOV_RSTB_PAD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     scpu_boot_info_valid:1;
 }ISO_CPU_ST2V;
 
-typedef struct 
+typedef struct
 {
 unsigned int     scpu_boot_info:32;
 }ISO_CPU_ST2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:18;
 unsigned int     write_enable3:1;
@@ -1859,25 +1868,25 @@ unsigned int     write_enable1:1;
 unsigned int     enable:1;
 }ISO_ACPU_DBG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     analogy_mode_in:1;
 }ISO_ANLG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     dll:8;
 }ISO_U0RBR_THR_DLL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     dlh:8;
 }ISO_U0IER_DLH;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     fifo16:2;
@@ -1885,7 +1894,7 @@ unsigned int     reserved_1:2;
 unsigned int     iid:4;
 }ISO_U0IIR_FCR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     dlab:1;
@@ -1897,7 +1906,7 @@ unsigned int     stb:1;
 unsigned int     wls:2;
 }ISO_U0LCR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     afce:1;
@@ -1907,7 +1916,7 @@ unsigned int     rts:1;
 unsigned int     dtr:1;
 }ISO_U0MCR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     rfe:1;
@@ -1920,7 +1929,7 @@ unsigned int     oe:1;
 unsigned int     dr:1;
 }ISO_U0LSR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     dcd:1;
@@ -1933,31 +1942,31 @@ unsigned int     ddsr:1;
 unsigned int     dcts:1;
 }ISO_U0MSR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     scr:8;
 }ISO_U0SCR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     rbd:8;
 }ISO_U0SRBR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     far:1;
 }ISO_U0FAR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     far:8;
 }ISO_U0TFR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:22;
 unsigned int     rffe:1;
@@ -1965,7 +1974,7 @@ unsigned int     rfpf:1;
 unsigned int     rfwd:8;
 }ISO_U0RFW;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     rff:1;
@@ -1975,19 +1984,19 @@ unsigned int     tfnf:1;
 unsigned int     busy:1;
 }ISO_U0USR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     tfl:8;
 }ISO_U0TFL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     rfl:8;
 }ISO_U0RFL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     xfr:1;
@@ -1995,49 +2004,49 @@ unsigned int     rfr:1;
 unsigned int     ur:1;
 }ISO_U0SRR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     sbcr:1;
 }ISO_U0SBCR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     sdmam:1;
 }ISO_U0SDMAM;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     sfe:1;
 }ISO_U0SFE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     srt:2;
 }ISO_U0SRT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     stet:2;
 }ISO_U0STET;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     htx:1;
 }ISO_U0HTX;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     dmasa:1;
 }ISO_U0DMASA;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:8;
 unsigned int     fifo_mode:8;
@@ -2056,17 +2065,17 @@ unsigned int     reserved_2:2;
 unsigned int     apb_data_width:2;
 }ISO_U0CPR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ucv:32;
 }ISO_U0UCV;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ctr:32;
 }ISO_U0CTR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:25;
 unsigned int     ic_slave_disable:1;
@@ -2077,7 +2086,7 @@ unsigned int     speed:2;
 unsigned int     master_mode:1;
 }ISO_IC0_CON;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:19;
 unsigned int     ic_10bitaddr_master:1;
@@ -2086,19 +2095,19 @@ unsigned int     gc_or_start:1;
 unsigned int     ic_tar:10;
 }ISO_IC0_TAR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:22;
 unsigned int     ic_sar:10;
 }ISO_IC0_SAR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     ic_hs_mar:3;
 }ISO_IC0_HS_MADDR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:21;
 unsigned int     restart:1;
@@ -2107,31 +2116,31 @@ unsigned int     cmd:1;
 unsigned int     dat:8;
 }ISO_IC0_DATA_CMD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_ss_scl_hcnt:16;
 }ISO_IC0_SS_SCL_HCNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_ss_scl_lcnt:16;
 }ISO_IC0_SS_SCL_LCNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_fs_scl_hcnt:16;
 }ISO_IC0_FS_SCL_HCNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_fs_scl_lcnt:16;
 }ISO_IC0_FS_SCL_LCNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     r_gen_call:1;
@@ -2148,7 +2157,7 @@ unsigned int     r_rx_over:1;
 unsigned int     r_rx_under:1;
 }ISO_IC0_INTR_STAT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     m_gen_call:1;
@@ -2165,7 +2174,7 @@ unsigned int     m_rx_over:1;
 unsigned int     m_rx_under:1;
 }ISO_IC0_INTR_MASK;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     gen_call:1;
@@ -2182,91 +2191,91 @@ unsigned int     rx_over:1;
 unsigned int     rx_under:1;
 }ISO_IC0_RAW_INTR_STAT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     rx_tl:8;
 }ISO_IC0_RX_TL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     tx_tl:8;
 }ISO_IC0_TX_TL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_intr:1;
 }ISO_IC0_CLR_INTR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_rx_under:1;
 }ISO_IC0_CLR_RX_UNDER;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_rx_over:1;
 }ISO_IC0_CLR_RX_OVER;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_tx_over:1;
 }ISO_IC0_CLR_TX_OVER;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_rd_req:1;
 }ISO_IC0_CLR_RD_REQ;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_tx_abrt:1;
 }ISO_IC0_CLR_TX_ABRT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_rx_done:1;
 }ISO_IC0_CLR_RX_DONE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_activity:1;
 }ISO_IC0_CLR_ACTIVITY;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_stop_det:1;
 }ISO_IC0_CLR_STOP_DET;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_start_det:1;
 }ISO_IC0_CLR_START_DET;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_gen_call:1;
 }ISO_IC0_CLR_GEN_CALL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     enable:1;
 }ISO_IC0_ENABLE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:25;
 unsigned int     slv_activity:1;
@@ -2278,25 +2287,25 @@ unsigned int     tfnf:1;
 unsigned int     activity:1;
 }ISO_IC0_STATUS;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     txflr:4;
 }ISO_IC0_TXFLR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     rxflr:4;
 }ISO_IC0_RXFLR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_sda_hold:16;
 }ISO_IC0_SDA_HOLD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     abrt_slvrd_intx:1;
@@ -2317,44 +2326,44 @@ unsigned int     abrt_10addr1_noack:1;
 unsigned int     abrt_7b_addr_noack:1;
 }ISO_IC0_TX_ABRT_SOURCE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     nack:1;
 }ISO_IC0_SLV_DATA_NACK_ONLY;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     tdmae:1;
 unsigned int     rdmae:1;
 }ISO_IC0_DMA_CR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     dmatdl:3;
 }ISO_IC0_DMA_TDLR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     dmardl:4;
 }ISO_IC0_DMA_RDLR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     sda_setup:8;
 }ISO_IC0_SDA_SETUP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     ack_gen_call:1;
 }ISO_IC0_ACK_GENERAL_CALL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     slv_rx_data_lost:1;
@@ -2362,7 +2371,7 @@ unsigned int     slv_disabled_whi:1;
 unsigned int     ic_en:1;
 }ISO_IC0_ENABLE_STATUS;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:8;
 unsigned int     tx_buffer_depth:8;
@@ -2375,17 +2384,17 @@ unsigned int     max_speed_mode:2;
 unsigned int     apb_data_width:2;
 }ISO_IC0_COMP_PARAM_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ic_comp_version:32;
 }ISO_IC0_COMP_VERSION;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ic_comp_type:32;
 }ISO_IC0_COMP_TYPE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:25;
 unsigned int     ic_slave_disable:1;
@@ -2396,7 +2405,7 @@ unsigned int     speed:2;
 unsigned int     master_mode:1;
 }ISO_IC1_CON;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:19;
 unsigned int     ic_10bitaddr_master:1;
@@ -2405,19 +2414,19 @@ unsigned int     gc_or_start:1;
 unsigned int     ic_tar:10;
 }ISO_IC1_TAR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:22;
 unsigned int     ic_sar:10;
 }ISO_IC1_SAR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     ic_hs_mar:3;
 }ISO_IC1_HS_MADDR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:21;
 unsigned int     restart:1;
@@ -2426,31 +2435,31 @@ unsigned int     cmd:1;
 unsigned int     dat:8;
 }ISO_IC1_DATA_CMD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_ss_scl_hcnt:16;
 }ISO_IC1_SS_SCL_HCNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_ss_scl_lcnt:16;
 }ISO_IC1_SS_SCL_LCNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_fs_scl_hcnt:16;
 }ISO_IC1_FS_SCL_HCNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_fs_scl_lcnt:16;
 }ISO_IC1_FS_SCL_LCNT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     r_gen_call:1;
@@ -2467,7 +2476,7 @@ unsigned int     r_rx_over:1;
 unsigned int     r_rx_under:1;
 }ISO_IC1_INTR_STAT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     m_gen_call:1;
@@ -2484,7 +2493,7 @@ unsigned int     m_rx_over:1;
 unsigned int     m_rx_under:1;
 }ISO_IC1_INTR_MASK;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:20;
 unsigned int     gen_call:1;
@@ -2501,91 +2510,91 @@ unsigned int     rx_over:1;
 unsigned int     rx_under:1;
 }ISO_IC1_RAW_INTR_STAT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     rx_tl:8;
 }ISO_IC1_RX_TL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     tx_tl:8;
 }ISO_IC1_TX_TL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_intr:1;
 }ISO_IC1_CLR_INTR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_rx_under:1;
 }ISO_IC1_CLR_RX_UNDER;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_rx_over:1;
 }ISO_IC1_CLR_RX_OVER;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_tx_over:1;
 }ISO_IC1_CLR_TX_OVER;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_rd_req:1;
 }ISO_IC1_CLR_RD_REQ;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_tx_abrt:1;
 }ISO_IC1_CLR_TX_ABRT;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_rx_done:1;
 }ISO_IC1_CLR_RX_DONE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_activity:1;
 }ISO_IC1_CLR_ACTIVITY;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_stop_det:1;
 }ISO_IC1_CLR_STOP_DET;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_start_det:1;
 }ISO_IC1_CLR_START_DET;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     clr_gen_call:1;
 }ISO_IC1_CLR_GEN_CALL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     enable:1;
 }ISO_IC1_ENABLE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:25;
 unsigned int     slv_activity:1;
@@ -2597,25 +2606,25 @@ unsigned int     tfnf:1;
 unsigned int     activity:1;
 }ISO_IC1_STATUS;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     txflr:4;
 }ISO_IC1_TXFLR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     rxflr:4;
 }ISO_IC1_RXFLR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     ic_sda_hold:16;
 }ISO_IC1_SDA_HOLD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     abrt_slvrd_intx:1;
@@ -2636,44 +2645,44 @@ unsigned int     abrt_10addr1_noack:1;
 unsigned int     abrt_7b_addr_noack:1;
 }ISO_IC1_TX_ABRT_SOURCE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     nack:1;
 }ISO_IC1_SLV_DATA_NACK_ONLY;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     tdmae:1;
 unsigned int     rdmae:1;
 }ISO_IC1_DMA_CR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     dmatdl:3;
 }ISO_IC1_DMA_TDLR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     dmardl:4;
 }ISO_IC1_DMA_RDLR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     sda_setup:8;
 }ISO_IC1_SDA_SETUP;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     ack_gen_call:1;
 }ISO_IC1_ACK_GENERAL_CALL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     slv_rx_data_lost:1;
@@ -2681,7 +2690,7 @@ unsigned int     slv_disabled_whi:1;
 unsigned int     ic_en:1;
 }ISO_IC1_ENABLE_STATUS;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:8;
 unsigned int     tx_buffer_depth:8;
@@ -2694,17 +2703,17 @@ unsigned int     max_speed_mode:2;
 unsigned int     apb_data_width:2;
 }ISO_IC1_COMP_PARAM_1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ic_comp_version:32;
 }ISO_IC1_COMP_VERSION;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ic_comp_type:32;
 }ISO_IC1_COMP_TYPE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     3:8;
 unsigned int     2:8;
@@ -2712,7 +2721,7 @@ unsigned int     1:8;
 unsigned int     0:8;
 }ISO_PWM_OCD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     3:8;
 unsigned int     2:8;
@@ -2720,7 +2729,7 @@ unsigned int     1:8;
 unsigned int     0:8;
 }ISO_PWM_CD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:16;
 unsigned int     3:4;

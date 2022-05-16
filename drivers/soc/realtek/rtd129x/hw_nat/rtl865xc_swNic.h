@@ -41,6 +41,11 @@
 * no message
 *
 * ---------------------------------------------------------------
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
 */
 
 #ifndef RTL865XC_SWNIC_H
@@ -318,6 +323,8 @@
 #define	RTL8651_CPU_PORT		0x07	/* in rtl8651_tblDrv.h */
 #define	_RTL865XB_EXTPORTMASKS		7
 #define CONFIG_RTL_CUSTOM_PASSTHRU
+
+#include <linux/netdevice.h>
 
 typedef struct {
 	uint16 vid;

@@ -1,8 +1,8 @@
 /*
 * ----------------------------------------------------------------
-* Copyright c                  Realtek Semiconductor Corporation, 2002  
+* Copyright c                  Realtek Semiconductor Corporation, 2002
 * All rights reserved.
-* 
+*
 * $Header: /home1/sub1/tmp/cvs2svn/skylark/skylark/skylark/linux-2.6.x/drivers/net/re865x/board.h,v 1.1 2007-12-21 10:28:22 davidhsu Exp $
 *
 * Abstract: Board specific definitions.
@@ -640,7 +640,7 @@
 * uclinux initial
 *
 * Revision 1.1.1.1  2003/08/27 03:08:53  rupert
-*  initial version 
+*  initial version
 *
 * Revision 1.24  2003/07/03 12:15:59  tony
 * fix some warning messages.
@@ -719,6 +719,11 @@
 * init
 *
 * ---------------------------------------------------------------
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
 */
 #ifndef _BOARD_H_
 #define _BOARD_H_
@@ -783,11 +788,11 @@
 #undef _SUPPORT_LARGE_FLASH_ /* to support single 8MB/16MB flash */
 
 
-/* Define flash device 
+/* Define flash device
 */
 
 #define VLAN_LOAD_COUNT		8
-#define MAX_PORT_NUM		9   
+#define MAX_PORT_NUM		9
 #define MAX_IP_INTERFACE	VLAN_LOAD_COUNT
 #define MAX_ROUTE			MAX_IP_INTERFACE
 #define MAX_STATIC_ARP		10
@@ -805,7 +810,7 @@
 #define MAX_WLAN_CRYPT_MIX_TYPE	2		/* WPA2 mix : allow WPA/WPA2 -- 2 types */
 #define	MAX_IP_STRING_LEN	48
 #define MAX_ROUTING	5
-#define MAX_QOS			13	
+#define MAX_QOS			13
 #define MAX_RATIO_QOS		10
 #define MAX_PBNAT			4
 #define MAX_NAT_MAPPING   6 // define for NAT Mapping
@@ -815,7 +820,7 @@
 #define MAX_DOMAIN_BLOCKING	8
 #define MAX_ALLOW_DOMAINNAME_LEN	(32+1)
 #define MAX_IPSEC_SESSION 	3
-#define PHY0	            0x00000001	
+#define PHY0	            0x00000001
 #define PHY1	            0x00000002
 #define PHY2	            0x00000004
 #define PHY3	            0x00000008
@@ -833,8 +838,8 @@
 #define SEMAPHORE_IPEVENT		1	/* for IP events in board.c */
 
 /* add routing functions  constant*/
-#define error_msg(fmt,args...) 
-#define ENOSUPP(fmt,args...) 
+#define error_msg(fmt,args...)
+#define ENOSUPP(fmt,args...)
 #define RTACTION_ADD   1
 #define RTACTION_DEL   2
 #define RTACTION_HELP  3
@@ -932,7 +937,7 @@ typedef struct _BssDscr {
     unsigned short bdCap;                // capability information
     unsigned char ChannelNumber;            // channel number
     unsigned long bdBrates;
-    unsigned long bdSupportRates;        
+    unsigned long bdSupportRates;
     unsigned char bdsa[6];            // SA address
     unsigned char rssi, sq;            // RSSI and signal strength
     unsigned char network;            // 1: 11B, 2: 11G, 4:11G
@@ -1004,8 +1009,8 @@ enum ifCfgParam_connType_e {
 	IFCFGPARAM_CONNTYPE_DHCPC,
 	IFCFGPARAM_CONNTYPE_PPPOE_UNNUMBERED,
 	IFCFGPARAM_CONNTYPE_PPPOE_MULTIPLE_PPPOE,
-	IFCFGPARAM_CONNTYPE_PPTP,	
-	IFCFGPARAM_CONNTYPE_L2TP,	
+	IFCFGPARAM_CONNTYPE_PPTP,
+	IFCFGPARAM_CONNTYPE_L2TP,
 	IFCFGPARAM_CONNTYPE_DHCPL2TP,
 	IFCFGPARAM_CONNTYPE_3G,
 	IFCFGPARAM_CONNTYPE_USB_ETHERNET,
@@ -1018,8 +1023,8 @@ typedef struct ifCfgParam_s	/* Interface Configuration */
 	uint8		ipAddr1[4];	/* ip address 1: this is for multiple DMZ host spec. */
 	uint8		ipAddr2[4];	/* ip address 2: this is for multiple DMZ host spec. */
 	uint8		ipMask[4];	/* network mask */
-	uint8		ipMask1[4];	/* network mask 1: this is for multiple DMZ host spec.  */	
-	uint8		ipMask2[4];	/* network mask 2: this is for multiple DMZ host spec.  */	
+	uint8		ipMask1[4];	/* network mask 1: this is for multiple DMZ host spec.  */
+	uint8		ipMask2[4];	/* network mask 2: this is for multiple DMZ host spec.  */
 	uint8		gwAddr[4];  /* default gateway address */
 	uint8		dnsPrimaryAddr[4]; /* dns address */
 	uint8		dnsSecondaryAddr[4]; /* dns address */
@@ -1035,7 +1040,7 @@ typedef struct ifCfgParam_s	/* Interface Configuration */
 
 enum pptpCfgParam_dialState_e {
 	PPTPCFGPARAM_DIALSTATE_OFF=0,
-	PPTPCFGPARAM_DIALSTATE_DIALED_WAITING,			
+	PPTPCFGPARAM_DIALSTATE_DIALED_WAITING,
 	PPTPCFGPARAM_DIALSTATE_DIALED_TRYING,
 	PPTPCFGPARAM_DIALSTATE_DIALED_SUCCESS,
 	PPTPCFGPARAM_DIALSTATE_DISCONNECTING
@@ -1043,7 +1048,7 @@ enum pptpCfgParam_dialState_e {
 
 enum l2tpCfgParam_dialState_e {
 	L2TPCFGPARAM_DIALSTATE_OFF=0,
-	L2TPCFGPARAM_DIALSTATE_DIALED_WAITING,			
+	L2TPCFGPARAM_DIALSTATE_DIALED_WAITING,
 	L2TPCFGPARAM_DIALSTATE_DIALED_TRYING,
 	L2TPCFGPARAM_DIALSTATE_DIALED_SUCCESS,
 	L2TPCFGPARAM_DIALSTATE_DISCONNECTING,
@@ -1054,7 +1059,7 @@ enum l2tpCfgParam_dialState_e {
 
 enum pppParam_authType {
 	PPPPARAM_AUTHTYPE_PAP=0,
-	PPPPARAM_AUTHTYPE_CHAP	
+	PPPPARAM_AUTHTYPE_CHAP
 };
 
 typedef struct pptpCfgParam_s	/* PPTP Configuration */
@@ -1066,13 +1071,13 @@ typedef struct pptpCfgParam_s	/* PPTP Configuration */
 	int8		username[32];  /* pptp server username */
 	int8		password[32];  /* pptp server password */
 	uint32	mtu;
-	
-	uint8			manualHangup;        /* only meaningful for ram version, to record a manual hangup event from web ui */	
+
+	uint8			manualHangup;        /* only meaningful for ram version, to record a manual hangup event from web ui */
 	uint8			autoReconnect; /* 1/0 */
-	uint8			demand;		   /* 1/0 */	
+	uint8			demand;		   /* 1/0 */
 	uint8			dialState;	   /*  only meaningful for ram version, dial state */
-	
-	uint32			silentTimeout; /* in seconds */	
+
+	uint32			silentTimeout; /* in seconds */
 	uint32			authType;
 
 } pptpCfgParam_t;
@@ -1098,14 +1103,14 @@ typedef struct l2tpCfgParam_s	/* L2TP Configuration */
 	int8		username[32];  /* pppoe server username */
 	int8		password[32];  /* pppoe server password */
 	uint32	mtu;
-	
-	uint8			manualHangup;        /* only meaningful for ram version, to record a manual hangup event from web ui */	
+
+	uint8			manualHangup;        /* only meaningful for ram version, to record a manual hangup event from web ui */
 	uint8			autoReconnect; /* 1/0 */
-	uint8			demand;		   /* 1/0 */	
+	uint8			demand;		   /* 1/0 */
 	uint8			dialState;	   /*  only meaningful for ram version, dial state */
-	
-	uint32			silentTimeout; /* in seconds */	
-	uint32			authType;	
+
+	uint32			silentTimeout; /* in seconds */
+	uint32			authType;
 
 } l2tpCfgParam_t;
 
@@ -1131,7 +1136,7 @@ typedef struct arpCfgParam_s /* Static ARP Configuration */
 
 typedef struct natCfgParam_s /* nat Configuration */
 {
-	uint8			enable;			/* 0: disable, 1: enable */	
+	uint8			enable;			/* 0: disable, 1: enable */
 	uint8			hwaccel;			/* 1:hardware acceleration,0:no hw accel */
 	uint8			ipsecPassthru;	/* 1: passthru, 0: no passthru */
 	uint8			pptpPassthru;	/* 1: passthru, 0: no passthru */
@@ -1147,11 +1152,11 @@ typedef struct natMappingCfgParam_s
     uint8 Enabled;
     uint8 Empty;
     int16 Status;
-}natMappingCfgParam_t; 
+}natMappingCfgParam_t;
 
 enum ppppoeCfgParam_dialState_e {
 	PPPOECFGPARAM_DIALSTATE_OFF=0,
-	PPPOECFGPARAM_DIALSTATE_DIALED_WAITING,			
+	PPPOECFGPARAM_DIALSTATE_DIALED_WAITING,
 	PPPOECFGPARAM_DIALSTATE_DIALED_TRYING,
 	PPPOECFGPARAM_DIALSTATE_DIALED_SUCCESS
 };
@@ -1161,7 +1166,7 @@ enum ppppoeCfgParam_destnetType_e {
 	PPPOECFGPARAM_DESTNETTYPE_IP,
 	PPPOECFGPARAM_DESTNETTYPE_DOMAIN,
 	PPPOECFGPARAM_DESTNETTYPE_TCPPORT,
-	PPPOECFGPARAM_DESTNETTYPE_UDPPORT,	
+	PPPOECFGPARAM_DESTNETTYPE_UDPPORT,
 };
 
 enum ppppoeCfgParam_lanType_e {
@@ -1175,20 +1180,20 @@ typedef struct pppoeCfgParam_s
 	uint8			defaultSession;   	/* default pppoe session  */
 	uint8			unnumbered;		/* unnumbered pppoe */
 	uint8			autoReconnect; /* 1/0 */
-	
-	uint8			demand;		   /* 1/0 */	
+
+	uint8			demand;		   /* 1/0 */
 	uint8			dialState;	   /*  only meaningful for ram version, dial state */
 	uint16			sessionId;	   /* pppoe session id */
-	
-	uint32			silentTimeout; /* in seconds */	
-		
+
+	uint32			silentTimeout; /* in seconds */
+
 	uint8           ipAddr[4];	   /* ip address, for multiple pppoe only */
 	uint8           ipMask[4];	   /* network mask, for multiple pppoe only */
 	uint8           gwAddr[4];     /* default gateway address, for multiple pppoe only */
-	uint8           dnsAddr[4];    /* dns address, for multiple pppoe only */	
-	
+	uint8           dnsAddr[4];    /* dns address, for multiple pppoe only */
+
 	uint8           localHostIp[4]; /* nat's local host ip, for pppoe/nat case only */
-	
+
 	int8			username[32];  /* pppoe server username */
 
 	int8			password[32];  /* pppoe server password */
@@ -1196,25 +1201,25 @@ typedef struct pppoeCfgParam_s
 	int8 			acName[32];
 
 	int8			serviceName[32];  /* pppoe service name */
-	
+
 	int8			destnet[4][32];  /* pppoe destination network route 1~4 */
-	
+
 	int8			destnetType[4];  /* pppoe destination network type 1~4 */
-	
+
 	uint8			unnumberedIpAddr[4];  /* global IP assign by ISP */
-	
-	uint8			unnumberedIpMask[4];  /* global Network mask assign by ISP */	
-	
+
+	uint8			unnumberedIpMask[4];  /* global Network mask assign by ISP */
+
 	uint8           svrMac[6];     /* pppoe server mac address */
-    uint8           pppx; /* i am pppx (0,1,2,3,...: ppp0,ppp1,ppp2,...) */    
+    uint8           pppx; /* i am pppx (0,1,2,3,...: ppp0,ppp1,ppp2,...) */
     uint8           unnumberedNapt;
-    
+
 	uint8           whichPppObjId; /* only meaningful for ram version, and for pppoeCfgParam[0] only, to keep track of who is the up/down pppObjId */
-	uint8           manualHangup; /* only meaningful for ram version, to record a manual hangup event from web ui */	
+	uint8           manualHangup; /* only meaningful for ram version, to record a manual hangup event from web ui */
 	uint16	mtu;
 
 	uint32	lanType;
-	uint32	authType;	
+	uint32	authType;
 
 } pppoeCfgParam_t;
 
@@ -1233,7 +1238,7 @@ typedef struct dhcpsCfgParam_s
 
 typedef struct dhcpcCfgParam_s
 {
-	uint32      cmacValid; 	    /* cmac valid */	
+	uint32      cmacValid; 	    /* cmac valid */
 	uint8		cloneMac[6];	/* clone mac address */
 	uint8       rsv[2]; 		    /* for alignment */
 } dhcpcCfgParam_t;
@@ -1248,11 +1253,11 @@ typedef struct addrIPv6_s
 
 /*IPv6 in IPv4 tunnel*/
 typedef struct tunnel6in4_s
-{	
+{
 	char strTunnelName[12];
-	uint8 	addrRemote[4];	
-	uint8	addrLocal[4];	
-	uint16	tunnelAddrIPv6[8];		
+	uint8 	addrRemote[4];
+	uint8	addrLocal[4];
+	uint16	tunnelAddrIPv6[8];
 	uint8	maskRemote[4];
 	uint8 	maskLocal[4];
 } tunnel6in4_t;
@@ -1265,7 +1270,7 @@ typedef struct tunnel6in4array_s
 
 typedef struct tunnel6to4_s
 {
-	int  flag_6to4;	
+	int  flag_6to4;
 }tunnel6to4_t;
 
 /*IPv6 Route*/
@@ -1273,13 +1278,13 @@ typedef struct routeIPv6_s
 {
 	char	 	dev[8];
 	int	   prefix_len;
-	uint16	   addrIPv6[8];	
-	
+	uint16	   addrIPv6[8];
+
 } routeIPv6_t;
 
 typedef struct routeTableIPv6_s
 {
-	int	   iRouteNum; 	
+	int	   iRouteNum;
 	routeIPv6_t	   routeIPv6[10];
 } routeTableIPv6_t;
 
@@ -1292,10 +1297,10 @@ struct AdvPrefix {
         int                     AdvAutonomousFlag;
         uint32                AdvValidLifetime;
         uint32                AdvPreferredLifetime;
- 
+
         /* Mobile IPv6 extensions */
         int                     AdvRouterAddr;
- 
+
         /* 6to4 extensions */
         char                    if6to4[IFNAMESIZE];
         int                     enabled;
@@ -1373,7 +1378,7 @@ typedef struct dhcpv6cCfgParam_s
 	/*now only support prefix delagation on eth0 interface*/
 	uint8 information_only;
       uint8 send_rapid_commit;
-      uint8 request_prefix_delegation;       
+      uint8 request_prefix_delegation;
       uint8 request_temp_address;
 	uint8 request_domain_name_servers;
 	struct prefixDelegation delegation;
@@ -1396,7 +1401,7 @@ typedef struct cwmpACSAccountCfgParam_s
 }cwmpACSAccountCfgParam_t;
 
 typedef struct cwmpConreqAccountCfgParam_s
-{       
+{
         char name[10];
         char key[10];
 }cwmpConreqAccountCfgParam_t;
@@ -1422,41 +1427,41 @@ typedef struct cwmpDeviceInfo_s{
 	char		DeviceLog[8]; //size should be 32K bytes
 }cwmpDeviceInfo_t;
 
-typedef struct cwmpInformTime_s 
+typedef struct cwmpInformTime_s
 {
 	int  itime;
 	int  test;
 }cwmpInformTime_t;
 
-typedef struct cwmpParam_s 
+typedef struct cwmpParam_s
 {
 	char			enable;
-	int  			EventCode;	
+	int  			EventCode;
 	int			DLStartTime;
 	int			DLCompleteTime;
 	unsigned int	DLFaultCode;
-	char	 		DLCommandKey[10];		
-	char			RB_CommandKey[20];	
+	char	 		DLCommandKey[10];
+	char			RB_CommandKey[20];
 	char			SI_CommandKey[20];
 }cwmpParam_t;
 
-typedef struct cwmpDHCPServ_s 
-{       
+typedef struct cwmpDHCPServ_s
+{
         char configurable;
 }cwmpDHCPServ_t;
 
-typedef struct cwmpNotifyConfig_s 
-{       
+typedef struct cwmpNotifyConfig_s
+{
       	char name[128] ;
   	unsigned int mode;
 }cwmpNotifyConfig_t;
 
-typedef struct cwmpServerpCfgParam_s 
+typedef struct cwmpServerpCfgParam_s
 {
 	uint32		InstanceNum;	//instance Num
 	uint8		ip[4];		// Server IP address
 	uint16		wanPortStart;	// WAN Port
-	uint16		wanPortFinish;	// WAN Port	
+	uint16		wanPortFinish;	// WAN Port
 	uint16		portStart;		// Server Port
 	uint8       	protocol;	// SERVERPCFGPARAM_PROTOCOL_TCP or SERVERPCFGPARAM_PROTOCOL_UDP
 	uint8		enable;		// enable
@@ -1465,7 +1470,7 @@ typedef struct cwmpServerpCfgParam_s
 
 #define CWMP_NETINTF_NAME_LEN 16
 typedef struct cwmp_extRouteTable_s
-{	
+{
 	uint16	InstanceNum;	//instance Num
 	uint16	enable;
 	ipaddr_t 	ipAddr; /* Destination IP Address */
@@ -1483,35 +1488,35 @@ typedef struct dnsCfgParam_s
 	uint8		    secondary[4]; /* secondary dns server ip */
 } dnsCfgParam_t;
 
-typedef struct mgmtCfgParam_s 
+typedef struct mgmtCfgParam_s
 {
 	uint8	name[16];
 	uint8	password[16];
 	uint8	mailfrom[32];
 	uint8	rcptto[32];
 	uint8	smtpserver[32];
-	uint8	logserver[32];		
+	uint8	logserver[32];
 	uint32	valid; 		/* valid */
 	uint32	remoteMgmtIp;
-	uint32	remoteMgmtMask; /* reserved */	
+	uint32	remoteMgmtMask; /* reserved */
 	uint16	remoteMgmtPort; /* remote management port */
 	uint8	remoteIcmpEnable; /* remote icmp enable */
-	uint8	mgmt_udp_500;	
+	uint8	mgmt_udp_500;
 } mgmtCfgParam_t;
 
 enum aclGlobalCfgParam_e {
 	ACLGLOBALCFGPARAM_ALLOWALLBUTACL = 0,
 	ACLGLOBALCFGPARAM_DENYALLBUTACL,
 	ACLGLOBALCFGPARAM_L34_DENYALLBUTACL,
-	ACLGLOBALCFGPARAM_ALLOWALLBUTACL_LOG,	
+	ACLGLOBALCFGPARAM_ALLOWALLBUTACL_LOG,
 };
 
-typedef struct aclGlobalCfgParam_s 
+typedef struct aclGlobalCfgParam_s
 {
 	uint8		policy;				// 0: allow all except ACL , 1: deny all except ACL
-	uint8		lanPermit;			// for sercomm spec	
+	uint8		lanPermit;			// for sercomm spec
 	uint8		layer2Permit;            // for Permit Layer2 ACL rule
-	uint8		rsv;				        // for 4 bytes alignment 
+	uint8		rsv;				        // for 4 bytes alignment
 } aclGlobalCfgParam_t;
 
 enum aclCfgParam_type_e {
@@ -1527,23 +1532,23 @@ enum aclCfgParam_direction_e {
 	ACLCFGPARAM_DIRECTION_INGRESS_SRC
 };
 
-typedef struct aclCfgParam_s 
+typedef struct aclCfgParam_s
 {
 	uint8		ip[4];		// IP address
-	
-	uint16		port;		// IP port	
+
+	uint16		port;		// IP port
 	uint8		enable;		// 0: disable,  1:enable
 	uint8		direction;	// 0: egress dest, 1: ingress dest, 2: egress src, 3: ingress src
-	
+
 	uint8		type;		// 0: TCP, 1: UDP
 	uint8		day;		// bit0:Sunday, bit1:Monday .... bit6:Saturday
-	uint8		start_hour;	
-	uint8		start_minute;	
-	
-	uint8		end_hour;	
-	uint8		end_minute;	
+	uint8		start_hour;
+	uint8		start_minute;
+
+	uint8		end_hour;
+	uint8		end_minute;
 	uint8		rsv[2];
-	
+
 } aclCfgParam_t;
 
 
@@ -1553,15 +1558,15 @@ enum serverpCfgParam_e {
 	SERVERPCFGPARAM_PROTOCOL_UDP,
 };
 
-typedef struct serverpCfgParam_s 
+typedef struct serverpCfgParam_s
 {
 	uint8		ip[4];		// Server IP address
 	uint16		wanPortStart;	// WAN Port
-	uint16		wanPortFinish;	// WAN Port	
+	uint16		wanPortFinish;	// WAN Port
 	uint16		portStart;		// Server Port
 	uint8       protocol;	// SERVERPCFGPARAM_PROTOCOL_TCP or SERVERPCFGPARAM_PROTOCOL_UDP
 	uint8		enable;		// enable
-	
+
 } serverpCfgParam_t;
 
 enum specialapCfgParam_e {
@@ -1571,21 +1576,21 @@ enum specialapCfgParam_e {
 };
 
 #define SPECIAL_AP_MAX_IN_RANGE 80
-typedef struct specialapCfgParam_s 
+typedef struct specialapCfgParam_s
 {
 	uint8		name[16];		// name
 	uint32		inType;			// incoming type
 	uint8		inRange[SPECIAL_AP_MAX_IN_RANGE];	// incoming port range
 	uint32		outType;		// outgoing type
 	uint16		outStart;		// outgoing start port
-	uint16		outFinish;		// outgoing finish port		
+	uint16		outFinish;		// outgoing finish port
 	uint8		enable;			// enable
 	uint8		rsv[3];			// for 4 bytes alignment
 } specialapCfgParam_t;
 
 
 #define GAMING_MAX_RANGE 80
-typedef struct gamingCfgParam_s 
+typedef struct gamingCfgParam_s
 {
 	uint8		name[32];		// name
 	uint32		ip;
@@ -1595,7 +1600,7 @@ typedef struct gamingCfgParam_s
 	uint8		rsv[3];			// for 4 bytes alignment
 } gamingCfgParam_t;
 
-typedef struct tbldrvCfgParam_s 
+typedef struct tbldrvCfgParam_s
 {
 	uint8		naptAutoAdd;		// napt auto add
 	uint8       naptAutoDelete;     // napt auto delete
@@ -1626,13 +1631,13 @@ typedef struct logCfgParam_s	/* Event Log Configuration */
 typedef struct upnpCfgParam_s	/* UPnP Configuration */
 {
 	uint32		enable; 	/* 0:off 1:on */
-	
+
 } upnpCfgParam_t;
 
 typedef struct snmpCfgParam_s	/* SNMP Daemon Configuration */
 {
 	uint32		enable; 	/* 0:off 1:on */
-	
+
 } snmpCfgParam_t;
 
 typedef struct snmpv2trapCfgParam_S	/*SNMPV2Trap Daemon Configuration*/
@@ -1655,7 +1660,7 @@ typedef struct ddnsCfgParam_s	/* DDNS Configuration */
 	uint32		enable; 	/* 0:off 1:on */
 	uint8		username[32];
 	uint8		password[32];
-	uint8		service[16];		
+	uint8		service[16];
 	uint8		username2[32];
 	uint8		password2[32];
 	uint8		hostname[32];
@@ -1679,7 +1684,7 @@ typedef struct urlfilterCfgParam_s	/* URL FILTER Configuration */
 typedef struct urlfilterTrustedUserCfgParam_s	/* URL FILTER Configuration */
 {
 	uint32		trustedIP;
-	uint32		enable; 	
+	uint32		enable;
 } urlfilterTrustedUserCfgParam_t;
 #define URL_FILTER_MAX_TRUSTED_USERS 5
 
@@ -1715,7 +1720,7 @@ typedef struct dosCfgParam_s	/* DoS Configuration */
 	uint16		icmp;
 	/* <---Per source IP tracking---> */
 	uint16		perSrc_syn;
-	uint16		perSrc_fin;		
+	uint16		perSrc_fin;
 	uint16		perSrc_udp;
 	uint16		perSrc_icmp;
 	/* <----Source IP blocking----> */
@@ -1741,7 +1746,7 @@ typedef struct algCfgParam_s	/* ALG Configuration */
 
 
  typedef enum{
-	CRYPT_NONE = 0, 
+	CRYPT_NONE = 0,
 	CRYPT_WEP,
 	CRYPT_WPA,
 	CRYPT_WPA2,
@@ -1763,7 +1768,7 @@ typedef enum {
  	AUTH_NONE=0,
 	AUTH_KEY,
 	AUTH_AUTO,
-	AUTH_8021x, 
+	AUTH_8021x,
 	AUTH_MAX
 }WlanAuthType;
 
@@ -1837,7 +1842,7 @@ typedef struct wlanCfgParam_s	/* Wireless LAN Configuration */
 	uint8	aliasName[32];
 	uint8	ssid[16];
 
-	uint8	enable;	
+	uint8	enable;
 	uint8	channel; //0:auto
 	uint8	dataRateMode; //enum  //
 	uint8	highPowerChk;
@@ -1846,7 +1851,7 @@ typedef struct wlanCfgParam_s	/* Wireless LAN Configuration */
 	uint8 	rxChargePump;
 	uint8 	txChargePump;
 	uint8 	regDomain;
-	
+
 	uint16	dataRate; //enum	//
 	uint16	frag;
 	uint16	rts;
@@ -1866,12 +1871,12 @@ typedef struct wlanCfgParam_s	/* Wireless LAN Configuration */
 	uint8	wdscryptType; //enum
 	uint8	wdscryptSubType[MAX_WLAN_CRYPT_MIX_TYPE];		/* array: for WPA mix-mode */
 	uint8	wdsauthType;
-	
+
 	uint8	acEnable;
 	uint8	wdsEnable;
 	uint8	wdsCount;
 	uint8	wmmEnable;
-	
+
 	uint8	channelBond;
 	int8	selectedAPIdx; //for 4 bytes alignment
 	uint8	sideBand;
@@ -1881,24 +1886,24 @@ typedef struct wlanCfgParam_s	/* Wireless LAN Configuration */
 	uint8	RepeaterEnable;
 	uint8	xxxReserved1; //for 4 bytes alignment
 	uint8	xxxReserved2; //for 4 bytes alignment
-	
+
 	uint16	authRadiusPort;
 	uint8	mode;
 	uint8 	adhoc;
 
 	uint32	authRadiusIp;
-	
+
 	uint8	acMacList[MAX_WLAN_AC][6];
 	uint8	acComment[MAX_WLAN_AC][8];
-	
-	uint8	wdsMacList[MAX_WLAN_WDS][6];	
-	
+
+	uint8	wdsMacList[MAX_WLAN_WDS][6];
+
 	uint8	key[68]; //10 hex for wep64,26 hex for wep128, 64 hex for WPA-PSK
 	uint8	wdskey[68]; //10 hex for wep64,26 hex for wep128, 64 hex for WPA-PSK
 
 	uint8	repeaterssid[16];
-	
-#ifdef CONFIG_RTL8185B	
+
+#ifdef CONFIG_RTL8185B
 	uint8	vap_ssid[MAX_WLAN_VAP][16];	/* for Multiple BSSID */
 	uint8	vap_cryptType[MAX_WLAN_VAP]; //enum
 	uint8	vap_cryptSubType[MAX_WLAN_VAP][MAX_WLAN_CRYPT_MIX_TYPE];
@@ -1906,7 +1911,7 @@ typedef struct wlanCfgParam_s	/* Wireless LAN Configuration */
 
 	uint8	vap_authRadiusPasswd[MAX_WLAN_VAP][16];
 	uint32	vap_authRadiusIp[MAX_WLAN_VAP];
-	
+
 	uint8	vap_key[MAX_WLAN_VAP][68];
 	uint8	enable_vap[MAX_WLAN_VAP];
 
@@ -1934,7 +1939,7 @@ typedef struct udpblockCfgParam_s	/* UDP Blocking Configuration */
 enum routingInterfaceCfgParam_e {
 	ROUTING_INTERFACE_NONE = 0,
 	ROUTING_INTERFACE_LAN,
-	ROUTING_INTERFACE_WAN	
+	ROUTING_INTERFACE_WAN
 };
 
 typedef struct routingCfgParam_s	/* Routing Table Configuration */
@@ -1967,7 +1972,7 @@ typedef struct qosCfgParam_s /* QoS Configuration */
 
 typedef struct ratioAlgQosEntry_s	/* Ratio based ALG QoS entry */
 {
-	uint32	queueID;	/* 1 ~ max no. of queue */	
+	uint32	queueID;	/* 1 ~ max no. of queue */
 	uint8	isHigh;		/* 0: Low 1: High */
 	uint8	ratio;		/* percentage */
 	uint8	enable;		/* 0: disable, 1: enable */
@@ -1982,12 +1987,12 @@ typedef struct ratioQosUpstreamCfgParam_s /* Ratio based QoS: Upstream total ban
 	uint8	remainingRatio_l;	/* remaining ratio in low queue */
 	uint8	rsv;				/* reserve for 32bits-alignment */
 	ratioAlgQosEntry_t algQosEntry[3];
-	
+
 } ratioQosUpstreamCfgParam_t;
 
 typedef struct ratioQosEntry_s	/* Ratio based QoS entry */
 {
-	uint32	queueID;	/* 1 ~ max no. of queue */	
+	uint32	queueID;	/* 1 ~ max no. of queue */
 	uint32	ip;
 	uint32	ipMask;
 	uint16	s_port;
@@ -2024,12 +2029,12 @@ typedef struct pbnatCfgParam_s /* Protocol-Based NAT Configuration */
 typedef struct rateLimitEntry_s
 {
 	uint8		enable;		/* 0: disable, 1: enable */
-	uint32		ip;	
+	uint32		ip;
 	uint32		ipMask;
-	uint16		s_port, e_port;		
+	uint16		s_port, e_port;
 	uint8		protoType;	/* 0: TCP, 1: UDP, 2: IP */
 	uint8		isByteCount;	/* 0: Packet Count, 1: Byte Count */
-	uint32		rate;	
+	uint32		rate;
 	uint8		rateUnit;		/* 0: Kbps, 1: Mbps */
 	uint32		maxRate;		/* Tolerance */
 	uint8		maxRateUnit;	/* 0: Kbps, 1: Mbps */
@@ -2119,9 +2124,9 @@ typedef struct ipsecConfigCfgParam_s	/* Ratio based QoS Configuration */
 	uint32 ipsec_keylife;
 	uint32 isakmp_keylife;
 	uint8  secrets[30];
-	uint8 ipsec_enckey[80];     
-	uint8 ipsec_authkey[60];   
-	
+	uint8 ipsec_enckey[80];
+	uint8 ipsec_authkey[60];
+
 } ipsecConfigCfgParam_t;
 
 typedef struct domainBlockCfgParam_s
@@ -2161,16 +2166,16 @@ typedef struct romeCfgParam_s
     upnpCfgParam_t      upnpCfgParam;
     snmpCfgParam_t      snmpCfgParam;
 	snmpv2trapCfgParam_t snmpv2trapCfgParam;
-    ddnsCfgParam_t      ddnsCfgParam;    
+    ddnsCfgParam_t      ddnsCfgParam;
 	tbldrvCfgParam_t    tbldrvCfgParam;
 	urlfilterCfgParam_t	urlfilterCfgParam[MAX_PPPOE_SESSION][MAX_URL_FILTER];
 	dosCfgParam_t		dosCfgParam[MAX_PPPOE_SESSION];
 	naptCfgParam_t		naptCfgParam;
-	timeCfgParam_t		timeCfgParam;	
+	timeCfgParam_t		timeCfgParam;
 	algCfgParam_t		algCfgParam[MAX_PPPOE_SESSION];
 	wlanCfgParam_t		wlanCfgParam[MAX_WLAN_CARDS];
 	wlaninterCfgParam_t wlaninterCfgParam;
-	udpblockCfgParam_t	udpblockCfgParam[MAX_PPPOE_SESSION];	
+	udpblockCfgParam_t	udpblockCfgParam[MAX_PPPOE_SESSION];
 	routingCfgParam_t	routingCfgParam[MAX_ROUTING];
 	pptpCfgParam_t		pptpCfgParam;
 	l2tpCfgParam_t		l2tpCfgParam;
@@ -2204,7 +2209,7 @@ typedef struct romeCfgParam_s
 	dhcpv6sCfgParam_t  dhcpv6sCfgParam;
 	dhcpv6cCfgParam_t  dhcpv6cCfgParam;
 	settingMgmtCfgParam_t  settingMgmtCfgParam;
-		
+
 	tr069CfgParam_t tr069CfgParam;
 	cwmpFlag_t cwmpFlagCfgParam;
 	cwmpInform_t cwmpInformCfgParam;

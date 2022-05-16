@@ -1,18 +1,9 @@
+// SPDX-License-Identifier: GPL-1.0+
 /*
  * Renesas USB driver
  *
  * Copyright (C) 2011 Renesas Solutions Corp.
  * Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
  */
 #ifndef RENESAS_USB_DRIVER_H
 #define RENESAS_USB_DRIVER_H
@@ -107,6 +98,7 @@ struct usbhs_priv;
 #define D2FIFOCTR	0x00F2	/* for R-Car Gen2 */
 #define D3FIFOSEL	0x00F4	/* for R-Car Gen2 */
 #define D3FIFOCTR	0x00F6	/* for R-Car Gen2 */
+#define SUSPMODE	0x0102	/* for RZ/A */
 
 /* SYSCFG */
 #define SCKE	(1 << 10)	/* USB Module Clock Enable */
@@ -115,6 +107,8 @@ struct usbhs_priv;
 #define DRPD	(1 << 5)	/* D+ Line/D- Line Resistance Control */
 #define DPRPU	(1 << 4)	/* D+ Line Resistance Control */
 #define USBE	(1 << 0)	/* USB Module Operation Enable */
+#define UCKSEL	(1 << 2)	/* Clock Select for RZ/A1 */
+#define UPLLE	(1 << 1)	/* USB PLL Enable for RZ/A1 */
 
 /* DVSTCTR */
 #define EXTLP	(1 << 10)	/* Controls the EXTLP pin output state */
@@ -163,11 +157,12 @@ struct usbhs_priv;
 #define VBSTS	(1 << 7)	/* VBUS_0 and VBUSIN_0 Input Status */
 #define VALID	(1 << 3)	/* USB Request Receive */
 
-#define DVSQ_MASK		(0x3 << 4)	/* Device State */
+#define DVSQ_MASK		(0x7 << 4)	/* Device State */
 #define  POWER_STATE		(0 << 4)
 #define  DEFAULT_STATE		(1 << 4)
 #define  ADDRESS_STATE		(2 << 4)
 #define  CONFIGURATION_STATE	(3 << 4)
+#define  SUSPENDED_STATE	(4 << 4)
 
 #define CTSQ_MASK		(0x7)	/* Control Transfer Stage */
 #define  IDLE_SETUP_STAGE	0	/* Idle stage or setup stage */
@@ -213,6 +208,7 @@ struct usbhs_priv;
 /* DCPCTR */
 #define BSTS		(1 << 15)	/* Buffer Status */
 #define SUREQ		(1 << 14)	/* Sending SETUP Token */
+#define INBUFM		(1 << 14)	/* (PIPEnCTR) Transfer Buffer Monitor */
 #define CSSTS		(1 << 12)	/* CSSTS Status */
 #define	ACLRM		(1 << 9)	/* Buffer Auto-Clear Mode */
 #define SQCLR		(1 << 8)	/* Toggle Bit Clear */
@@ -242,6 +238,9 @@ struct usbhs_priv;
 #define USBSPD_SPEED_FULL	0x2
 #define USBSPD_SPEED_HIGH	0x3
 
+/* SUSPMODE */
+#define SUSPM		(1 << 14)	/* SuspendM Control */
+
 /*
  *		struct
  */
@@ -258,6 +257,7 @@ struct usbhs_priv {
 	struct platform_device *pdev;
 
 	struct extcon_dev *edev;
+	struct notifier_block nb;
 
 	spinlock_t		lock;
 
@@ -278,7 +278,6 @@ struct usbhs_priv {
 	 */
 	struct usbhs_fifo_info fifo_info;
 
-	struct usb_phy *usb_phy;
 	struct phy *phy;
 };
 

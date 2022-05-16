@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /* x_tables module for matching the IPv4/IPv6 DSCP field
  *
  * (C) 2002 Harald Welte <laforge@gnumonks.org>
@@ -27,12 +28,5 @@ struct xt_tos_match_info {
 	__u8 tos_value;
 	__u8 invert;
 };
-
-#if defined(CONFIG_RTL_819X)
-struct ipt_tos_info {
-    __u8 tos;
-    __u8 invert;
-};
-#endif
 
 #endif /* _XT_DSCP_H */

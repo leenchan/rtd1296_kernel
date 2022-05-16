@@ -6,6 +6,11 @@
 *	PHY/MII/Port/STP/QOS
 * Abstract :
 * Author : hyking (hyking_liu@realsil.com.cn)
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
 */
 
 #ifndef RTL865X_ASICL2_H
@@ -356,6 +361,7 @@ int32 rtl865xC_setAsicPortPauseFlowControl(uint32 port, uint8 rxEn, uint8 txEn);
 int32 rtl865xC_getAsicPortPauseFlowControl(uint32 port, uint8 *rxEn, uint8 *txEn);
 
 int32 rtl8651_restartAsicEthernetPHYNway(uint32 port);
+int32 rtl8651_setAsicEthernetPHYPowerDown( uint32 port, uint32 pwrDown );
 
 #if defined(CONFIG_RTD_1295_HWNAT)
 int32 rtl8651_setAsicEthernetPHYTxPadDriving(uint32 port);

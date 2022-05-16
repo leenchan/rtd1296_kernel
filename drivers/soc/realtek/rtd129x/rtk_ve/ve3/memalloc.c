@@ -86,7 +86,7 @@ static hlina_chunk *hlina_chunks = NULL;
 static rtk_hlina_chunk *rtk_hlina_chunks = NULL;
 static size_t chunks = 0;
 
-static int AllocMemory(unsigned *busaddr, unsigned long size,
+static int AllocMemory(unsigned *busaddr, unsigned long size, unsigned int mem_type,
                        const struct file *filp);
 static int FreeMemory(unsigned long busaddr, const struct file *filp);
 static void ResetMems(void);
@@ -124,7 +124,7 @@ static long memalloc_ioctl(struct file *filp, unsigned int cmd,
                              sizeof(MemallocParams));
         if (ret) break;
 
-        ret = AllocMemory(&memparams.bus_address, memparams.size, filp);
+        ret = AllocMemory(&memparams.bus_address, memparams.size, memparams.mem_type, filp);
 
         memparams.translation_offset = addr_transl;
 
@@ -305,7 +305,7 @@ err:
 }
 
 /* Cycle through the buffers we have, give the first free one */
-static int AllocMemory(unsigned *busaddr, unsigned long size,
+static int AllocMemory(unsigned *busaddr, unsigned long size, unsigned int mem_type,
                        const struct file *filp) {
 
     int i = 0;
@@ -355,7 +355,7 @@ static int AllocMemory(unsigned *busaddr, unsigned long size,
     unsigned long base;
     unsigned long nSize = size;
 #ifdef CONFIG_RTK_RESERVE_MEMORY
-    unsigned int ret = pu_alloc_dma_buffer(nSize, &phys_addr, &base, 0);
+    unsigned int ret = pu_alloc_dma_buffer(nSize, &phys_addr, &base, mem_type);
     if(ret == -1)
     {
         printk(KERN_ERR "memalloc: Physical memory allocation error size=%d\n", nSize);

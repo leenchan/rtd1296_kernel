@@ -114,6 +114,7 @@ struct bnx2x_vf_mac_vlan_filter {
 	(BNX2X_VF_FILTER_MAC | BNX2X_VF_FILTER_VLAN) /*shortcut*/
 
 	bool add;
+	bool applied;
 	u8 *mac;
 	u16 vid;
 };
@@ -138,8 +139,10 @@ struct bnx2x_virtf {
 #define VF_ACQUIRED	1	/* VF acquired, but not initialized */
 #define VF_ENABLED	2	/* VF Enabled */
 #define VF_RESET	3	/* VF FLR'd, pending cleanup */
+#define VF_LOST		4	/* Recovery while VFs are loaded */
 
 	bool flr_clnup_stage;	/* true during flr cleanup */
+	bool malicious;		/* true if FW indicated so, until FLR */
 
 	/* dma */
 	dma_addr_t fw_stat_map;
@@ -180,6 +183,7 @@ struct bnx2x_virtf {
 	u32 error;	/* 0 means all's-well */
 
 	/* BDF */
+	unsigned int domain;
 	unsigned int bus;
 	unsigned int devfn;
 
@@ -195,7 +199,6 @@ struct bnx2x_virtf {
 	int leading_rss;
 
 	/* MCAST object */
-	int mcast_list_len;
 	struct bnx2x_mcast_obj		mcast_obj;
 
 	/* RSS configuration object */

@@ -54,7 +54,9 @@
 		.align	2;				\
 		.type	symbol, @function;		\
 		.ent	symbol, 0;			\
-symbol:		.frame	sp, 0, ra
+symbol:		.frame	sp, 0, ra;			\
+		.cfi_startproc;				\
+		.insn
 
 /*
  * NESTED - declare nested routine entry point
@@ -63,13 +65,16 @@ symbol:		.frame	sp, 0, ra
 		.globl	symbol;				\
 		.align	2;				\
 		.type	symbol, @function;		\
-		.ent	symbol, 0;			 \
-symbol:		.frame	sp, framesize, rpc
+		.ent	symbol, 0;			\
+symbol:		.frame	sp, framesize, rpc;		\
+		.cfi_startproc;				\
+		.insn
 
 /*
  * END - mark end of function
  */
 #define END(function)					\
+		.cfi_endproc;				\
 		.end	function;			\
 		.size	function, .-function
 
@@ -86,7 +91,7 @@ symbol:
 #define FEXPORT(symbol)					\
 		.globl	symbol;				\
 		.type	symbol, @function;		\
-symbol:
+symbol:		.insn
 
 /*
  * ABS - export absolute symbol
@@ -174,7 +179,7 @@ symbol		=	value
 /*
  * MIPS ISA IV/V movn/movz instructions and equivalents for older CPUs.
  */
-#if (_MIPS_ISA == _MIPS_ISA_MIPS1) && !defined(CONFIG_CPU_RLX)
+#if (_MIPS_ISA == _MIPS_ISA_MIPS1)
 #define MOVN(rd, rs, rt)				\
 		.set	push;				\
 		.set	reorder;			\
@@ -207,8 +212,7 @@ symbol		=	value
 9:
 #endif /* (_MIPS_ISA == _MIPS_ISA_MIPS2) || (_MIPS_ISA == _MIPS_ISA_MIPS3) */
 #if (_MIPS_ISA == _MIPS_ISA_MIPS4 ) || (_MIPS_ISA == _MIPS_ISA_MIPS5) || \
-    (_MIPS_ISA == _MIPS_ISA_MIPS32) || (_MIPS_ISA == _MIPS_ISA_MIPS64) || \
-    defined(CONFIG_CPU_RLX)
+    (_MIPS_ISA == _MIPS_ISA_MIPS32) || (_MIPS_ISA == _MIPS_ISA_MIPS64)
 #define MOVN(rd, rs, rt)				\
 		movn	rd, rs, rt
 #define MOVZ(rd, rs, rt)				\

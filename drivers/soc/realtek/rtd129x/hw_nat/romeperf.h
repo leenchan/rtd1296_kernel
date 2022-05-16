@@ -1,11 +1,16 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2002  
+* Copyright c                  Realtek Semiconductor Corporation, 2002
 * All rights reserved.
-* 
+*
 * Program : Performance Profiling Header File for ROME Driver
-* Abstract : 
-* Author : Yung-Chieh Lo (yjlou@realtek.com.tw)               
+* Abstract :
+* Author : Yung-Chieh Lo (yjlou@realtek.com.tw)
 * $Id: romeperf.h,v 1.1 2007-12-21 10:28:22 davidhsu Exp $
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
 */
 
 #ifndef _ROMEPERF_H_

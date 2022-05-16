@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2017 Realtek Semiconductor Corporation.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ */
+
 /**************************************************************
 // Spec Version                  : 0.6
 // Parser Version                : DVR_Parser_6.11(120105)
@@ -5,7 +14,7 @@
 // Naming Rule                   :  Module_Register_Name
 // Naming Rule                   : Module_Register_Name
 // Parse Option                  : Only Parse _op1
-// Parse Address Region          : All Address Region 
+// Parse Address Region          : All Address Region
 // Decode bit number             : 12 bits
 // Firmware Header Generate Date : 2015/7/15 20:39:21
 ***************************************************************/
@@ -14,7 +23,7 @@
 #ifndef _SATA_REG_H_INCLUDED_
 #define _SATA_REG_H_INCLUDED_
 #ifdef  _SATA_USE_STRUCT
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:27;
 unsigned int     Mbist_sata_st:1;
@@ -24,21 +33,21 @@ unsigned int     pme_req:1;
 unsigned int     sata_mac_int:1;
 }SATA_SATA_MAC_IN;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:29;
 unsigned int     sata_phy_rst_force:1;
 unsigned int     sata_phy_rstn:2;
 }SATA_SATA_FORCE_RST;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     sata_ls_en:1;
 unsigned int     sata_clk_gate_en:1;
 }SATA_SATA_SAVE;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:14;
 unsigned int     rx_error_CDR_sel:2;
@@ -57,7 +66,7 @@ unsigned int     phy_iprx_en_1:1;
 unsigned int     phy_iprx_en_0:1;
 }SATA_SATA_CTR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:28;
 unsigned int     phy_rdy_1:1;
@@ -66,7 +75,7 @@ unsigned int     phy_calibrated_1:1;
 unsigned int     phy_calibrated_0:1;
 }SATA_SATA_PHY_MON;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:14;
 unsigned int     rdata_in_order:1;
@@ -77,7 +86,7 @@ unsigned int     reserved_2:3;
 unsigned int     outstd_rcmd:5;
 }SATA_SATA_WRAPPER_DMA_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:4;
 unsigned int     dbus2_remote_cmd_num:4;
@@ -89,7 +98,7 @@ unsigned int     reserved_3:2;
 unsigned int     dbus_remote_wdata_num:6;
 }SATA_SATA_WRAPPER_DC_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:19;
 unsigned int     dbg_sel1:6;
@@ -97,14 +106,14 @@ unsigned int     dbg_sel0:6;
 unsigned int     dbg_en:1;
 }SATA_SATA_DBG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:30;
 unsigned int     sram_debug_sel:1;
 unsigned int     sram_debug_mode:1;
 }SATA_WRAP_CTR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     data:16;
 unsigned int     phy_addr:2;
@@ -117,13 +126,13 @@ unsigned int     mdio_srst:1;
 unsigned int     mdio_rdwr:1;
 }SATA_MDIO_CTR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:31;
 unsigned int     phy_sel:1;
 }SATA_MDIO_CTR1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:24;
 unsigned int     p1_spd_mode_st:2;
@@ -132,7 +141,7 @@ unsigned int     p1_spd_mode:2;
 unsigned int     p0_spd_mode:2;
 }SATA_SPD;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:15;
 unsigned int     done_st:1;
@@ -140,76 +149,76 @@ unsigned int     reserved_1:15;
 unsigned int     go_ct:1;
 }SATA_RAM_CTR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     sram_addr:32;
 }SATA_RAM_ADDR;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ram_wdata:32;
 }SATA_RAM_WDATA;
 
-typedef struct 
+typedef struct
 {
 unsigned int     ram_rdata:32;
 }SATA_RAM_RDATA;
 
-typedef struct 
+typedef struct
 {
 unsigned int     p0_csr_diagnr:32;
 }SATA_SATA_MAC_P0_DBG0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     p0_csr_diagnr1:32;
 }SATA_SATA_MAC_P0_DBG1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     p0_csr_is:32;
 }SATA_SATA_MAC_P0_DBG2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     p0_csr_cmd:32;
 }SATA_SATA_MAC_P0_DBG3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     p1_csr_diagnr:32;
 }SATA_SATA_MAC_P1_DBG0;
 
-typedef struct 
+typedef struct
 {
 unsigned int     p1_csr_diagnr1:32;
 }SATA_SATA_MAC_P1_DBG1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     p1_csr_is:32;
 }SATA_SATA_MAC_P1_DBG2;
 
-typedef struct 
+typedef struct
 {
 unsigned int     p1_csr_cmd:32;
 }SATA_SATA_MAC_P1_DBG3;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     p0_rx_error:1;
 unsigned int     p0_link_state:5;
 }SATA_SATA_MAC_P0_DBG4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:26;
 unsigned int     p1_rx_error:1;
 unsigned int     p1_link_state:5;
 }SATA_SATA_MAC_P1_DBG4;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:15;
 unsigned int     sata_bist1_ls10:2;
@@ -224,7 +233,7 @@ unsigned int     sata_bist1_rstn:1;
 unsigned int     sata_bist1_test_mode:1;
 }SATA_SATA_BIST1_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:21;
 unsigned int     sata_bist2_ls50:6;
@@ -235,7 +244,7 @@ unsigned int     sata_bist2_rstn:1;
 unsigned int     sata_bist2_test_mode:1;
 }SATA_SATA_BIST2_CTRL;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:2;
 unsigned int     sata_bist2_rm_5:4;
@@ -252,7 +261,7 @@ unsigned int     sata_bist2_rm_0:4;
 unsigned int     sata_bist2_rme_0:1;
 }SATA_SATA_BIST2_CTRL1;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:25;
 unsigned int     sata_drf_bist1_fail_1:1;
@@ -264,7 +273,7 @@ unsigned int     sata_drf_bist1_done:1;
 unsigned int     sata_bist1_done:1;
 }SATA_SATA_BIST1_STS;
 
-typedef struct 
+typedef struct
 {
 unsigned int     reserved_0:17;
 unsigned int     sata_drf_bist2_fail_5:1;
@@ -284,12 +293,12 @@ unsigned int     sata_drf_bist2_done:1;
 unsigned int     sata_bist2_done:1;
 }SATA_SATA_BIST2_STS;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dummy_0:32;
 }SATA_SATA_DUMMY_0_REG;
 
-typedef struct 
+typedef struct
 {
 unsigned int     dummy_1:32;
 }SATA_SATA_DUMMY_1_REG;

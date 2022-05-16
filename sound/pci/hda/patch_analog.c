@@ -148,7 +148,7 @@ static void ad_vmaster_eapd_hook(void *private_data, int enabled)
 		return;
 	if (codec->inv_eapd)
 		enabled = !enabled;
-	snd_hda_codec_update_cache(codec, spec->eapd_nid, 0,
+	snd_hda_codec_write_cache(codec, spec->eapd_nid, 0,
 				   AC_VERB_SET_EAPD_BTLENABLE,
 				   enabled ? 0x02 : 0x00);
 }
@@ -370,6 +370,7 @@ static const struct hda_fixup ad1986a_fixups[] = {
 
 static const struct snd_pci_quirk ad1986a_fixup_tbl[] = {
 	SND_PCI_QUIRK(0x103c, 0x30af, "HP B2800", AD1986A_FIXUP_LAPTOP_IMIC),
+	SND_PCI_QUIRK(0x1043, 0x1153, "ASUS M9V", AD1986A_FIXUP_LAPTOP_IMIC),
 	SND_PCI_QUIRK(0x1043, 0x1443, "ASUS Z99He", AD1986A_FIXUP_EAPD),
 	SND_PCI_QUIRK(0x1043, 0x1447, "ASUS A8JN", AD1986A_FIXUP_EAPD),
 	SND_PCI_QUIRK_MASK(0x1043, 0xff00, 0x8100, "ASUS P5", AD1986A_FIXUP_3STACK),
@@ -505,7 +506,7 @@ static int ad1983_auto_smux_enum_put(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
-static struct snd_kcontrol_new ad1983_auto_smux_mixer = {
+static const struct snd_kcontrol_new ad1983_auto_smux_mixer = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "IEC958 Playback Source",
 	.info = ad1983_auto_smux_enum_info,
@@ -788,7 +789,7 @@ static int ad1988_auto_smux_enum_put(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
-static struct snd_kcontrol_new ad1988_auto_smux_mixer = {
+static const struct snd_kcontrol_new ad1988_auto_smux_mixer = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "IEC958 Playback Source",
 	.info = ad1988_auto_smux_enum_info,
@@ -991,7 +992,7 @@ static void ad1884_vmaster_hp_gpio_hook(void *private_data, int enabled)
 
 	if (spec->eapd_nid)
 		ad_vmaster_eapd_hook(private_data, enabled);
-	snd_hda_codec_update_cache(codec, 0x01, 0,
+	snd_hda_codec_write_cache(codec, 0x01, 0,
 				   AC_VERB_SET_GPIO_DATA,
 				   enabled ? 0x00 : 0x02);
 }

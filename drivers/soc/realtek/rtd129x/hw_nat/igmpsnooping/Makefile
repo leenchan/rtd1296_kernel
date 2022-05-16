@@ -17,7 +17,7 @@ ifeq ($(CONFIG_NEW_IGMP_IMPLEMENTATION),y)
 obj-y := rtl865x_igmpsnooping_glue.o rtl865x_igmpsnooping_new.o igmp_delete.o
 EXTRA_CFLAGS += -DCONFIG_NEW_IGMP_IMPLEMENTATION
 else
-obj-y := rtl865x_igmpsnooping_glue.o rtl865x_igmpsnooping.o 
+obj-y := rtl865x_igmpsnooping_glue.o rtl865x_igmpsnooping.o
 endif
 
 EXTRA_CFLAGS += -O1 -DRTL_TBLDRV -D__linux__ -D __KERNEL__ -DEXPORT_SYMTAB -DRTL865X_OVER_KERNEL -DRTL865X_OVER_LINUX -Werror

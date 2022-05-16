@@ -12,6 +12,8 @@
 #ifndef _ASM_IO_H
 #define _ASM_IO_H
 
+#define ARCH_HAS_IOREMAP_WC
+
 #include <linux/compiler.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -60,21 +62,11 @@
  * instruction, so the lower 16 bits must be zero.  Should be true on
  * on any sane architecture; generic code does not use this assumption.
  */
-extern const unsigned long mips_io_port_base;
+extern unsigned long mips_io_port_base;
 
-/*
- * Gcc will generate code to load the value of mips_io_port_base after each
- * function call which may be fairly wasteful in some cases.  So we don't
- * play quite by the book.  We tell gcc mips_io_port_base is a long variable
- * which solves the code generation issue.  Now we need to violate the
- * aliasing rules a little to make initialization possible and finally we
- * will need the barrier() to fight side effects of the aliasing chat.
- * This trickery will eventually collapse under gcc's optimizer.  Oh well.
- */
 static inline void set_io_port_base(unsigned long base)
 {
-	* (unsigned long *) &mips_io_port_base = base;
-	barrier();
+	mips_io_port_base = base;
 }
 
 /*
@@ -141,14 +133,14 @@ static inline void * phys_to_virt(unsigned long address)
 /*
  * ISA I/O bus memory addresses are 1:1 with the physical address.
  */
-static inline unsigned long isa_virt_to_bus(volatile void * address)
+static inline unsigned long isa_virt_to_bus(volatile void *address)
 {
-	return (unsigned long)address - PAGE_OFFSET;
+	return virt_to_phys(address);
 }
 
-static inline void * isa_bus_to_virt(unsigned long address)
+static inline void *isa_bus_to_virt(unsigned long address)
 {
-	return (void *)(address + PAGE_OFFSET);
+	return phys_to_virt(address);
 }
 
 #define isa_page_to_bus page_to_phys
@@ -275,17 +267,28 @@ static inline void __iomem * __ioremap_mode(phys_addr_t offset, unsigned long si
  */
 #define ioremap_cachable(offset, size)					\
 	__ioremap_mode((offset), (size), _page_cachable_default)
+#define ioremap_cache ioremap_cachable
 
 /*
- * These two are MIPS specific ioremap variant.	 ioremap_cacheable_cow
- * requests a cachable mapping, ioremap_uncached_accelerated requests a
- * mapping using the uncached accelerated mode which isn't supported on
- * all processors.
+ * ioremap_wc     -   map bus memory into CPU space
+ * @offset:    bus address of the memory
+ * @size:      size of the resource to map
+ *
+ * ioremap_wc performs a platform specific sequence of operations to
+ * make bus memory CPU accessible via the readb/readw/readl/writeb/
+ * writew/writel functions and the other mmio helpers. The returned
+ * address is not guaranteed to be usable directly as a virtual
+ * address.
+ *
+ * This version of ioremap ensures that the memory is marked uncachable
+ * but accelerated by means of write-combining feature. It is specifically
+ * useful for PCIe prefetchable windows, which may vastly improve a
+ * communications performance. If it was determined on boot stage, what
+ * CPU CCA doesn't support UCA, the method shall fall-back to the
+ * _CACHE_UNCACHED option (see cpu_probe() method).
  */
-#define ioremap_cacheable_cow(offset, size)				\
-	__ioremap_mode((offset), (size), _CACHE_CACHABLE_COW)
-#define ioremap_uncached_accelerated(offset, size)			\
-	__ioremap_mode((offset), (size), _CACHE_UNCACHED_ACCELERATED)
+#define ioremap_wc(offset, size)					\
+	__ioremap_mode((offset), (size), boot_cpu_data.writecombine)
 
 static inline void iounmap(const volatile void __iomem *addr)
 {
@@ -303,21 +306,21 @@ static inline void iounmap(const volatile void __iomem *addr)
 #undef __IS_KSEG1
 }
 
-#ifdef CONFIG_CPU_CAVIUM_OCTEON
-#define war_octeon_io_reorder_wmb()		wmb()
+#if defined(CONFIG_CPU_CAVIUM_OCTEON) || defined(CONFIG_LOONGSON3_ENHANCEMENT)
+#define war_io_reorder_wmb()		wmb()
 #else
-#define war_octeon_io_reorder_wmb()		do { } while (0)
+#define war_io_reorder_wmb()		barrier()
 #endif
 
 #define __BUILD_MEMORY_SINGLE(pfx, bwlq, type, irq)			\
 									\
-static inline void pfx##write_raw##bwlq(type val,				\
+static inline void pfx##write##bwlq(type val,				\
 				    volatile void __iomem *mem)		\
 {									\
 	volatile type *__mem;						\
 	type __val;							\
 									\
-	war_octeon_io_reorder_wmb();					\
+	war_io_reorder_wmb();					\
 									\
 	__mem = (void *)__swizzle_addr_##bwlq((unsigned long)(mem));	\
 									\
@@ -347,7 +350,7 @@ static inline void pfx##write_raw##bwlq(type val,				\
 		BUG();							\
 }									\
 									\
-static inline type pfx##read_raw##bwlq(const volatile void __iomem *mem)	\
+static inline type pfx##read##bwlq(const volatile void __iomem *mem)	\
 {									\
 	volatile type *__mem;						\
 	type __val;							\
@@ -376,6 +379,8 @@ static inline type pfx##read_raw##bwlq(const volatile void __iomem *mem)	\
 		BUG();							\
 	}								\
 									\
+	/* prevent prefetching of coherent DMA data prematurely */	\
+	rmb();								\
 	return pfx##ioswab##bwlq(__mem, __val);				\
 }
 
@@ -386,7 +391,7 @@ static inline void pfx##out##bwlq##p(type val, unsigned long port)	\
 	volatile type *__addr;						\
 	type __val;							\
 									\
-	war_octeon_io_reorder_wmb();					\
+	war_io_reorder_wmb();					\
 									\
 	__addr = (void *)__swizzle_addr_##bwlq(mips_io_port_base + port); \
 									\
@@ -411,6 +416,8 @@ static inline type pfx##in##bwlq##p(unsigned long port)			\
 	__val = *__addr;						\
 	slow;								\
 									\
+	/* prevent prefetching of coherent DMA data prematurely */	\
+	rmb();								\
 	return pfx##ioswab##bwlq(__addr, __val);			\
 }
 
@@ -428,165 +435,6 @@ BUILDIO_MEM(b, u8)
 BUILDIO_MEM(w, u16)
 BUILDIO_MEM(l, u32)
 BUILDIO_MEM(q, u64)
-
-#ifdef CONFIG_PCIE_RTL8117_CORE
-extern u32 pcieh_mem32_read(volatile u32 Haddr, volatile u32 Laddr,volatile u32 *value);
-extern u32 pcieh_mem32_write(volatile u32 Haddr, u32 Laddr, u32 value);
-extern u32 pcieh_mem16_read(volatile u32 Haddr, volatile u32 Laddr, volatile u32 *value);
-extern u32 pcieh_mem16_write(volatile u32 Haddr, volatile u32 Laddr,volatile u32 value);
-extern u32 pcieh_mem8_read(volatile u32 Haddr, volatile u32 Laddr, volatile u32 *value);
-extern u32 pcieh_mem8_write(volatile u32 Haddr, volatile u32 Laddr, volatile u32 value);
-
-static inline int is_pci_memory(u32 addr)
-{
-	return (( addr & 0xf0000000 ) == 0xc0000000);
-}
-#endif
-
-static inline void writeb(u8 value, volatile void __iomem *p)
-{
-
-#ifdef CONFIG_PCIE_RTL8117_CORE
-	u32 addr = (u32)p;
-	u32 val = value;
-
-	if (is_pci_memory(addr)) {
-		pcieh_mem8_write(0x0, addr, val);
-		return;
-	}
-#endif
-
-	write_rawb(value, p);
-}
-
-static inline void writew(u16 value, volatile void __iomem *p)
-{
-#ifdef CONFIG_PCIE_RTL8117_CORE
-	u32 addr = (u32)p;
-	u32 val = value;
-
-	if (is_pci_memory(addr)) {
-		pcieh_mem16_write(0x0, addr, val);
-		return;
-	}
-#endif
-
-	write_raww(value, p);
-}
-
-static inline void writel(u32 value, volatile void __iomem *p)
-{
-#ifdef CONFIG_PCIE_RTL8117_CORE
-	u32 addr = (__force u32)p;
-	u32 val = value;
-
-	if (is_pci_memory(addr)) {
-		pcieh_mem32_write(0x0, addr, val);
-		return;
-	}
-#endif
-
-	write_rawl(value, p);
-}
-
-static inline void writeq(u64 value, volatile void __iomem *p)
-{
-#ifdef CONFIG_PCIE_RTL8117_CORE
-	u32 addr = (__force u32)p;
-	u32 val_low = (u32)value;
-	u32 val_high = (u32)(value >> 32);
-
-	if (is_pci_memory(addr)) {
-		pcieh_mem32_write(0x0, addr, val_low);
-		pcieh_mem32_write(0x0, addr+4, val_high);
-		return;
-	}
-#endif
-
-	write_rawl(value, p);
-}
-
-#define __raw_writeb __raw_write_rawb
-#define __raw_writew __raw_write_raww
-#define __raw_writel __raw_write_rawl
-#define __raw_writeq __raw_write_rawq
-
-#define __mem_writeb __mem_write_rawb
-#define __mem_writew __mem_write_raww
-#define __mem_writel __mem_write_rawl
-#define __mem_writeq __mem_write_rawq
-
-static inline u8 readb(const volatile void __iomem *p)
-{
-#ifdef CONFIG_PCIE_RTL8117_CORE
-	u32 addr = (__force u32)p;
-	u32 data;
-
-	if (is_pci_memory(addr)) {
-		pcieh_mem8_read(0x0, addr, &data);
-		return (u8)data;
-	}
-#endif
-
-	return read_rawb(p);
-}
-
-static inline u16 readw(const volatile void __iomem *p)
-{
-#ifdef CONFIG_PCIE_RTL8117_CORE
-	u32 addr = (__force u32)p;
-	u32 data;
-
-	if (is_pci_memory(addr)) {
-		pcieh_mem16_read(0x0, addr, &data);
-		return (u16)data;
-	}
-#endif
-
-	return read_raww(p);
-}
-
-static inline u32 readl(const volatile void __iomem *p)
-{
-#ifdef CONFIG_PCIE_RTL8117_CORE
-	u32 addr = (__force u32)p;
-	u32 data;
-
-	if (is_pci_memory(addr)) {
-		pcieh_mem32_read(0x0, addr, &data);
-		return data;
-	}
-#endif
-
-	return read_rawl(p);
-}
-
-static inline u64 readq(const volatile void __iomem *p)
-{
-#ifdef CONFIG_PCIE_RTL8117_CORE
-
-	u32 data_low, data_high;
-	u32 addr = (__force u32)p;
-
-	if (is_pci_memory(addr)) {
-		pcieh_mem32_read(0x0, addr, &data_low);
-		pcieh_mem32_read(0x0, addr+4, &data_high);
-		return data_low + ((u64)data_high << 32);;
-	}
-#endif
-
-	return read_rawq(p);
-}
-
-#define __raw_readb __raw_read_rawb
-#define __raw_readw __raw_read_raww
-#define __raw_readl __raw_read_rawl
-#define __raw_readq __raw_read_rawq
-
-#define __mem_readb __mem_read_rawb
-#define __mem_readw __mem_read_raww
-#define __mem_readl __mem_read_rawl
-#define __mem_readq __mem_read_rawq
 
 #define __BUILD_IOPORT_PFX(bus, bwlq, type)				\
 	__BUILD_IOPORT_SINGLE(bus, bwlq, type, ,)			\
@@ -640,8 +488,8 @@ __BUILDIO(q, u64)
 /*
  * Some code tests for these symbols
  */
-//#define readq				readq
-//#define writeq				writeq
+#define readq				readq
+#define writeq				writeq
 
 #define __BUILD_MEMORY_STRING(bwlq, type)				\
 									\
@@ -706,8 +554,6 @@ BUILDSTRING(q, u64)
 
 #ifdef CONFIG_CPU_CAVIUM_OCTEON
 #define mmiowb() wmb()
-#elif defined(CONFIG_CPU_RLX)
-#define mmiowb() wmb()
 #else
 /* Depends on MIPS II instruction set */
 #define mmiowb() asm volatile ("sync" ::: "memory")
@@ -746,7 +592,7 @@ static inline void memcpy_toio(volatile void __iomem *dst, const void *src, int 
  *
  * This API used to be exported; it now is for arch code internal use only.
  */
-#if defined(CONFIG_DMA_NONCOHERENT) || defined(CONFIG_DMA_MAYBE_COHERENT)
+#ifdef CONFIG_DMA_NONCOHERENT
 
 extern void (*_dma_cache_wback_inv)(unsigned long start, unsigned long size);
 extern void (*_dma_cache_wback)(unsigned long start, unsigned long size);
@@ -765,7 +611,7 @@ extern void (*_dma_cache_inv)(unsigned long start, unsigned long size);
 #define dma_cache_inv(start,size)	\
 	do { (void) (start); (void) (size); } while (0)
 
-#endif /* CONFIG_DMA_NONCOHERENT || CONFIG_DMA_MAYBE_COHERENT */
+#endif /* CONFIG_DMA_NONCOHERENT */
 
 /*
  * Read a 32-bit register that requires a 64-bit read cycle on the bus.
@@ -791,5 +637,7 @@ extern void (*_dma_cache_inv)(unsigned long start, unsigned long size);
  * Convert a virtual cached pointer to an uncached pointer
  */
 #define xlate_dev_kmem_ptr(p)	p
+
+void __ioread64_copy(void *to, const void __iomem *from, size_t count);
 
 #endif /* _ASM_IO_H */

@@ -1,7 +1,7 @@
 /*
 * Program : Protocol Header rtl8651_proto.h
-* Abstract : 
-* Author : Chih-Hua Huang (chhuang@realtek.com.tw)               
+* Abstract :
+* Author : Chih-Hua Huang (chhuang@realtek.com.tw)
 * $Id: rtl8651_tblDrvProto.h,v 1.1 2007-12-21 10:29:52 davidhsu Exp $
 *
 *  Copyright (c) 2011 Realtek Semiconductor Corp.
@@ -19,7 +19,7 @@
 #include <net/rtl/rtl_types.h>
 
 /*==========================================================================================
- * Ethernet Header for MAC ACL lookup 
+ * Ethernet Header for MAC ACL lookup
  *==========================================================================================*/
 #define ETHER_ADDR_LEN				6
 struct	ether_header {
@@ -49,7 +49,7 @@ typedef struct pppoeHdr_s {
 	uint8	ver:4, type:4;
   #endif
 	uint8	code;
-	uint16	sessionId, 
+	uint16	sessionId,
 			length; //Length of the PPPoE payload, does not include Ethernet and PPPoE header
 	uint16	proto;	//PPP protocol field
 } pppoeHdr_t;
@@ -71,7 +71,7 @@ typedef struct vlanHdr_s {
 
 
 /*==========================================================================================
- * IP Header for IP ACL lookup 
+ * IP Header for IP ACL lookup
  *==========================================================================================*/
 //#ifndef UTILITY_H /* pktproc/utility.h also defined this structure. */
 #if !defined(_LINUX_IN_H)
@@ -88,7 +88,7 @@ struct in_addr{
 
 struct ip {
 
-#if 0 
+#if 0
 union{
    uint8 _vhl;   /* version << 4 | header length >> 2 */
 #ifdef _LITTLE_ENDIAN
@@ -110,7 +110,7 @@ union{
 #else
 	/* replace bit field */
 	uint8 ip_vhl;
-#endif 
+#endif
 
 	uint8	ip_tos;			/* type of service */
 	uint16	ip_len;			/* total length */
@@ -131,7 +131,7 @@ typedef struct ip ip_t;
 
 
 /*==========================================================================================
- * IP Header for IP ACL lookup 
+ * IP Header for IP ACL lookup
  *==========================================================================================*/
 struct icmp_ra_addr {
 	uint32 ira_addr;
@@ -244,7 +244,7 @@ struct icmp {
 #define	ICMP_MAXTYPE		18
 
 /*==========================================================================================
- * IP Header for IP ACL lookup 
+ * IP Header for IP ACL lookup
  *==========================================================================================*/
 // igmp v3 group record
 struct igmp_gr {
@@ -295,7 +295,7 @@ struct igmp {
 	#define	igmp_rresv		grp.v3_report.resv
 	#define	igmp_grlist		un_v3.report.gr_list
 
-};	
+};
 
 /* IGMP Type */
 #define	IGMP_QUERY				0x11		/* igmp group membership query */
@@ -321,7 +321,7 @@ struct igmp {
 #define	IGMPV3_BLOCK_OLD_SOURCES		0x06
 
 /*==========================================================================================
- * IP Header for IP ACL lookup 
+ * IP Header for IP ACL lookup
  *==========================================================================================*/
 typedef	uint32 tcp_seq;
 struct tcphdr {
@@ -329,7 +329,7 @@ struct tcphdr {
 	uint16	th_dport;		/* destination port */
 	tcp_seq	th_seq;			/* sequence number */
 	tcp_seq	th_ack;			/* acknowledgement number */
-#if 0	
+#if 0
 	#ifdef  _LITTLE_ENDIAN
 		uint8	th_x2:4,		/* (unused) */
 			th_off:4;			/* data offset */
@@ -340,8 +340,8 @@ struct tcphdr {
 #else
 	/* replace bit field */
 	uint8  th_off_x;
-	
-#endif 
+
+#endif
 
 	uint8	th_flags;
 		#define	TH_FIN	0x01
@@ -350,8 +350,8 @@ struct tcphdr {
 		#define	TH_PUSH 0x08
 		#define	TH_ACK	0x10
 		#define	TH_URG	0x20
-		#define	TH_ECE	0x40		
-		#define	TH_CWR	0x80		
+		#define	TH_ECE	0x40
+		#define	TH_CWR	0x80
 		#define	TH_FLAGS	(TH_FIN|TH_SYN|TH_RST|TH_ACK|TH_URG|TH_ECE|TH_CWR)
 
 	uint16	th_win;			/* window */
@@ -385,7 +385,7 @@ struct tcphdr {
 
 
 /*==========================================================================================
- * IP Header for IP ACL lookup 
+ * IP Header for IP ACL lookup
  *==========================================================================================*/
 struct udphdr
 {
@@ -411,7 +411,7 @@ struct tftpRequest {
 #define TFTP_ERR	0x05
 
 /*==========================================================================================
- * AH Header 
+ * AH Header
  *==========================================================================================*/
 #define AH_AUTHLEN  	12              	/* authenticator length of 96bits */
 #define AH_BASIC_LEN 8      			/* basic AH header is 8 bytes, nh,hl,rv,spi and the ah_hl, says how many bytes after that to cover. */
@@ -426,7 +426,7 @@ typedef struct ahHdr_s			/* Generic AH header */
 } ahHdr_t;
 
 /*==========================================================================================
- * ESP Header 
+ * ESP Header
  *==========================================================================================*/
 typedef struct espHdr_s
 {

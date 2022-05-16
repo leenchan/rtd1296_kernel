@@ -13,13 +13,16 @@
 #include <linux/irq.h>
 #include <linux/kernel.h>
 #include <linux/kexec.h>
+#include <linux/page-flags.h>
 #include <linux/smp.h>
 
 #include <asm/cacheflush.h>
 #include <asm/cpu_ops.h>
+#include <asm/daifflags.h>
 #include <asm/memory.h>
 #include <asm/mmu.h>
 #include <asm/mmu_context.h>
+#include <asm/page.h>
 
 #include "cpu-reset.h"
 
@@ -67,29 +70,12 @@ void machine_kexec_cleanup(struct kimage *kimage)
  */
 int machine_kexec_prepare(struct kimage *kimage)
 {
-	void *reboot_code_buffer;
-
 	kexec_image_info(kimage);
 
 	if (kimage->type != KEXEC_TYPE_CRASH && cpus_are_stuck_in_kernel()) {
 		pr_err("Can't kexec: CPUs are stuck in the kernel.\n");
 		return -EBUSY;
 	}
-
-	reboot_code_buffer =
-			phys_to_virt(page_to_phys(kimage->control_code_page));
-
-	/*
-	 * Copy arm64_relocate_new_kernel to the reboot_code_buffer for use
-	 * after the kernel is shut down.
-	 */
-	memcpy(reboot_code_buffer, arm64_relocate_new_kernel,
-		arm64_relocate_new_kernel_size);
-
-	/* Flush the reboot_code_buffer in preparation for its execution. */
-	__flush_dcache_area(reboot_code_buffer, arm64_relocate_new_kernel_size);
-	flush_icache_range((uintptr_t)reboot_code_buffer,
-		arm64_relocate_new_kernel_size);
 
 	return 0;
 }
@@ -161,14 +147,19 @@ static void kexec_segment_flush(const struct kimage *kimage)
 void machine_kexec(struct kimage *kimage)
 {
 	phys_addr_t reboot_code_buffer_phys;
+	void *reboot_code_buffer;
+	bool in_kexec_crash = (kimage == kexec_crash_image);
+	bool stuck_cpus = cpus_are_stuck_in_kernel();
 
 	/*
 	 * New cpus may have become stuck_in_kernel after we loaded the image.
 	 */
-	BUG_ON((cpus_are_stuck_in_kernel() || (num_online_cpus() > 1)) &&
-			!WARN_ON(kimage == kexec_crash_image));
+	BUG_ON(!in_kexec_crash && (stuck_cpus || (num_online_cpus() > 1)));
+	WARN(in_kexec_crash && (stuck_cpus || smp_crash_stop_failed()),
+		"Some CPUs may be stale, kdump will be unreliable.\n");
 
 	reboot_code_buffer_phys = page_to_phys(kimage->control_code_page);
+	reboot_code_buffer = phys_to_virt(reboot_code_buffer_phys);
 
 	kexec_image_info(kimage);
 
@@ -176,11 +167,33 @@ void machine_kexec(struct kimage *kimage)
 		kimage->control_code_page);
 	pr_debug("%s:%d: reboot_code_buffer_phys:  %pa\n", __func__, __LINE__,
 		&reboot_code_buffer_phys);
+	pr_debug("%s:%d: reboot_code_buffer:       %p\n", __func__, __LINE__,
+		reboot_code_buffer);
 	pr_debug("%s:%d: relocate_new_kernel:      %p\n", __func__, __LINE__,
 		arm64_relocate_new_kernel);
 	pr_debug("%s:%d: relocate_new_kernel_size: 0x%lx(%lu) bytes\n",
 		__func__, __LINE__, arm64_relocate_new_kernel_size,
 		arm64_relocate_new_kernel_size);
+
+	/*
+	 * Copy arm64_relocate_new_kernel to the reboot_code_buffer for use
+	 * after the kernel is shut down.
+	 */
+	memcpy(reboot_code_buffer, arm64_relocate_new_kernel,
+		arm64_relocate_new_kernel_size);
+
+	/* Flush the reboot_code_buffer in preparation for its execution. */
+	__flush_dcache_area(reboot_code_buffer, arm64_relocate_new_kernel_size);
+
+	/*
+	 * Although we've killed off the secondary CPUs, we don't update
+	 * the online mask if we're handling a crash kernel and consequently
+	 * need to avoid flush_icache_range(), which will attempt to IPI
+	 * the offline CPUs. Therefore, we must use the __* variant here.
+	 */
+	__flush_icache_range((uintptr_t)reboot_code_buffer,
+			     (uintptr_t)reboot_code_buffer +
+			     arm64_relocate_new_kernel_size);
 
 	/* Flush the kimage list and its buffers. */
 	kexec_list_flush(kimage);
@@ -191,8 +204,7 @@ void machine_kexec(struct kimage *kimage)
 
 	pr_info("Bye!\n");
 
-	/* Disable all DAIF exceptions. */
-	asm volatile ("msr daifset, #0xf" : : : "memory");
+	local_daif_mask();
 
 	/*
 	 * cpu_soft_restart will shutdown the MMU, disable data caches, then
@@ -203,8 +215,7 @@ void machine_kexec(struct kimage *kimage)
 	 * relocation is complete.
 	 */
 
-	cpu_soft_restart(kimage != kexec_crash_image,
-		reboot_code_buffer_phys, kimage->head, kimage->start, 0);
+	cpu_soft_restart(reboot_code_buffer_phys, kimage->head, kimage->start, 0);
 
 	BUG(); /* Should never get here. */
 }
@@ -248,7 +259,7 @@ void machine_crash_shutdown(struct pt_regs *regs)
 	local_irq_disable();
 
 	/* shutdown non-crashing cpus */
-	smp_send_crash_stop();
+	crash_smp_send_stop();
 
 	/* for crashing cpu */
 	crash_save_cpu(regs, smp_processor_id());
@@ -259,39 +270,92 @@ void machine_crash_shutdown(struct pt_regs *regs)
 
 void arch_kexec_protect_crashkres(void)
 {
+	int i;
+
 	kexec_segment_flush(kexec_crash_image);
 
-	/*
-	 * Page_mappings_only is true as it is required to ensure that
-	 * a section mapping will not be created over an existing
-	 * directory entry.
-	 */
-	create_pgd_mapping(&init_mm, crashk_res.start,
-			__phys_to_virt(crashk_res.start),
-			resource_size(&crashk_res), PAGE_KERNEL_INVALID, true);
-
-	flush_tlb_all();
+	for (i = 0; i < kexec_crash_image->nr_segments; i++)
+		set_memory_valid(
+			__phys_to_virt(kexec_crash_image->segment[i].mem),
+			kexec_crash_image->segment[i].memsz >> PAGE_SHIFT, 0);
 }
 
 void arch_kexec_unprotect_crashkres(void)
 {
-	/*
-	 * Since /sys/kernel/kexec_crash_size interface enables us to
-	 * shrink the region or entirely free it later, we consistently
-	 * use page-level mappings here so unused memory can be reclaimed
-	 * and put back to buddy system.
-	 */
-	create_pgd_mapping(&init_mm, crashk_res.start,
-			__phys_to_virt(crashk_res.start),
-			resource_size(&crashk_res), PAGE_KERNEL, true);
+	int i;
+
+	for (i = 0; i < kexec_crash_image->nr_segments; i++)
+		set_memory_valid(
+			__phys_to_virt(kexec_crash_image->segment[i].mem),
+			kexec_crash_image->segment[i].memsz >> PAGE_SHIFT, 1);
 }
 
-void arch_crash_save_vmcoreinfo(void)
+#ifdef CONFIG_HIBERNATION
+/*
+ * To preserve the crash dump kernel image, the relevant memory segments
+ * should be mapped again around the hibernation.
+ */
+void crash_prepare_suspend(void)
 {
-	VMCOREINFO_NUMBER(VA_BITS);
-	/* Please note VMCOREINFO_NUMBER() uses "%d", not "%x" */
-	vmcoreinfo_append_str("NUMBER(kimage_voffset)=0x%llx\n",
-						kimage_voffset);
-	vmcoreinfo_append_str("NUMBER(PHYS_OFFSET)=0x%llx\n",
-						PHYS_OFFSET);
+	if (kexec_crash_image)
+		arch_kexec_unprotect_crashkres();
 }
+
+void crash_post_resume(void)
+{
+	if (kexec_crash_image)
+		arch_kexec_protect_crashkres();
+}
+
+/*
+ * crash_is_nosave
+ *
+ * Return true only if a page is part of reserved memory for crash dump kernel,
+ * but does not hold any data of loaded kernel image.
+ *
+ * Note that all the pages in crash dump kernel memory have been initially
+ * marked as Reserved in kexec_reserve_crashkres_pages().
+ *
+ * In hibernation, the pages which are Reserved and yet "nosave" are excluded
+ * from the hibernation iamge. crash_is_nosave() does thich check for crash
+ * dump kernel and will reduce the total size of hibernation image.
+ */
+
+bool crash_is_nosave(unsigned long pfn)
+{
+	int i;
+	phys_addr_t addr;
+
+	if (!crashk_res.end)
+		return false;
+
+	/* in reserved memory? */
+	addr = __pfn_to_phys(pfn);
+	if ((addr < crashk_res.start) || (crashk_res.end < addr))
+		return false;
+
+	if (!kexec_crash_image)
+		return true;
+
+	/* not part of loaded kernel image? */
+	for (i = 0; i < kexec_crash_image->nr_segments; i++)
+		if (addr >= kexec_crash_image->segment[i].mem &&
+				addr < (kexec_crash_image->segment[i].mem +
+					kexec_crash_image->segment[i].memsz))
+			return false;
+
+	return true;
+}
+
+void crash_free_reserved_phys_range(unsigned long begin, unsigned long end)
+{
+	unsigned long addr;
+	struct page *page;
+
+	for (addr = begin; addr < end; addr += PAGE_SIZE) {
+		page = phys_to_page(addr);
+		ClearPageReserved(page);
+		free_reserved_page(page);
+	}
+}
+#endif /* CONFIG_HIBERNATION */

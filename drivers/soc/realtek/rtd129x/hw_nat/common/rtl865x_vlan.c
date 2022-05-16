@@ -1,10 +1,15 @@
 /*
-* Copyright c                  Realtek Semiconductor Corporation, 2008  
+* Copyright c                  Realtek Semiconductor Corporation, 2008
 * All rights reserved.
-* 
+*
 * Program : Vlan driver
-* Abstract : 
-* Author : hyking (hyking_liu@realsil.com.cn)  
+* Abstract :
+* Author : hyking (hyking_liu@realsil.com.cn)
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
 */
 #include <net/rtl/rtl_types.h>
 #include <net/rtl/rtl_glue.h>
@@ -39,7 +44,7 @@ static int32 _rtl865x_setAsicVlan(uint16 vid,rtl865x_vlan_entry_t *vlanEntry)
 
 #if defined(CONFIG_RTL_8197F)
 	asicEntry.hp = vlanEntry->hp;
-#endif	
+#endif
 
 	retval = rtl8651_setAsicVlan(vid,&asicEntry);
 	return retval;
@@ -85,9 +90,9 @@ static int32 _rtl865x_referVlan(uint16 vid)
 	/* vid should be legal vlan ID */
 	if(vid < 1 || vid > VLAN_NUMBER-1)
 		return RTL_EINVALIDVLANID;
-	
+
 #if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
-	
+
 	entry = rtl_getVlanEntryByVid(vid);
 	if(entry == NULL)
 		return RTL_EINVALIDVLANID;
@@ -95,7 +100,7 @@ static int32 _rtl865x_referVlan(uint16 vid)
 
 	entry = &vlanTbl[vid];
 #endif
-	
+
 	if(entry->valid != 1)
 		return RTL_EINVALIDVLANID;
 
@@ -109,9 +114,9 @@ static int32 _rtl865x_deReferVlan(uint16 vid)
 	/* vid should be legal vlan ID */
 	if(vid < 1 || vid > VLAN_NUMBER-1)
 		return RTL_EINVALIDVLANID;
-	
-#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)	
-	
+
+#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
+
 	entry = rtl_getVlanEntryByVid(vid);
 	if(entry == NULL)
 		return RTL_EINVALIDVLANID;
@@ -119,7 +124,7 @@ static int32 _rtl865x_deReferVlan(uint16 vid)
 
 	entry = &vlanTbl[vid];
 #endif
-	
+
 	if(entry->valid != 1)
 		return RTL_EINVALIDVLANID;
 
@@ -132,7 +137,7 @@ int32 _rtl865x_addVlan(uint16 vid)
 	int32 retval = FAILED;
 	rtl865x_vlan_entry_t *entry;
 
-#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)	
+#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
 	entry = rtl_findEmptyVlanEntry();
 	if(entry == NULL)
 		return RTL_EINVALIDVLANID;
@@ -149,8 +154,8 @@ int32 _rtl865x_addVlan(uint16 vid)
 	entry->refCnt = 1;
 
 	/*add this entry to asic table*/
-	retval = _rtl865x_setAsicVlan(vid,entry);	
-	
+	retval = _rtl865x_setAsicVlan(vid,entry);
+
 	return retval;
 }
 
@@ -160,7 +165,7 @@ static int32 _rtl865x_delVlan(uint16 vid)
 	int32 retval = FAILED;
 	rtl865x_vlan_entry_t *vlanEntry,org;
 
-#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)		
+#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
 	vlanEntry = rtl_getVlanEntryByVid(vid);
 	if(vlanEntry == NULL)
 		return RTL_EINVALIDVLANID;
@@ -178,7 +183,7 @@ static int32 _rtl865x_delVlan(uint16 vid)
 	*/
 
 	memcpy(&org,vlanEntry,sizeof(rtl865x_vlan_entry_t));
-	
+
 	/*delete vlan entry*/
 	vlanEntry->valid =  0;
 	/*ignor other member...*/
@@ -194,7 +199,7 @@ static int32 _rtl865x_delVlan(uint16 vid)
 		rtl865x_raiseEvent(EVENT_DEL_VLAN, (void *)&org);
 		#endif
 	}
-	
+
 	return retval;
 }
 
@@ -202,7 +207,7 @@ static int32 _rtl865x_addVlanPortMember(uint16 vid, uint32 portMask)
 {
 	int32 retval = FAILED;
 	rtl865x_vlan_entry_t *vlanEntry;
-#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)	
+#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
 	vlanEntry = rtl_getVlanEntryByVid(vid);
 	if(vlanEntry == NULL)
 		return RTL_EINVALIDVLANID;
@@ -220,15 +225,15 @@ static int32 _rtl865x_addVlanPortMember(uint16 vid, uint32 portMask)
 	retval = _rtl865x_setAsicVlan(vid,vlanEntry);
 
 	return retval;
-	
-	
+
+
 }
 
 static int32 _rtl865x_addVlanPortMember2(uint16 vid, uint32 portMask, uint32 untagPortMask)
 {
 	int32 retval = FAILED;
 	rtl865x_vlan_entry_t *vlanEntry;
-	
+
 	vlanEntry = &vlanTbl[vid];
 	if(vlanEntry->valid == 0)
 		return RTL_EINVALIDVLANID;
@@ -240,7 +245,7 @@ static int32 _rtl865x_addVlanPortMember2(uint16 vid, uint32 portMask, uint32 unt
 	/*update this entry to asic table*/
 	retval = _rtl865x_setAsicVlan(vid,vlanEntry);
 
-	return retval;		
+	return retval;
 }
 
 int32 rtl865x_addVlanPortMember2(uint16 vid, uint32 portMask, uint32 untagPortMask)
@@ -253,7 +258,7 @@ int32 rtl865x_addVlanPortMember2(uint16 vid, uint32 portMask, uint32 untagPortMa
 
 	//rtl_down_interruptible(&vlan_sem);
 	SMP_LOCK_ETH(flags);
-	retval = _rtl865x_addVlanPortMember2(vid,portMask,untagPortMask);	
+	retval = _rtl865x_addVlanPortMember2(vid,portMask,untagPortMask);
 	//rtl_up(&vlan_sem);
 	SMP_UNLOCK_ETH(flags);
 	return retval;
@@ -264,7 +269,7 @@ static int32 _rtl865x_delVlanPortMember(uint16 vid, uint32 portMask)
 	int32 retval = FAILED;
 	rtl865x_vlan_entry_t *vlanEntry;
 	//rtl865x_tblAsicDrv_vlanParam_t asicEntry;
-#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)	
+#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
 	vlanEntry = rtl_getVlanEntryByVid(vid);
 	if(vlanEntry == NULL)
 		return RTL_EINVALIDVLANID;
@@ -286,8 +291,8 @@ static int32 _rtl865x_delVlanPortMember(uint16 vid, uint32 portMask)
 	retval = _rtl865x_setAsicVlan(vid,vlanEntry);
 
 	return retval;
-	
-	
+
+
 }
 
 
@@ -315,7 +320,7 @@ static int32 _rtl865x_setVlanPortTag(uint16 vid, uint32 portMask, uint8 tag)
 	retval = _rtl865x_setAsicVlan(vid,vlanEntry);
 
 	return retval;
-	
+
 }
 
 static int32 _rtl865x_setVlanFID(uint16 vid, uint32 fid)
@@ -325,8 +330,8 @@ static int32 _rtl865x_setVlanFID(uint16 vid, uint32 fid)
 
 	if(fid >= RTL865X_FDB_NUMBER)
 		return RTL_EINVALIDFID;
-	
-#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)	
+
+#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
 	vlanEntry = rtl_getVlanEntryByVid(vid);
 	if(vlanEntry == NULL)
 		return RTL_EINVALIDVLANID;
@@ -337,7 +342,7 @@ static int32 _rtl865x_setVlanFID(uint16 vid, uint32 fid)
 	if(vlanEntry->valid == 0)
 		return RTL_EINVALIDVLANID;
 
-	vlanEntry->fid = fid;		
+	vlanEntry->fid = fid;
 
 	/*update this entry to asic table*/
 	retval = _rtl865x_setAsicVlan(vid,vlanEntry);
@@ -355,17 +360,17 @@ static int32 _rtl865x_getVlanFilterDatabaseId(uint16 vid, uint32 *fid)
 
 	if(vid < 1 || vid > VLAN_NUMBER -1)
 		return RTL_EINVALIDVLANID;
-	
+
 #if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
 
 	vlanEntry = rtl_getVlanEntryByVid(vid);
 	if(vlanEntry == NULL)
 		return RTL_EINVALIDVLANID;
-	
+
 	if(vlanEntry->valid == 1)
 #else
 
-	if(vlanTbl[vid].valid == 1)		
+	if(vlanTbl[vid].valid == 1)
 #endif
 	{
 #if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
@@ -390,7 +395,7 @@ static int32 _rtl865x_getVlanFilterDatabaseId(uint16 vid, uint32 *fid)
 	}
 
 	return retval;
-	
+
 }
 rtl865x_vlan_entry_t *_rtl8651_getVlanTableEntry(uint16 vid)
 {
@@ -441,7 +446,7 @@ NOTE: rtl865x_deReferVlan should be called after rtl865x_referVlan.
 int32 rtl865x_deReferVlan(uint16 vid)
 {
 	int32 retval = FAILED;
-	unsigned long flags=0;	
+	unsigned long flags=0;
 	//rtl_down_interruptible(&vlan_sem);
 	SMP_LOCK_ETH_HW(flags);
 	retval = _rtl865x_deReferVlan(vid);
@@ -471,7 +476,7 @@ int32 rtl865x_addVlan(uint16 vid)
 	//rtl_up(&vlan_sem);
 	SMP_UNLOCK_ETH(flags);
 	return retval;
-		
+
 }
 
 /*
@@ -484,14 +489,14 @@ int32 rtl865x_addVlan(uint16 vid)
 int32 rtl865x_delVlan(uint16 vid)
 {
 	int32 retval = FAILED;
-	unsigned long flags=0;	
+	unsigned long flags=0;
 	/* vid should be legal vlan ID */
 	if(vid < 1 || vid > VLAN_NUMBER -1)
 		return RTL_EINVALIDVLANID;
-	
+
 	//rtl_down_interruptible(&vlan_sem);
 	SMP_LOCK_ETH(flags);
-	retval = _rtl865x_delVlan(vid);	
+	retval = _rtl865x_delVlan(vid);
 	//rtl_up(&vlan_sem);
 	SMP_UNLOCK_ETH(flags);
 	return retval;
@@ -516,7 +521,7 @@ int32 rtl865x_addVlanPortMember(uint16 vid, uint32 portMask)
 
 	//rtl_down_interruptible(&vlan_sem);
 	SMP_LOCK_ETH(flags);
-	retval = _rtl865x_addVlanPortMember(vid,portMask);	
+	retval = _rtl865x_addVlanPortMember(vid,portMask);
 	//rtl_up(&vlan_sem);
 	SMP_UNLOCK_ETH(flags);
 	return retval;
@@ -538,15 +543,15 @@ int32 rtl865x_delVlanPortMember(uint16 vid,uint32 portMask)
 	/* vid should be legal vlan ID */
 	if(vid < 1 || vid > VLAN_NUMBER -1)
 		return RTL_EINVALIDVLANID;
-	
+
 	//rtl_down_interruptible(&vlan_sem);
 	SMP_LOCK_ETH(flags);
-	retval = _rtl865x_delVlanPortMember(vid,portMask);	
+	retval = _rtl865x_delVlanPortMember(vid,portMask);
 	//rtl_up(&vlan_sem);
 	SMP_UNLOCK_ETH(flags);
 
 	return retval;
-	
+
 }
 
 
@@ -559,21 +564,21 @@ if the retrun value is zero, it means vlan entry is invalid or no member port in
 uint32 rtl865x_getVlanPortMask(uint32 vid)
 {
 	rtl865x_vlan_entry_t *vlanEntry;
-	
+
 	if(vid < 1 || vid > VLAN_NUMBER -1)
 		return 0;
-#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)	
+#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
 
 	vlanEntry = rtl_getVlanEntryByVid(vid);
 	if(vlanEntry == NULL)
 		return 0;
 #else
-	
+
 	vlanEntry = &vlanTbl[vid];
 #endif
 	if(vlanEntry->valid == 0)
-		return 0;	
-	
+		return 0;
+
 	return vlanEntry->memberPortMask;
 }
 
@@ -592,14 +597,14 @@ parm tag is used to indicated physical port is vlantag or untag. value 1 means v
 int32 rtl865x_setVlanPortTag(uint16 vid,uint32 portMask,uint8 tag)
 {
 	int32 retval = FAILED;
-	unsigned long flags=0;	
+	unsigned long flags=0;
 	/* vid should be legal vlan ID */
 	if(vid < 1 || vid > VLAN_NUMBER -1)
 		return RTL_EINVALIDVLANID;
-	
+
 	//rtl_down_interruptible(&vlan_sem);
 	SMP_LOCK_ETH(flags);
-	retval = _rtl865x_setVlanPortTag(vid,portMask,tag);	
+	retval = _rtl865x_setVlanPortTag(vid,portMask,tag);
 	//rtl_up(&vlan_sem);
 	SMP_UNLOCK_ETH(flags);
 	return retval;
@@ -624,14 +629,14 @@ int32 rtl865x_setVlanFilterDatabase(uint16 vid, uint32 fid)
 	/* vid should be legal vlan ID */
 	if(vid < 1 || vid > VLAN_NUMBER -1)
 		return RTL_EINVALIDVLANID;
-	
+
 	//rtl_down_interruptible(&vlan_sem);//Lock resource
 	SMP_LOCK_ETH(flags);
-	retval = _rtl865x_setVlanFID(vid,fid);	
+	retval = _rtl865x_setVlanFID(vid,fid);
 	//rtl_up(&vlan_sem);
 	SMP_UNLOCK_ETH(flags);
 
-	return retval;	
+	return retval;
 }
 
 /*
@@ -655,7 +660,7 @@ static int32 _rtl865x_modVlanPortMember(uint16 vid, uint32 portMask, uint32 unta
 {
 	int32 retval = FAILED;
 	rtl865x_vlan_entry_t *vlanEntry;
-#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)	
+#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
 	vlanEntry = rtl_getVlanEntryByVid(vid);
 	if(vlanEntry == NULL)
 		return RTL_EINVALIDVLANID;
@@ -685,7 +690,7 @@ int32 rtl865x_modVlanPortMember(uint16 vid, uint32 portMask, uint32 untagset)
 
 	//rtl_down_interruptible(&vlan_sem);
 	SMP_LOCK_ETH(flags);
-	retval = _rtl865x_modVlanPortMember(vid, portMask, untagset);	
+	retval = _rtl865x_modVlanPortMember(vid, portMask, untagset);
 	//rtl_up(&vlan_sem);
 	SMP_UNLOCK_ETH(flags);
 	return retval;
@@ -698,11 +703,11 @@ int32 rtl865x_modVlanPortMember(uint16 vid, uint32 portMask, uint32 untagset)
 @rvalue FAILED | Failed,system should be reboot.
 */
 int32 rtl865x_initVlanTable(void)
-{	
-	TBL_MEM_ALLOC(vlanTbl, rtl865x_vlan_entry_t, VLANTBL_SIZE);	
+{
+	TBL_MEM_ALLOC(vlanTbl, rtl865x_vlan_entry_t, VLANTBL_SIZE);
 	memset(vlanTbl,0,sizeof(rtl865x_vlan_entry_t)*VLANTBL_SIZE);
 
-	return SUCCESS;	
+	return SUCCESS;
 }
 
 /*
@@ -716,7 +721,7 @@ int32 rtl865x_reinitVlantable(void)
 	{
 		if(vlanTbl[i].valid)
 		{
-			#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)	
+			#if defined(CONFIG_RTL_8196E) || defined(CONFIG_RTL_819XD)
 			_rtl865x_delVlan(vlanTbl[i].vid);
 			#else
 			_rtl865x_delVlan(i);
@@ -731,7 +736,7 @@ static int32 _rtl865x_setVlanHp(uint16 vid, uint8 hp)
 {
 	int32 retval = FAILED;
 	rtl865x_vlan_entry_t *vlanEntry;
-	
+
 	vlanEntry = &vlanTbl[vid];
 	if (vlanEntry->valid == 0)
 		return RTL_EINVALIDVLANID;
@@ -764,7 +769,7 @@ int32 rtl865x_setVlanHp(uint16 vid, uint8 hp)
 int32 rtl865x_getVlanHp(uint16 vid, uint8 *hp)
 {
 	rtl865x_vlan_entry_t *vlanEntry;
-	
+
 	/* vid should be legal vlan ID */
 	if ((vid < 1) ||(vid > VLAN_NUMBER -1) ||(hp == NULL))
 		return RTL_EINVALIDVLANID;

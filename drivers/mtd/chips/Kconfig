@@ -44,7 +44,7 @@ choice
 	prompt "Flash cmd/query data swapping"
 	depends on MTD_CFI_ADV_OPTIONS
 	default MTD_CFI_NOSWAP
-	---help---
+	help
 	  This option defines the way in which the CPU attempts to arrange
 	  data bits when writing the 'magic' commands to the chips. Saying
 	  'NO', which is the default when CONFIG_MTD_CFI_ADV_OPTIONS isn't
@@ -67,6 +67,10 @@ endchoice
 config MTD_CFI_GEOMETRY
 	bool "Specific CFI Flash geometry selection"
 	depends on MTD_CFI_ADV_OPTIONS
+	select MTD_MAP_BANK_WIDTH_1 if  !(MTD_MAP_BANK_WIDTH_2 || \
+		 MTD_MAP_BANK_WIDTH_4  || MTD_MAP_BANK_WIDTH_8 || \
+		 MTD_MAP_BANK_WIDTH_16 || MTD_MAP_BANK_WIDTH_32)
+	select MTD_CFI_I1 if !(MTD_CFI_I2 || MTD_CFI_I4 || MTD_CFI_I8)
 	help
 	  This option does not affect the code directly, but will enable
 	  some other configuration options which would allow you to reduce
@@ -111,6 +115,7 @@ config MTD_MAP_BANK_WIDTH_16
 
 config MTD_MAP_BANK_WIDTH_32
 	bool "Support 256-bit buswidth" if MTD_CFI_GEOMETRY
+	select MTD_COMPLEX_MAPPINGS if HAS_IOMEM
 	default n
 	help
 	  If you wish to support CFI devices on a physical bus which is
@@ -231,62 +236,5 @@ config MTD_XIP
 	  This allows MTD support to work with flash memory which is also
 	  used for XIP purposes.  If you're not sure what this is all about
 	  then say N.
-
-config MTD_RTK_SFC
-        tristate "Realtek Serial Flash Controller for SPI Flash"
-        depends on ARCH_RTD119X || ARCH_RTD129X
-        default y
-        help
-          This is used by SST/SPANSION/MXIC SPI Serial Flash with
-          Realtek Serial Flash Controller.
-
-config MTD_RTK_SFC_READ_MD
-        bool "Support MD Read"
-        depends on MTD_RTK_SFC
-        default y
-        help
-          Enable Move Data Engine(MD) to accelerate FLASH-to-DDR performance
-
-config MTD_RTK_SFC_WRITE_MD
-        bool "Support MD Write"
-        depends on MTD_RTK_SFC
-        default y
-        help
-          Enable Move Data Engine(MD) to accelerate DDR-to-FLASH performance
-
-config MTD_RTK_SFC_DEBUG
-        bool "Logging Serial Flash Controller Activities"
-        depends on MTD_RTK_SFC
-        default n
-        help
-          Enable Logging of serial flash controller activities for debug purpose
-
-config NOR_SUPPORT_MAX_ERASE_SIZE
-        bool "Enable max erase size support of nor flash driver"
-        depends on MTD_RTK_SFC
-        default n
-        help
-         Setting this to 'n' will not use max erase size for nor flash.
-
-config NOR_AUTO_HW_POLLING
-        bool "Enable auto hardware polling for nor flash driver"
-        depends on MTD_RTK_SFC
-        default y
-        help
-         Setting this to 'n' will disable auto hardware polling for nor flash driver.
-
-config NOR_ENTER_4BYTES_MODE
-        bool "Enable 4Bytes mode support for nor flash driver"
-        depends on MTD_RTK_SFC
-        default n
-        help
-         Setting this to 'y' will enable 4Bytes mode support for nor flash driver.
-
-config MTD_RTK_SFC_RTL8117
-        tristate "Realtek Serial Flash Controller for SPI Flash"
-        depends on SOC_RTL8117
-        help
-          This is used by SST/SPANSION/MXIC SPI Serial Flash with
-          Realtek Serial Flash Controller.
 
 endmenu

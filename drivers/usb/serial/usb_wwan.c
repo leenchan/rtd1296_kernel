@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
   USB Driver layer for GSM modems
 
   Copyright (C) 2005  Matthias Urlichs <smurf@smurf.noris.de>
-
-  This driver is free software; you can redistribute it and/or modify
-  it under the terms of Version 2 of the GNU General Public License as
-  published by the Free Software Foundation.
 
   Portions copied from the Keyspan driver by Hugh Blemings <hugh@blemings.org>
 
@@ -139,9 +136,6 @@ static int get_serial_info(struct usb_serial_port *port,
 			   struct serial_struct __user *retinfo)
 {
 	struct serial_struct tmp;
-
-	if (!retinfo)
-		return -EFAULT;
 
 	memset(&tmp, 0, sizeof(tmp));
 	tmp.line            = port->minor;
@@ -305,6 +299,10 @@ static void usb_wwan_indat_callback(struct urb *urb)
 	if (status) {
 		dev_dbg(dev, "%s: nonzero status: %d on endpoint %02x.\n",
 			__func__, status, endpoint);
+
+		/* don't resubmit on fatal errors */
+		if (status == -ESHUTDOWN || status == -ENOENT)
+			return;
 	} else {
 		if (urb->actual_length) {
 			tty_insert_flip_string(&port->port, data,
@@ -332,6 +330,7 @@ static void usb_wwan_outdat_callback(struct urb *urb)
 	struct usb_serial_port *port;
 	struct usb_wwan_port_private *portdata;
 	struct usb_wwan_intf_private *intfdata;
+	unsigned long flags;
 	int i;
 
 	port = urb->context;
@@ -340,9 +339,9 @@ static void usb_wwan_outdat_callback(struct urb *urb)
 	usb_serial_port_softint(port);
 	usb_autopm_put_interface_async(port->serial->interface);
 	portdata = usb_get_serial_port_data(port);
-	spin_lock(&intfdata->susp_lock);
+	spin_lock_irqsave(&intfdata->susp_lock, flags);
 	intfdata->in_flight--;
-	spin_unlock(&intfdata->susp_lock);
+	spin_unlock_irqrestore(&intfdata->susp_lock, flags);
 
 	for (i = 0; i < N_OUT_URB; ++i) {
 		if (portdata->out_urbs[i] == urb) {
@@ -464,7 +463,7 @@ void usb_wwan_close(struct usb_serial_port *port)
 
 	/*
 	 * Need to take susp_lock to make sure port is not already being
-	 * resumed, but no need to hold it due to ASYNC_INITIALIZED.
+	 * resumed, but no need to hold it due to initialized
 	 */
 	spin_lock_irq(&intfdata->susp_lock);
 	if (--intfdata->open_ports == 0)
@@ -495,6 +494,7 @@ static struct urb *usb_wwan_setup_urb(struct usb_serial_port *port,
 				      void (*callback) (struct urb *))
 {
 	struct usb_serial *serial = port->serial;
+	struct usb_wwan_intf_private *intfdata = usb_get_serial_data(serial);
 	struct urb *urb;
 
 	urb = usb_alloc_urb(0, GFP_KERNEL);	/* No ISO */
@@ -504,6 +504,9 @@ static struct urb *usb_wwan_setup_urb(struct usb_serial_port *port,
 	usb_fill_bulk_urb(urb, serial->dev,
 			  usb_sndbulkpipe(serial->dev, endpoint) | dir,
 			  buf, len, callback, ctx);
+
+	if (intfdata->use_zlp && dir == USB_DIR_OUT)
+		urb->transfer_flags |= URB_ZERO_PACKET;
 
 	return urb;
 }
@@ -682,7 +685,7 @@ int usb_wwan_resume(struct usb_serial *serial)
 	for (i = 0; i < serial->num_ports; i++) {
 		port = serial->port[i];
 
-		if (!test_bit(ASYNCB_INITIALIZED, &port->port.flags))
+		if (!tty_port_initialized(&port->port))
 			continue;
 
 		portdata = usb_get_serial_port_data(port);
@@ -726,4 +729,4 @@ EXPORT_SYMBOL(usb_wwan_resume);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

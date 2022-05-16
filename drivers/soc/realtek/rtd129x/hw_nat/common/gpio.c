@@ -1,3 +1,12 @@
+/*
+ * Copyright (C) 2017 Realtek Semiconductor Corporation.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ */
+
 
 #include <net/rtl/rtl_types.h>
 #include <net/rtl/rtl_glue.h>
@@ -24,11 +33,11 @@ enum GPIO_FUNC
 	GPIO_FUNC_INTERRUPT_ENABLE,
 	GPIO_FUNC_MAX,
 };
-#define PABCCNR PABCD_CNR  
-#define PDEPTCR PEFGH_CNR 
-#define PFGHICNR PEFGH_CNR 
+#define PABCCNR PABCD_CNR
+#define PDEPTCR PEFGH_CNR
+#define PFGHICNR PEFGH_CNR
 
-static uint32 regGpioControl[] = 
+static uint32 regGpioControl[] =
 {
 	PABCD_CNR, /* Port A */
 	PABCD_CNR, /* Port B */
@@ -53,7 +62,7 @@ static uint32 bitStartGpioControl[] =
 	0,  /* Port I */
 };
 
-static uint32 regGpioDedicatePeripheralType[] = 
+static uint32 regGpioDedicatePeripheralType[] =
 {
 	PABCD_PTYPE, /* Port A */
 	PABCD_PTYPE, /* Port B */
@@ -191,7 +200,7 @@ static uint32 bitStartGpioInterruptEnable[] =
 #endif
 
 /*
-@func int32 | _getGpio | abstract GPIO registers 
+@func int32 | _getGpio | abstract GPIO registers
 @parm enum GPIO_FUNC | func | control/data/interrupt register
 @parm enum GPIO_PORT | port | GPIO port
 @parm uint32 | pin | pin number
@@ -211,7 +220,7 @@ static uint32 _getGpio( enum GPIO_FUNC func, enum GPIO_PORT port, uint32 pin )
 			else
 				return 0;
 			break;
-			
+
 		case GPIO_FUNC_DEDICATE_PERIPHERAL_TYPE:
 
 			if ( REG32(regGpioDedicatePeripheralType[port]) & ( (uint32)1 << (pin+bitStartGpioDedicatePeripheralType[port]) ) )
@@ -219,21 +228,21 @@ static uint32 _getGpio( enum GPIO_FUNC func, enum GPIO_PORT port, uint32 pin )
 			else
 				return 0;
 			break;
-			
+
 		case GPIO_FUNC_DIRECTION:
 			if ( REG32(regGpioDirection[port]) & ( (uint32)1 << (pin+bitStartGpioDirection[port]) ) )
 				return 1;
 			else
 				return 0;
 			break;
-			
+
 		case GPIO_FUNC_DATA:
 			if ( REG32(regGpioData[port]) & ( (uint32)1 << (pin+bitStartGpioData[port]) ) )
 				return 1;
 			else
 				return 0;
 			break;
-			
+
 		case GPIO_FUNC_INTERRUPT_ENABLE:
 			return ( REG32(regGpioInterruptEnable[port]) >> (pin*2+bitStartGpioInterruptEnable[port]) ) & (uint32)0x3;
 			break;
@@ -244,7 +253,7 @@ static uint32 _getGpio( enum GPIO_FUNC func, enum GPIO_PORT port, uint32 pin )
 			else
 				return 0;
 			break;
-			
+
 		case GPIO_FUNC_MAX:
 			break;
 	}
@@ -253,7 +262,7 @@ static uint32 _getGpio( enum GPIO_FUNC func, enum GPIO_PORT port, uint32 pin )
 
 
 /*
-@func int32 | _setGpio | abstract GPIO registers 
+@func int32 | _setGpio | abstract GPIO registers
 @parm enum GPIO_FUNC | func | control/data/interrupt register
 @parm enum GPIO_PORT | port | GPIO port
 @parm uint32 | pin | pin number
@@ -265,7 +274,7 @@ This function abstracts these information.
 */
 static void _setGpio( enum GPIO_FUNC func, enum GPIO_PORT port, uint32 pin, uint32 data )
 {
-	
+
 #if _GPIO_DEBUG_ >= 4
 	rtlglue_printf("[%s():%d] func=%d port=%d pin=%d data=%d\n", __FUNCTION__, __LINE__, func, port, pin, data );
 #endif
@@ -281,7 +290,7 @@ static void _setGpio( enum GPIO_FUNC func, enum GPIO_PORT port, uint32 pin, uint
 			else
 				REG32(regGpioControl[port]) &= ~((uint32)1 << (pin+bitStartGpioControl[port]));
 			break;
-			
+
 		case GPIO_FUNC_DEDICATE_PERIPHERAL_TYPE:
 #if _GPIO_DEBUG_ >= 5
 			rtlglue_printf("[%s():%d] regGpioDedicatePeripheralType[port]=0x%08x  bitStartGpioDedicatePeripheralType[port]=%d\n", __FUNCTION__, __LINE__, regGpioDedicatePeripheralType[port], bitStartGpioDedicatePeripheralType[port] );
@@ -291,7 +300,7 @@ static void _setGpio( enum GPIO_FUNC func, enum GPIO_PORT port, uint32 pin, uint
 			else
 				REG32(regGpioDedicatePeripheralType[port]) &= ~((uint32)1 << (pin+bitStartGpioDedicatePeripheralType[port]));
 			break;
-			
+
 		case GPIO_FUNC_DIRECTION:
 #if _GPIO_DEBUG_ >= 5
 			rtlglue_printf("[%s():%d] regGpioDirection[port]=0x%08x  bitStartGpioDirection[port]=%d\n", __FUNCTION__, __LINE__, regGpioDirection[port], bitStartGpioDirection[port] );
@@ -311,7 +320,7 @@ static void _setGpio( enum GPIO_FUNC func, enum GPIO_PORT port, uint32 pin, uint
 			else
 				REG32(regGpioData[port]) &= ~((uint32)1 << (pin+bitStartGpioData[port]));
 			break;
-			
+
 		case GPIO_FUNC_INTERRUPT_ENABLE:
 #if _GPIO_DEBUG_ >= 5
 			rtlglue_printf("[%s():%d] regGpioInterruptEnable[port]=0x%08x  bitStartGpioInterruptEnable[port]=%d\n", __FUNCTION__, __LINE__, regGpioInterruptEnable[port], bitStartGpioInterruptEnable[port] );
@@ -347,9 +356,9 @@ static void _setGpio( enum GPIO_FUNC func, enum GPIO_PORT port, uint32 pin, uint
 @comm
 This function is used to initialize GPIO port.
 */
-int32 _rtl865x_initGpioPin( gpioID gpioId, 
-	enum GPIO_PERIPHERAL dedicate, 
-	enum GPIO_DIRECTION direction, 
+int32 _rtl865x_initGpioPin( gpioID gpioId,
+	enum GPIO_PERIPHERAL dedicate,
+	enum GPIO_DIRECTION direction,
 	enum GPIO_INTERRUPT_TYPE interruptEnable )
 {
 	uint32 port = GPIO_PORT( gpioId );
@@ -378,7 +387,7 @@ int32 _rtl865x_initGpioPin( gpioID gpioId,
 			_setGpio( GPIO_FUNC_DEDICATE_PERIPHERAL_TYPE, port, pin, 1 );
 			break;
 	}
-	
+
 	_setGpio( GPIO_FUNC_DIRECTION, port, pin, direction );
 
 	_setGpio( GPIO_FUNC_INTERRUPT_ENABLE, port, pin, interruptEnable );

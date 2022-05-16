@@ -1,7 +1,7 @@
 /*
 * Program : Implementation of Glue Functions of Model Code
-* Abstract : 
-* Author : Louis Yung-Chieh Lo (yjlou@realtek.com.tw)               
+* Abstract :
+* Author : Louis Yung-Chieh Lo (yjlou@realtek.com.tw)
 * $Id: rtl_glue.c,v 1.5 2008/04/11 10:12:38 bo_zhao Exp $
 
 *  Copyright (c) 2011 Realtek Semiconductor Corp.
@@ -27,7 +27,7 @@ void rtl_up(struct semaphore * sem)
 }
 
 int32 rtlglue_drvMutexLock(void)
-{	
+{
 #if 0
 	spinlock_t lockForCC = SPIN_LOCK_UNLOCKED;
 	int flagsForCC;
@@ -42,12 +42,12 @@ int32 rtlglue_drvMutexLock(void)
 	{
 		uint32 dummy;
  		saveGimr = READ_MEM32( GIMR );
-		
-#if defined (CONFIG_RTK_VOIP_DRIVERS_PCM865xC)	
+
+#if defined (CONFIG_RTK_VOIP_DRIVERS_PCM865xC)
 		WRITE_MEM32( GIMR, 0x00080000 );		/* Note: DO NOT disable PCM interrupt because users might be already on the phone call at this time
 												==> Keep PCM interrupt enable for RTK VoIP applications
-													==> RTL865xC, bit19: PCM_IE 
-											*/		
+													==> RTL865xC, bit19: PCM_IE
+											*/
 #elif defined (CONFIG_RTK_VOIP_DRIVERS_PCM8651)
 		WRITE_MEM32( GIMR, 0x00040000 );		/* RTL865xB, bit18: PCM_IE */
 #else
@@ -63,7 +63,7 @@ int32 rtlglue_drvMutexLock(void)
 		dummy = READ_MEM32( GIMR );
 
  	}
- 	
+
 	spin_unlock_irqrestore(&lockForCC, flagsForCC);
 #endif
 	return 0;
@@ -75,9 +75,9 @@ int32 rtlglue_drvMutexUnlock(void)
 	spinlock_t lockForCC = SPIN_LOCK_UNLOCKED;
 	int flagsForCC;
 	int needUnlock;
-	
+
 	spin_lock_irqsave(&lockForCC,flagsForCC);
-	
+
 	int_cc--;
 	needUnlock = ( int_cc==0 )?TRUE:FALSE;
 

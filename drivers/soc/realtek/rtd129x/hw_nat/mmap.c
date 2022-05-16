@@ -1,6 +1,12 @@
 /*
  * Simple - REALLY simple memory mapping demonstration.
  * $Id: mmap.c,v 1.1 2007-12-21 10:28:22 davidhsu Exp $
+ *
+ * Copyright (C) 2017 Realtek Semiconductor Corporation.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  */
 
 #ifndef __KERNEL__
@@ -83,7 +89,7 @@ int simple_open (struct inode *inode, struct file *filp)
 {
     unsigned int dev = MINOR(inode->i_rdev);
 
-    if (dev >= MAX_SIMPLE_DEV) 
+    if (dev >= MAX_SIMPLE_DEV)
         return -ENODEV;
     filp->f_op = simple_fops[dev];
 #ifdef CONFIG_DEFAULTS_KERNEL_2_6
@@ -148,7 +154,7 @@ int simple_remap_mmap(struct file *filp, struct vm_area_struct *vma)
     if (remap_pfn_range(vma, vma->vm_start, offset, vma->vm_end-vma->vm_start, vma->vm_page_prot))
 #else
     if (remap_page_range(vma->vm_start, offset, vma->vm_end-vma->vm_start, vma->vm_page_prot))
-#endif	    
+#endif
         return -EAGAIN;
 
     vma->vm_ops = &simple_remap_vm_ops;
@@ -174,7 +180,7 @@ struct page *simple_vma_nopage(struct vm_area_struct *vma, unsigned long address
     get_page(pageptr);
     return pageptr;
 }
-        
+
 static struct vm_operations_struct simple_nopage_vm_ops = {
     open:    simple_vma_open,
     close:   simple_vma_close,
